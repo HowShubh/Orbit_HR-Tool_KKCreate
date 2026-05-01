@@ -1,7 +1,11 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, CircleDashed } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
 
 type BootstrapState =
@@ -15,7 +19,7 @@ const STEPS = [
     id: 'awaiting_root_admin',
     label: 'Create Root Admin',
     description:
-      'The first person to sign in becomes the Root Admin (Founder role with full access).',
+      'Create the first account — this becomes the Root Admin (Founder role with full access).',
   },
   {
     id: 'awaiting_first_hr',
@@ -47,19 +51,105 @@ function stepStatus(
   return 'pending'
 }
 
+function RootAdminForm() {
+  const router = useRouter()
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    const res = await fetch('/api/setup/root-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ full_name: fullName, email, password }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      setError(data.error ?? 'Something went wrong. Please try again.')
+      setLoading(false)
+      return
+    }
+
+    // Sign in with the newly created credentials
+    const supabase = createClient()
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (signInError) {
+      setError('Account created but sign-in failed. Try signing in from the login page.')
+      setLoading(false)
+      return
+    }
+
+    router.push('/')
+    router.refresh()
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-3 space-y-3">
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">
+          {error}
+        </div>
+      )}
+      <div className="space-y-1">
+        <Label htmlFor="setup-name" className="text-[12.5px]">Full name</Label>
+        <Input
+          id="setup-name"
+          placeholder="Lokesh Sharma"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          required
+          className="h-8 text-sm"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="setup-email" className="text-[12.5px]">Email</Label>
+        <Input
+          id="setup-email"
+          type="email"
+          placeholder="lokesh@kkcreate.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="h-8 text-sm"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="setup-password" className="text-[12.5px]">Password</Label>
+        <Input
+          id="setup-password"
+          type="password"
+          placeholder="Min. 8 characters"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={8}
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button type="submit" size="sm" disabled={loading} className="w-full">
+        {loading ? 'Creating account…' : 'Create Root Admin account'}
+      </Button>
+    </form>
+  )
+}
+
 export default function SetupChecklist({
   bootstrapState,
 }: {
   bootstrapState: BootstrapState
 }) {
-  async function handleGoogleSignIn() {
-    const supabase = createClient()
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    })
-  }
-
   return (
     <div className="rounded-2xl border bg-card p-6 shadow-sm space-y-6">
       <div className="space-y-4">
@@ -93,7 +183,7 @@ export default function SetupChecklist({
                   />
                 )}
               </div>
-              <div className="pb-4 min-w-0">
+              <div className="pb-4 min-w-0 flex-1">
                 <div
                   className={`text-[14px] font-semibold ${
                     status === 'pending' ? 'text-muted-foreground' : ''
@@ -105,9 +195,7 @@ export default function SetupChecklist({
                   {step.description}
                 </div>
                 {status === 'active' && step.id === 'awaiting_root_admin' && (
-                  <Button className="mt-3 gap-2" onClick={handleGoogleSignIn}>
-                    Sign in with Google to become Root Admin
-                  </Button>
+                  <RootAdminForm />
                 )}
                 {status === 'active' && step.id === 'awaiting_first_hr' && (
                   <p className="mt-2 text-[12.5px] text-violet-600 font-medium">
