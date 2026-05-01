@@ -31,6 +31,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['audit_log']['Insert']>
+        Relationships: []
       }
       capabilities: {
         Row: {
@@ -46,6 +47,7 @@ export type Database = {
           is_write: boolean
         }
         Update: Partial<Database['public']['Tables']['capabilities']['Insert']>
+        Relationships: []
       }
       capability_bundles: {
         Row: {
@@ -61,6 +63,7 @@ export type Database = {
           capabilities: Json
         }
         Update: Partial<Database['public']['Tables']['capability_bundles']['Insert']>
+        Relationships: []
       }
       compoff_grants: {
         Row: {
@@ -92,6 +95,7 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['compoff_grants']['Insert']>
+        Relationships: []
       }
       holidays: {
         Row: {
@@ -107,6 +111,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['holidays']['Insert']>
+        Relationships: []
       }
       leave_balances: {
         Row: {
@@ -130,6 +135,7 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['leave_balances']['Insert']>
+        Relationships: []
       }
       leave_year_resets: {
         Row: {
@@ -145,6 +151,7 @@ export type Database = {
           triggered_at?: string
         }
         Update: Partial<Database['public']['Tables']['leave_year_resets']['Insert']>
+        Relationships: []
       }
       leaves: {
         Row: {
@@ -184,6 +191,7 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['leaves']['Insert']>
+        Relationships: []
       }
       notifications: {
         Row: {
@@ -211,6 +219,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>
+        Relationships: []
       }
       system_state: {
         Row: {
@@ -226,6 +235,7 @@ export type Database = {
           bootstrapped_by?: string | null
         }
         Update: Partial<Database['public']['Tables']['system_state']['Insert']>
+        Relationships: []
       }
       team_members: {
         Row: {
@@ -247,6 +257,7 @@ export type Database = {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['team_members']['Insert']>
+        Relationships: []
       }
       teams: {
         Row: {
@@ -266,6 +277,7 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['teams']['Insert']>
+        Relationships: []
       }
       user_capabilities: {
         Row: {
@@ -295,6 +307,7 @@ export type Database = {
           note?: string | null
         }
         Update: Partial<Database['public']['Tables']['user_capabilities']['Insert']>
+        Relationships: []
       }
       users: {
         Row: {
@@ -330,6 +343,7 @@ export type Database = {
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['users']['Insert']>
+        Relationships: []
       }
     }
     Views: {
@@ -343,6 +357,7 @@ export type Database = {
           half_day_start: boolean
           half_day_end: boolean
         }
+        Relationships: []
       }
     }
     Functions: {
@@ -358,11 +373,11 @@ export type Database = {
           p_source?: string
           p_source_ref?: string
         }
-        Returns: undefined
+        Returns: void
       }
       recompute_role_bundles: {
         Args: { p_user_id: string; p_new_role: string }
-        Returns: undefined
+        Returns: void
       }
     }
   }
