@@ -93,3 +93,5 @@ export interface AuditEntry {
   note?: string;
   created_at: string;
 }
+
+export type { CanHelpers } from '@/lib/capabilities/can'
