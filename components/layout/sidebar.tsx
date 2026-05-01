@@ -17,31 +17,36 @@ import {
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { cn } from "@/lib/utils";
 
-const NAV: {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  roles?: string[];
-  badge?: "compoff" | "audit";
-}[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/leaves", label: "My Leaves", icon: ClipboardList },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/org", label: "Organization", icon: Network },
-  { href: "/team", label: "My Team", icon: Users, roles: ["team_lead", "hr", "founder"] },
-  { href: "/hr", label: "HR Console", icon: UserCog, roles: ["hr", "founder"] },
-  { href: "/audit", label: "Audit Log", icon: History, roles: ["hr", "founder", "team_lead"] },
-];
+const NAV = [
+  { href: "/",            label: "Dashboard",    icon: LayoutDashboard, always: true },
+  { href: "/leaves",      label: "My Leaves",    icon: ClipboardList,   always: true },
+  { href: "/calendar",    label: "Calendar",     icon: CalendarDays,    always: true },
+  { href: "/org",         label: "Organization", icon: Network,         always: true },
+  { href: "/team",        label: "My Team",      icon: Users,           cap: "hasTeamAccess" as const },
+  { href: "/hr",          label: "HR Console",   icon: UserCog,         cap: "isHROrAbove" as const },
+  { href: "/audit",       label: "Audit Log",    icon: History,         cap: "viewAuditLog" as const },
+  { href: "/permissions", label: "Permissions",  icon: UserCog,         cap: "manageCapabilities" as const },
+] as const;
 
 export function Sidebar() {
   const pathname = usePathname();
   const { currentUser, compoffGrants } = useStore();
+  const { can } = useCapabilities();
 
-  const visibleNav = NAV.filter(
-    (n) => !n.roles || n.roles.includes(currentUser.role)
-  );
+  const visibleNav = NAV.filter((n) => {
+    if ('always' in n && n.always) return true
+    if ('cap' in n) {
+      const capKey = n.cap
+      if (capKey === 'hasTeamAccess')       return can.hasTeamAccess
+      if (capKey === 'isHROrAbove')         return can.isHROrAbove
+      if (capKey === 'viewAuditLog')        return can.viewAuditLog()
+      if (capKey === 'manageCapabilities')  return can.manageCapabilities()
+    }
+    return false
+  });
 
   const pendingCompoffCount = compoffGrants.filter(
     (g) => g.status === "pending" && g.manager_id === currentUser.id
