@@ -1,0 +1,51 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e8]:
+          - generic [ref=e9]: Orbit HR
+          - generic [ref=e10]: KK Create
+      - navigation [ref=e11]:
+        - generic [ref=e12]: Workspace
+        - list [ref=e13]:
+          - listitem [ref=e14]:
+            - link "Dashboard" [ref=e15] [cursor=pointer]:
+              - /url: /
+              - img [ref=e16]
+              - generic [ref=e21]: Dashboard
+          - listitem [ref=e22]:
+            - link "My Leaves" [ref=e23] [cursor=pointer]:
+              - /url: /leaves
+              - img [ref=e24]
+              - generic [ref=e27]: My Leaves
+          - listitem [ref=e28]:
+            - link "Calendar" [ref=e29] [cursor=pointer]:
+              - /url: /calendar
+              - img [ref=e30]
+              - generic [ref=e32]: Calendar
+          - listitem [ref=e33]:
+            - link "Organization" [ref=e34] [cursor=pointer]:
+              - /url: /org
+              - img [ref=e35]
+              - generic [ref=e40]: Organization
+        - generic [ref=e41]: Account
+        - list [ref=e42]:
+          - listitem [ref=e43]:
+            - link "My Profile" [ref=e44] [cursor=pointer]:
+              - /url: /profile
+              - img [ref=e45]
+              - text: My Profile
+          - listitem [ref=e48]:
+            - link "Settings" [ref=e49] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e50]
+              - text: Settings
+      - generic [ref=e53]:
+        - generic [ref=e55]: RS
+        - generic [ref=e56]:
+          - generic [ref=e57]: Rahul Sharma
+          - generic [ref=e58]: employee
+    - main [ref=e59]:
+      - generic [ref=e60]: HR Console is only available to HR and Founders.
+  - alert [ref=e61]

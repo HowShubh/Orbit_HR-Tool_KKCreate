@@ -1,0 +1,151 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e8]:
+        - generic [ref=e9]: Orbit HR
+        - generic [ref=e10]: KK Create
+    - navigation [ref=e11]:
+      - generic [ref=e12]: Workspace
+      - list [ref=e13]:
+        - listitem [ref=e14]:
+          - link "Dashboard" [ref=e15] [cursor=pointer]:
+            - /url: /
+            - img [ref=e16]
+            - generic [ref=e21]: Dashboard
+        - listitem [ref=e22]:
+          - link "My Leaves" [ref=e23] [cursor=pointer]:
+            - /url: /leaves
+            - img [ref=e24]
+            - generic [ref=e27]: My Leaves
+        - listitem [ref=e28]:
+          - link "Calendar" [ref=e29] [cursor=pointer]:
+            - /url: /calendar
+            - img [ref=e30]
+            - generic [ref=e32]: Calendar
+        - listitem [ref=e33]:
+          - link "Organization" [ref=e34] [cursor=pointer]:
+            - /url: /org
+            - img [ref=e35]
+            - generic [ref=e40]: Organization
+      - generic [ref=e41]: Account
+      - list [ref=e42]:
+        - listitem [ref=e43]:
+          - link "My Profile" [ref=e44] [cursor=pointer]:
+            - /url: /profile
+            - img [ref=e45]
+            - text: My Profile
+        - listitem [ref=e48]:
+          - link "Settings" [ref=e49] [cursor=pointer]:
+            - /url: /settings
+            - img [ref=e50]
+            - text: Settings
+    - generic [ref=e53]:
+      - generic [ref=e55]: RS
+      - generic [ref=e56]:
+        - generic [ref=e57]: Rahul Sharma
+        - generic [ref=e58]: employee
+  - main [ref=e59]:
+    - generic [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]: Calendar
+        - generic [ref=e64]: Plan ahead — names show only for today; counts for other days.
+      - generic [ref=e65]:
+        - img [ref=e66]
+        - textbox "Search teammates, leaves…" [ref=e69]
+      - 'button "View as: employee" [ref=e70] [cursor=pointer]':
+        - generic [ref=e71]: "View as:"
+        - generic [ref=e72]: employee
+        - img [ref=e73]
+      - button "2" [ref=e75] [cursor=pointer]:
+        - img [ref=e76]
+        - generic [ref=e79]: "2"
+      - button "RS" [ref=e80] [cursor=pointer]:
+        - generic [ref=e82]: RS
+        - img [ref=e83]
+    - generic [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e87]:
+          - button [ref=e88] [cursor=pointer]:
+            - img [ref=e89]
+          - generic [ref=e91]: April 2026
+          - button [ref=e92] [cursor=pointer]:
+            - img [ref=e93]
+          - button "Today" [ref=e95] [cursor=pointer]
+        - generic [ref=e96]:
+          - generic [ref=e97]: WFH
+          - generic [ref=e99]: Leave
+          - generic [ref=e101]: Comp-off WFH
+          - generic [ref=e103]: Comp-off Leave
+          - generic [ref=e105]: Holiday
+      - generic [ref=e108]:
+        - generic [ref=e109]:
+          - generic [ref=e110]: Mon
+          - generic [ref=e111]: Tue
+          - generic [ref=e112]: Wed
+          - generic [ref=e113]: Thu
+          - generic [ref=e114]: Fri
+          - generic [ref=e115]: Sat
+          - generic [ref=e116]: Sun
+        - generic [ref=e117]:
+          - generic [ref=e120]: "30"
+          - generic [ref=e123]: "31"
+          - generic [ref=e126]: "1"
+          - generic [ref=e129]: "2"
+          - generic [ref=e132]: "3"
+          - generic [ref=e135]: "4"
+          - generic [ref=e138]: "5"
+          - generic [ref=e141]: "6"
+          - generic [ref=e144]: "7"
+          - generic [ref=e147]: "8"
+          - generic [ref=e150]: "9"
+          - generic [ref=e153]: "10"
+          - generic [ref=e156]: "11"
+          - generic [ref=e159]: "12"
+          - generic [ref=e162]: "13"
+          - generic [ref=e164]:
+            - generic [ref=e165]: "14"
+            - generic [ref=e166]: Ambedkar Jayanti
+          - generic [ref=e169]: "15"
+          - generic [ref=e172]: "16"
+          - generic [ref=e175]: "17"
+          - generic [ref=e178]: "18"
+          - generic [ref=e181]: "19"
+          - generic [ref=e184]: "20"
+          - generic [ref=e187]: "21"
+          - generic [ref=e190]: "22"
+          - generic [ref=e193]: "23"
+          - generic [ref=e196]: "24"
+          - generic [ref=e199]: "25"
+          - generic [ref=e202]: "26"
+          - generic [ref=e203]:
+            - generic [ref=e204]:
+              - generic [ref=e205]: "27"
+              - generic [ref=e206]: Holi
+            - generic [ref=e208]:
+              - img [ref=e209]
+              - text: 1 away
+          - generic [ref=e212]:
+            - generic [ref=e214]: "28"
+            - generic [ref=e215]:
+              - generic [ref=e218]: Ananya
+              - generic [ref=e221]: Saanvi
+              - generic [ref=e224]: Neha
+          - generic [ref=e225]:
+            - generic [ref=e227]: "29"
+            - generic [ref=e229]:
+              - img [ref=e230]
+              - text: 1 away
+          - generic [ref=e233]:
+            - generic [ref=e235]: "30"
+            - generic [ref=e237]:
+              - img [ref=e238]
+              - text: 1 away
+          - generic [ref=e242]:
+            - generic [ref=e243]: "1"
+            - generic [ref=e244]: Labour Day
+          - generic [ref=e247]: "2"
+          - generic [ref=e250]: "3"
+      - generic [ref=e251]:
+        - img [ref=e252]
+        - text: For privacy, you only see today's full names. Other days show how many people are out — managers and HR see the full view.

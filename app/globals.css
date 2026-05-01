@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme — main canvas */
+    --background: 220 24% 97%;
+    --foreground: 222 22% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 22% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 22% 12%;
+
+    /* Brand purple */
+    --primary: 256 80% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 22% 14%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 22% 14%;
+
+    --destructive: 0 75% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 256 80% 58%;
+
+    --radius: 0.85rem;
+
+    /* Dark sidebar */
+    --sidebar: 230 18% 11%;
+    --sidebar-foreground: 220 16% 86%;
+    --sidebar-accent: 232 22% 17%;
+    --sidebar-border: 232 18% 18%;
+
+    /* Leave-type accents */
+    --leave-wfh: 215 90% 60%;        /* blue */
+    --leave-leave: 22 92% 58%;       /* orange */
+    --leave-compwfh: 192 78% 60%;    /* light blue */
+    --leave-compleave: 36 95% 64%;   /* light orange */
+    --leave-holiday: 340 80% 64%;    /* pink */
+  }
+
+  * { @apply border-border; }
+  html, body { @apply bg-background text-foreground antialiased; }
+  body { font-feature-settings: "cv11", "ss01"; }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 999px;
+  }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+}

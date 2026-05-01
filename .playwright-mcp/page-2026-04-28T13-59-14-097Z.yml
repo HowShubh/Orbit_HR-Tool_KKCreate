@@ -1,0 +1,119 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e8]:
+        - generic [ref=e9]: Orbit HR
+        - generic [ref=e10]: KK Create
+    - navigation [ref=e11]:
+      - generic [ref=e12]: Workspace
+      - list [ref=e13]:
+        - listitem [ref=e14]:
+          - link "Dashboard" [ref=e15] [cursor=pointer]:
+            - /url: /
+            - img [ref=e16]
+            - generic [ref=e21]: Dashboard
+        - listitem [ref=e22]:
+          - link "My Leaves" [ref=e23] [cursor=pointer]:
+            - /url: /leaves
+            - img [ref=e24]
+            - generic [ref=e27]: My Leaves
+        - listitem [ref=e28]:
+          - link "Calendar" [ref=e29] [cursor=pointer]:
+            - /url: /calendar
+            - img [ref=e30]
+            - generic [ref=e32]: Calendar
+        - listitem [ref=e33]:
+          - link "Organization" [ref=e34] [cursor=pointer]:
+            - /url: /org
+            - img [ref=e35]
+            - generic [ref=e40]: Organization
+      - generic [ref=e41]: Account
+      - list [ref=e42]:
+        - listitem [ref=e43]:
+          - link "My Profile" [ref=e44] [cursor=pointer]:
+            - /url: /profile
+            - img [ref=e45]
+            - text: My Profile
+        - listitem [ref=e48]:
+          - link "Settings" [ref=e49] [cursor=pointer]:
+            - /url: /settings
+            - img [ref=e50]
+            - text: Settings
+    - generic [ref=e53]:
+      - generic [ref=e55]: RS
+      - generic [ref=e56]:
+        - generic [ref=e57]: Rahul Sharma
+        - generic [ref=e58]: employee
+  - main [ref=e59]:
+    - generic [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]: My Leaves
+        - generic [ref=e64]: Apply, edit and review your leave history
+      - generic [ref=e65]:
+        - img [ref=e66]
+        - textbox "Search teammates, leaves…" [ref=e69]
+      - 'button "View as: employee" [ref=e70] [cursor=pointer]':
+        - generic [ref=e71]: "View as:"
+        - generic [ref=e72]: employee
+        - img [ref=e73]
+      - button "2" [ref=e75] [cursor=pointer]:
+        - img [ref=e76]
+        - generic [ref=e79]: "2"
+      - button "RS" [ref=e80] [cursor=pointer]:
+        - generic [ref=e82]: RS
+        - img [ref=e83]
+    - generic [ref=e85]:
+      - generic [ref=e86]:
+        - tablist [ref=e88]:
+          - tab "Upcoming" [selected] [ref=e89] [cursor=pointer]
+          - tab "Past" [ref=e90] [cursor=pointer]
+          - tab "All" [ref=e91] [cursor=pointer]
+        - generic [ref=e92]:
+          - generic [ref=e93]:
+            - img [ref=e94]
+            - textbox "Search reason or type" [ref=e97]
+          - button "Request Comp-off" [ref=e98] [cursor=pointer]:
+            - img [ref=e99]
+            - text: Request Comp-off
+          - button "Apply" [ref=e101] [cursor=pointer]:
+            - img [ref=e102]
+            - text: Apply
+      - table [ref=e106]:
+        - rowgroup [ref=e107]:
+          - row "Type Dates Days Reason Status Actions" [ref=e108]:
+            - columnheader "Type" [ref=e109]
+            - columnheader "Dates" [ref=e110]
+            - columnheader "Days" [ref=e111]
+            - columnheader "Reason" [ref=e112]
+            - columnheader "Status" [ref=e113]
+            - columnheader "Actions" [ref=e114]
+        - rowgroup [ref=e115]:
+          - row "WFH May 12 1 — Confirmed" [ref=e116]:
+            - cell "WFH" [ref=e117]:
+              - generic [ref=e118]: WFH
+            - cell "May 12" [ref=e119]
+            - cell "1" [ref=e120]
+            - cell "—" [ref=e121]
+            - cell "Confirmed" [ref=e122]:
+              - generic [ref=e123]: Confirmed
+            - cell [ref=e124]:
+              - generic [ref=e125]:
+                - button "Edit" [ref=e126] [cursor=pointer]:
+                  - img [ref=e127]
+                - button "Delete" [ref=e130] [cursor=pointer]:
+                  - img [ref=e131]
+          - row "Leave May 4 – May 5 2 Family function Confirmed" [ref=e134]:
+            - cell "Leave" [ref=e135]:
+              - generic [ref=e136]: Leave
+            - cell "May 4 – May 5" [ref=e137]
+            - cell "2" [ref=e138]
+            - cell "Family function" [ref=e139]
+            - cell "Confirmed" [ref=e140]:
+              - generic [ref=e141]: Confirmed
+            - cell [ref=e142]:
+              - generic [ref=e143]:
+                - button "Edit" [ref=e144] [cursor=pointer]:
+                  - img [ref=e145]
+                - button "Delete" [ref=e148] [cursor=pointer]:
+                  - img [ref=e149]

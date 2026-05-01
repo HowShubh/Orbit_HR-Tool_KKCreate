@@ -1,0 +1,216 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e6]
+        - generic [ref=e8]:
+          - generic [ref=e9]: Orbit HR
+          - generic [ref=e10]: KK Create
+      - navigation [ref=e11]:
+        - generic [ref=e12]: Workspace
+        - list [ref=e13]:
+          - listitem [ref=e14]:
+            - link "Dashboard" [ref=e15] [cursor=pointer]:
+              - /url: /
+              - img [ref=e16]
+              - generic [ref=e21]: Dashboard
+          - listitem [ref=e22]:
+            - link "My Leaves" [ref=e23] [cursor=pointer]:
+              - /url: /leaves
+              - img [ref=e24]
+              - generic [ref=e27]: My Leaves
+          - listitem [ref=e28]:
+            - link "Calendar" [ref=e29] [cursor=pointer]:
+              - /url: /calendar
+              - img [ref=e30]
+              - generic [ref=e32]: Calendar
+          - listitem [ref=e33]:
+            - link "Organization" [ref=e34] [cursor=pointer]:
+              - /url: /org
+              - img [ref=e35]
+              - generic [ref=e40]: Organization
+        - generic [ref=e41]: Account
+        - list [ref=e42]:
+          - listitem [ref=e43]:
+            - link "My Profile" [ref=e44] [cursor=pointer]:
+              - /url: /profile
+              - img [ref=e45]
+              - text: My Profile
+          - listitem [ref=e48]:
+            - link "Settings" [ref=e49] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e50]
+              - text: Settings
+      - generic [ref=e53]:
+        - generic [ref=e55]: RS
+        - generic [ref=e56]:
+          - generic [ref=e57]: Rahul Sharma
+          - generic [ref=e58]: employee
+    - main [ref=e59]:
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - generic [ref=e63]: Organization
+          - generic [ref=e64]: Org tree, teams and reporting lines
+        - generic [ref=e65]:
+          - img [ref=e66]
+          - textbox "Search teammates, leaves…" [ref=e69]
+        - 'button "View as: employee" [ref=e70] [cursor=pointer]':
+          - generic [ref=e71]: "View as:"
+          - generic [ref=e72]: employee
+          - img [ref=e73]
+        - button "2" [ref=e75] [cursor=pointer]:
+          - img [ref=e76]
+          - generic [ref=e79]: "2"
+        - button "RS" [ref=e80] [cursor=pointer]:
+          - generic [ref=e82]: RS
+          - img [ref=e83]
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - generic [ref=e88]:
+            - img [ref=e89]
+            - textbox "Search by name, role or designation" [ref=e92]
+          - list [ref=e95]:
+            - listitem [ref=e96]:
+              - button "KK Kabir Kapoor Founder 2" [ref=e97] [cursor=pointer]:
+                - button [ref=e98]:
+                  - img [ref=e99]
+                - generic [ref=e101]:
+                  - generic [ref=e103]: KK
+                  - img [ref=e105]
+                - generic [ref=e107]:
+                  - generic [ref=e108]: Kabir Kapoor
+                  - generic [ref=e109]: Founder
+                - generic [ref=e110]:
+                  - img [ref=e111]
+                  - text: "2"
+              - list [ref=e116]:
+                - listitem [ref=e117]:
+                  - button "LM Leah Mathews Design Lead 3" [ref=e118] [cursor=pointer]:
+                    - button [ref=e119]:
+                      - img [ref=e120]
+                    - generic [ref=e124]: LM
+                    - generic [ref=e125]:
+                      - generic [ref=e126]: Leah Mathews
+                      - generic [ref=e127]: Design Lead
+                    - generic [ref=e128]:
+                      - img [ref=e129]
+                      - text: "3"
+                  - list [ref=e134]:
+                    - listitem [ref=e135]:
+                      - button "RS Rahul Sharma Senior Product Designer" [ref=e136] [cursor=pointer]:
+                        - generic [ref=e139]: RS
+                        - generic [ref=e140]:
+                          - generic [ref=e141]: Rahul Sharma
+                          - generic [ref=e142]: Senior Product Designer
+                    - listitem [ref=e143]:
+                      - button "AV Ananya Verma UI Designer" [ref=e144] [cursor=pointer]:
+                        - generic [ref=e147]: AV
+                        - generic [ref=e148]:
+                          - generic [ref=e149]: Ananya Verma
+                          - generic [ref=e150]: UI Designer
+                    - listitem [ref=e151]:
+                      - button "RD Rohit Desai Visual Designer" [ref=e152] [cursor=pointer]:
+                        - generic [ref=e155]: RD
+                        - generic [ref=e156]:
+                          - generic [ref=e157]: Rohit Desai
+                          - generic [ref=e158]: Visual Designer
+                - listitem [ref=e159]:
+                  - button "PI Priya Iyer Content & Ops Lead 2" [ref=e160] [cursor=pointer]:
+                    - button [ref=e161]:
+                      - img [ref=e162]
+                    - generic [ref=e166]: PI
+                    - generic [ref=e167]:
+                      - generic [ref=e168]: Priya Iyer
+                      - generic [ref=e169]: Content & Ops Lead
+                    - generic [ref=e170]:
+                      - img [ref=e171]
+                      - text: "2"
+                  - list [ref=e176]:
+                    - listitem [ref=e177]:
+                      - button "NB Neha Bansal Content Strategist" [ref=e178] [cursor=pointer]:
+                        - generic [ref=e181]: NB
+                        - generic [ref=e182]:
+                          - generic [ref=e183]: Neha Bansal
+                          - generic [ref=e184]: Content Strategist
+                    - listitem [ref=e185]:
+                      - button "AK Aditya Khanna Copywriter" [ref=e186] [cursor=pointer]:
+                        - generic [ref=e189]: AK
+                        - generic [ref=e190]:
+                          - generic [ref=e191]: Aditya Khanna
+                          - generic [ref=e192]: Copywriter
+            - listitem [ref=e193]:
+              - button "MK Meera Krishnan Co-Founder 2" [ref=e194] [cursor=pointer]:
+                - button [ref=e195]:
+                  - img [ref=e196]
+                - generic [ref=e198]:
+                  - generic [ref=e200]: MK
+                  - img [ref=e202]
+                - generic [ref=e204]:
+                  - generic [ref=e205]: Meera Krishnan
+                  - generic [ref=e206]: Co-Founder
+                - generic [ref=e207]:
+                  - img [ref=e208]
+                  - text: "2"
+              - list [ref=e213]:
+                - listitem [ref=e214]:
+                  - button "SJ Stewart Joseph Head of People" [ref=e215] [cursor=pointer]:
+                    - generic [ref=e218]: SJ
+                    - generic [ref=e219]:
+                      - generic [ref=e220]: Stewart Joseph
+                      - generic [ref=e221]: Head of People
+                - listitem [ref=e222]:
+                  - button "AM Arjun Mehta Engineering Lead 3" [ref=e223] [cursor=pointer]:
+                    - button [ref=e224]:
+                      - img [ref=e225]
+                    - generic [ref=e229]: AM
+                    - generic [ref=e230]:
+                      - generic [ref=e231]: Arjun Mehta
+                      - generic [ref=e232]: Engineering Lead
+                    - generic [ref=e233]:
+                      - img [ref=e234]
+                      - text: "3"
+                  - list [ref=e239]:
+                    - listitem [ref=e240]:
+                      - button "SR Saanvi Rao Senior Frontend Engineer" [ref=e241] [cursor=pointer]:
+                        - generic [ref=e244]: SR
+                        - generic [ref=e245]:
+                          - generic [ref=e246]: Saanvi Rao
+                          - generic [ref=e247]: Senior Frontend Engineer
+                    - listitem [ref=e248]:
+                      - button "VB Vikram Bhatt Backend Engineer" [ref=e249] [cursor=pointer]:
+                        - generic [ref=e252]: VB
+                        - generic [ref=e253]:
+                          - generic [ref=e254]: Vikram Bhatt
+                          - generic [ref=e255]: Backend Engineer
+                    - listitem [ref=e256]:
+                      - button "IP Isha Pillai Full-stack Engineer" [ref=e257] [cursor=pointer]:
+                        - generic [ref=e260]: IP
+                        - generic [ref=e261]:
+                          - generic [ref=e262]: Isha Pillai
+                          - generic [ref=e263]: Full-stack Engineer
+        - complementary [ref=e264]:
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - generic [ref=e269]: RS
+              - generic [ref=e270]:
+                - generic [ref=e271]: Rahul Sharma
+                - generic [ref=e272]: Senior Product Designer
+            - generic [ref=e273]:
+              - generic [ref=e274]:
+                - generic [ref=e275]: Role
+                - generic [ref=e277]: employee
+              - generic [ref=e278]:
+                - generic [ref=e279]: Email
+                - generic [ref=e281]:
+                  - img [ref=e282]
+                  - text: rahul@kkcreate.com
+              - generic [ref=e285]:
+                - generic [ref=e286]: Manager
+                - generic [ref=e287]: Leah Mathews
+              - generic [ref=e288]:
+                - generic [ref=e289]: Teams
+                - generic [ref=e292]: Design · primary
+              - generic [ref=e293]:
+                - generic [ref=e294]: Joined
+                - generic [ref=e295]: Mar 15, 2023
+  - alert [ref=e296]

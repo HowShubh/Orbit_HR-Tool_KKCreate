@@ -1,0 +1,285 @@
+- generic [ref=e2]:
+  - main [ref=e3]:
+    - generic [ref=e5]:
+      - button [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: Good evening, Rahul 👋
+      - button "2" [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+        - generic [ref=e14]: "2"
+      - button "RS" [ref=e15] [cursor=pointer]:
+        - generic [ref=e17]: RS
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - generic [ref=e20]: Tuesday, Apr 28 · FY 2026 – 27
+        - generic [ref=e21]:
+          - button "Request comp-off" [ref=e22] [cursor=pointer]:
+            - img [ref=e23]
+            - text: Request comp-off
+          - button "Apply for leave" [ref=e25] [cursor=pointer]:
+            - img [ref=e26]
+            - text: Apply for leave
+      - generic [ref=e27]:
+        - generic [ref=e28]:
+          - generic [ref=e29]:
+            - generic [ref=e30]:
+              - heading "My Status" [level=3] [ref=e31]
+              - generic [ref=e32]: Working
+            - generic [ref=e34]:
+              - generic [ref=e35]:
+                - generic [ref=e36]:
+                  - generic [ref=e37]:
+                    - img [ref=e38]
+                    - text: Today's session
+                  - generic [ref=e41]:
+                    - img [ref=e42]
+                    - text: Office
+                - generic [ref=e45]: 05:42:18
+                - generic [ref=e46]: Checked in at 09:18 AM
+              - generic [ref=e47]:
+                - button "On break" [ref=e48] [cursor=pointer]:
+                  - img [ref=e49]
+                  - text: On break
+                - button "Check out" [ref=e51] [cursor=pointer]
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - heading "Upcoming holidays" [level=3] [ref=e54]
+              - img [ref=e55]
+            - generic [ref=e57]:
+              - generic [ref=e58]:
+                - generic [ref=e59]: Next holiday
+                - generic [ref=e60]: Labour Day
+                - generic [ref=e61]: Friday, May 1, 2026
+              - list [ref=e62]:
+                - listitem [ref=e63]:
+                  - generic [ref=e64]: Buddha Purnima
+                  - generic [ref=e65]: May 25
+                - listitem [ref=e66]:
+                  - generic [ref=e67]: Independence Day
+                  - generic [ref=e68]: Aug 15
+                - listitem [ref=e69]:
+                  - generic [ref=e70]: Gandhi Jayanti
+                  - generic [ref=e71]: Oct 2
+        - generic [ref=e72]:
+          - generic [ref=e73]:
+            - generic [ref=e75]:
+              - heading "This week's schedule" [level=3] [ref=e76]
+              - generic [ref=e77]: "Design team · WFO: MON, WED, FRI"
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - generic [ref=e80]:
+                  - generic [ref=e81]: M
+                  - generic [ref=e82]: WFO
+                - generic [ref=e83]:
+                  - generic [ref=e84]: T
+                  - generic [ref=e85]: WFH
+                - generic [ref=e86]:
+                  - generic [ref=e87]: W
+                  - generic [ref=e88]: WFO
+                - generic [ref=e89]:
+                  - generic [ref=e90]: T
+                  - generic [ref=e91]: WFH
+                - generic [ref=e92]:
+                  - generic [ref=e93]: F
+                  - generic [ref=e94]: WFO
+                - generic [ref=e95]:
+                  - generic [ref=e96]: S
+                  - generic [ref=e97]: ·
+                - generic [ref=e98]:
+                  - generic [ref=e99]: S
+                  - generic [ref=e100]: ·
+              - generic [ref=e101]:
+                - generic [ref=e102]: Office
+                - generic [ref=e104]: Home
+                - generic [ref=e106]: "Off"
+          - generic [ref=e108]:
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - heading "My Leave Balance" [level=3] [ref=e111]
+                - generic [ref=e112]: FY 2026-27 · Jun – May
+              - generic [ref=e113]:
+                - img [ref=e114]
+                - text: Comp-off auto-expires in 90 days
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - generic [ref=e121]: Leave
+                - generic [ref=e122]:
+                  - generic [ref=e123]: "14.0"
+                  - generic [ref=e124]: / 18
+                - generic [ref=e125]: 4.0 used
+              - generic [ref=e126]:
+                - generic [ref=e129]: WFH
+                - generic [ref=e130]:
+                  - generic [ref=e131]: "18.0"
+                  - generic [ref=e132]: / 24
+                - generic [ref=e133]: 6.0 used
+              - generic [ref=e134]:
+                - generic [ref=e137]: Comp-Leave
+                - generic [ref=e138]:
+                  - generic [ref=e139]: "2.0"
+                  - generic [ref=e140]: / 3
+                - generic [ref=e141]: 1.0 used
+              - generic [ref=e142]:
+                - generic [ref=e145]: Comp-WFH
+                - generic [ref=e146]:
+                  - generic [ref=e147]: "2.0"
+                  - generic [ref=e148]: / 2
+                - generic [ref=e149]: 0.0 used
+        - generic [ref=e152]:
+          - generic [ref=e153]:
+            - heading "Quick actions" [level=3] [ref=e155]
+            - generic [ref=e157]:
+              - button "Apply leave Single or multi-day" [ref=e158] [cursor=pointer]:
+                - img [ref=e160]
+                - generic [ref=e162]: Apply leave
+                - generic [ref=e163]: Single or multi-day
+              - button "Comp-off Request from manager" [ref=e164] [cursor=pointer]:
+                - img [ref=e166]
+                - generic [ref=e168]: Comp-off
+                - generic [ref=e169]: Request from manager
+              - link "Calendar Plan around team" [ref=e170] [cursor=pointer]:
+                - /url: /calendar
+                - img [ref=e172]
+                - generic [ref=e175]: Calendar
+                - generic [ref=e176]: Plan around team
+              - link "Organization Find a teammate" [ref=e177] [cursor=pointer]:
+                - /url: /org
+                - img [ref=e179]
+                - generic [ref=e182]: Organization
+                - generic [ref=e183]: Find a teammate
+          - generic [ref=e184]:
+            - generic [ref=e185]:
+              - heading "Who's out today" [level=3] [ref=e186]
+              - generic [ref=e187]: 3 people
+            - list [ref=e189]:
+              - listitem [ref=e190]:
+                - generic [ref=e192]: AV
+                - generic [ref=e193]:
+                  - generic [ref=e194]: Ananya Verma
+                  - generic [ref=e195]: UI Designer
+                - generic [ref=e196]: Leave
+              - listitem [ref=e197]:
+                - generic [ref=e199]: SR
+                - generic [ref=e200]:
+                  - generic [ref=e201]: Saanvi Rao
+                  - generic [ref=e202]: Senior Frontend Engineer
+                - generic [ref=e203]: WFH
+              - listitem [ref=e204]:
+                - generic [ref=e206]: NB
+                - generic [ref=e207]:
+                  - generic [ref=e208]: Neha Bansal
+                  - generic [ref=e209]: Content Strategist
+                - generic [ref=e210]: Leave
+        - generic [ref=e212]:
+          - generic [ref=e213]:
+            - heading "Upcoming leaves" [level=3] [ref=e214]
+            - link "View all" [ref=e215] [cursor=pointer]:
+              - /url: /leaves
+              - text: View all
+              - img [ref=e216]
+          - list [ref=e219]:
+            - listitem [ref=e220]:
+              - generic [ref=e221]: "4"
+              - generic [ref=e222]:
+                - generic [ref=e223]: May 4 – 5
+                - generic [ref=e224]: Family function
+              - generic [ref=e225]: Leave
+            - listitem [ref=e226]:
+              - generic [ref=e227]: "12"
+              - generic [ref=e228]:
+                - generic [ref=e229]: May 12
+                - generic [ref=e230]: —
+              - generic [ref=e231]: WFH
+        - generic [ref=e233]:
+          - generic [ref=e234]:
+            - heading "Comp-off bank" [level=3] [ref=e235]
+            - generic [ref=e236]:
+              - img [ref=e237]
+              - text: 3 active
+          - list [ref=e240]:
+            - listitem [ref=e241]:
+              - generic [ref=e242]:
+                - generic [ref=e243]: 1 day Leave
+                - generic [ref=e244]: Earned Mar 22
+              - generic [ref=e245]:
+                - generic [ref=e246]: 55d left
+                - generic [ref=e247]: Exp Jun 22
+            - listitem [ref=e248]:
+              - generic [ref=e249]:
+                - generic [ref=e250]: 1 day Leave
+                - generic [ref=e251]: Earned Apr 4
+              - generic [ref=e252]:
+                - generic [ref=e253]: 67d left
+                - generic [ref=e254]: Exp Jul 4
+            - listitem [ref=e255]:
+              - generic [ref=e256]:
+                - generic [ref=e257]: 1 day WFH
+                - generic [ref=e258]: Earned Apr 19
+              - generic [ref=e259]:
+                - generic [ref=e260]: 82d left
+                - generic [ref=e261]: Exp Jul 19
+        - generic [ref=e263]:
+          - generic [ref=e264]:
+            - heading "My team" [level=3] [ref=e265]
+            - link "View team" [ref=e266] [cursor=pointer]:
+              - /url: /team
+              - text: View team
+              - img [ref=e267]
+          - list [ref=e270]:
+            - listitem [ref=e271]:
+              - generic [ref=e273]: KK
+              - generic [ref=e274]:
+                - generic [ref=e275]: Kabir Kapoor
+                - generic [ref=e276]: Founder
+              - generic [ref=e277]: In office
+            - listitem [ref=e279]:
+              - generic [ref=e281]: LM
+              - generic [ref=e282]:
+                - generic [ref=e283]: Leah Mathews
+                - generic [ref=e284]: Design Lead
+              - generic [ref=e285]: In office
+            - listitem [ref=e287]:
+              - generic [ref=e289]: AV
+              - generic [ref=e290]:
+                - generic [ref=e291]: Ananya Verma
+                - generic [ref=e292]: UI Designer
+              - generic [ref=e293]: On leave
+            - listitem [ref=e295]:
+              - generic [ref=e297]: RD
+              - generic [ref=e298]:
+                - generic [ref=e299]: Rohit Desai
+                - generic [ref=e300]: Visual Designer
+              - generic [ref=e301]: In office
+            - listitem [ref=e303]:
+              - generic [ref=e305]: IP
+              - generic [ref=e306]:
+                - generic [ref=e307]: Isha Pillai
+                - generic [ref=e308]: Full-stack Engineer
+              - generic [ref=e309]: In office
+  - navigation [ref=e311]:
+    - list [ref=e312]:
+      - listitem [ref=e313]:
+        - link "Home" [ref=e314] [cursor=pointer]:
+          - /url: /
+          - img [ref=e315]
+          - generic [ref=e320]: Home
+      - listitem [ref=e321]:
+        - link "Leaves" [ref=e322] [cursor=pointer]:
+          - /url: /leaves
+          - img [ref=e323]
+          - generic [ref=e326]: Leaves
+      - listitem [ref=e327]:
+        - link "Calendar" [ref=e328] [cursor=pointer]:
+          - /url: /calendar
+          - img [ref=e329]
+          - generic [ref=e331]: Calendar
+      - listitem [ref=e332]:
+        - link "Org" [ref=e333] [cursor=pointer]:
+          - /url: /org
+          - img [ref=e334]
+          - generic [ref=e339]: Org
+      - listitem [ref=e340]:
+        - link "Me" [ref=e341] [cursor=pointer]:
+          - /url: /profile
+          - img [ref=e342]
+          - generic [ref=e354]: Me
