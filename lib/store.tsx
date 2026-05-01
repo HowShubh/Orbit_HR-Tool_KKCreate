@@ -10,6 +10,7 @@ import {
 } from "react";
 import { compoffGrants as seedGrants, leaves as seedLeaves, leaveBalances as seedBalances, notifications as seedNotifs, users } from "./mock-data";
 import { CompoffGrant, Leave, LeaveBalance, Notification, Role, User } from "./types";
+import type { Tables } from "@/lib/supabase/database.types";
 
 interface StoreShape {
   currentUser: User;
@@ -40,10 +41,34 @@ const StoreContext = createContext<StoreShape | null>(null);
 
 const DEFAULT_USER_ID = "u-rahul";
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUserRaw] = useState<User>(
-    () => users.find((u) => u.id === DEFAULT_USER_ID)!
-  );
+export function StoreProvider({
+  children,
+  realUser,
+}: {
+  children: ReactNode
+  realUser?: Tables<'users'>
+}) {
+  const [currentUser, setCurrentUserRaw] = useState<User>(() => {
+    if (realUser) {
+      const mockMatch = users.find((u) => u.email === realUser.email)
+      if (mockMatch) return mockMatch
+      return {
+        id: realUser.id,
+        email: realUser.email,
+        full_name: realUser.full_name,
+        phone: realUser.phone ?? undefined,
+        role: realUser.role as User['role'],
+        manager_id: realUser.manager_id ?? null,
+        status: realUser.status as User['status'],
+        joined_at: realUser.joined_at,
+        designation: realUser.designation ?? '',
+        primary_team_id: '',
+        team_ids: [],
+        notifications_muted: realUser.notifications_muted,
+      }
+    }
+    return users.find((u) => u.id === DEFAULT_USER_ID)!
+  });
   const [leaves, setLeaves] = useState<Leave[]>(seedLeaves);
   const [balances, setBalances] = useState<LeaveBalance[]>(seedBalances);
   const [grants, setGrants] = useState<CompoffGrant[]>(seedGrants);
