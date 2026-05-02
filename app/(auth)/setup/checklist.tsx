@@ -261,14 +261,24 @@ export default function SetupChecklist({
                   )
                 )}
                 {status === 'active' && step.id === 'awaiting_first_hr' && (
-                  <p className="mt-2 text-[12.5px] text-violet-600 font-medium">
-                    You're in! Go to HR Console → Users to add your first HR user.
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-[12.5px] text-violet-600 font-medium">
+                      You're in! Add your first HR user from the HR Console.
+                    </p>
+                    <Button asChild size="sm" variant="outline">
+                      <a href="/hr">Go to HR Console</a>
+                    </Button>
+                  </div>
                 )}
                 {status === 'active' && step.id === 'awaiting_first_team' && (
-                  <p className="mt-2 text-[12.5px] text-violet-600 font-medium">
-                    Go to HR Console → Teams to create your first team.
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    <p className="text-[12.5px] text-violet-600 font-medium">
+                      Now create your first team from the HR Console.
+                    </p>
+                    <Button asChild size="sm" variant="outline">
+                      <a href="/hr">Go to HR Console</a>
+                    </Button>
+                  </div>
                 )}
               </div>
             </div>

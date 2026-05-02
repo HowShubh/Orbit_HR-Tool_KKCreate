@@ -24,17 +24,14 @@ export default async function AppLayout({
     .select('bootstrap_state')
     .single()
 
-  // If bootstrap is not operational, send to setup (regardless of whether users row exists)
-  if (
-    stateRow?.bootstrap_state &&
-    stateRow.bootstrap_state !== 'operational'
-  ) {
+  // Hard-block only for the very first state — we need a founder before anything else
+  if (stateRow?.bootstrap_state === 'awaiting_root_admin') {
     redirect('/setup')
   }
 
   const user = await getCurrentUser()
 
-  // Authed but no users row, and bootstrap is operational → not onboarded
+  // Authed but no users row → not onboarded
   if (!user) {
     redirect('/login?error=not_onboarded')
   }
