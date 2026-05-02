@@ -70,28 +70,14 @@ export function TeamMembersDialog({ open, onOpenChange, team, users }: Props) {
     const membership = user?.memberships.find((m) => m.team_id === team.id)
     if (!membership) return
 
-    // We need the membership ID — but UserWithMembership only has team_id and is_primary
-    // We'll use the team_id + user_id pattern to soft-delete via the action
-    // The removeTeamMember action takes a membershipId, but we don't have it.
-    // Fall back to calling the action with a search pattern.
-    // For now, we need to pass something — let's store a synthetic key.
-    // Since we don't have the membership row id, we'll use the user_id+team_id approach
-    // by passing them via a workaround — we pass user_id as a compound to removeTeamMember
-    // BUT removeTeamMember takes a membershipId. We'll need to handle this differently.
-    //
-    // Looking at the UserWithMembership type: it only has { team_id, is_primary }
-    // We can't get membership ID from the client. We'll call removeTeamMember with
-    // a "userId:teamId" format and handle it server-side, OR we need to pass user_id+team_id.
-    //
-    // Since removeTeamMember takes a membershipId and we don't have it, let's add a
-    // note and call it with the user_id as a stopgap — this will fail gracefully.
-    // The real fix would be to include membership `id` in UserWithMembership.
-    // For now we'll show a toast indicating the limitation.
-
-    pushToast({
-      title: 'Cannot remove',
-      body: 'Membership ID not available in current data fetch. Refresh and try again.',
-      variant: 'error'
+    startTransition(async () => {
+      try {
+        await removeTeamMember(membership.id)
+        pushToast({ title: 'Member removed', variant: 'success' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed'
+        pushToast({ title: 'Error', body: msg, variant: 'error' })
+      }
     })
   }
 
