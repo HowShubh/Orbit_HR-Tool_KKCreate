@@ -1,0 +1,165 @@
+'use client'
+
+import { useTransition } from 'react'
+import { format, parseISO } from 'date-fns'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Avatar } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { decideCompoff } from '@/lib/actions/compoff'
+import { useStore } from '@/lib/store'
+import { cn } from '@/lib/utils'
+import type { Tables } from '@/lib/supabase/database.types'
+import type { UserWithMembership } from '@/lib/queries/users'
+
+interface Props {
+  grants: Tables<'compoff_grants'>[]
+  users: UserWithMembership[]
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  compoff_leave: 'Comp Leave',
+  compoff_wfh: 'Comp WFH',
+}
+
+function StatCard({ label, value, tone }: { label: string; value: number; tone: 'warning' | 'success' | 'muted' }) {
+  const cls = {
+    warning: 'border-amber-200 bg-amber-50 text-amber-900',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    muted: 'border-border bg-muted/40 text-muted-foreground',
+  }[tone]
+  return (
+    <div className={cn('rounded-xl border p-4', cls)}>
+      <div className="text-[12px] uppercase tracking-wide font-semibold opacity-80">{label}</div>
+      <div className="text-[24px] font-semibold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+export function CompoffTab({ grants, users }: Props) {
+  const { pushToast } = useStore()
+  const [isPending, startTransition] = useTransition()
+
+  const pending = grants.filter((g) => g.status === 'pending')
+  const approved = grants.filter((g) => g.status === 'approved')
+  const rejected = grants.filter((g) => g.status === 'rejected')
+
+  function handleDecide(grantId: string, decision: 'approved' | 'rejected') {
+    startTransition(async () => {
+      try {
+        await decideCompoff(grantId, decision)
+        pushToast({
+          title: decision === 'approved' ? 'Compoff approved' : 'Compoff rejected',
+          variant: decision === 'approved' ? 'success' : 'info',
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed'
+        pushToast({ title: 'Error', body: msg, variant: 'error' })
+      }
+    })
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-5 p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <StatCard label="Pending" value={pending.length} tone="warning" />
+          <StatCard label="Approved" value={approved.length} tone="success" />
+          <StatCard label="Rejected" value={rejected.length} tone="muted" />
+        </div>
+
+        {grants.length === 0 && (
+          <p className="text-center text-muted-foreground text-sm py-6">
+            No compoff grants found.
+          </p>
+        )}
+
+        {pending.length > 0 && (
+          <div>
+            <div className="text-[13px] font-semibold mb-2">Pending</div>
+            <div className="space-y-3">
+              {pending.map((g) => {
+                const u = users.find((x) => x.id === g.user_id)
+                const manager = users.find((x) => x.id === g.manager_id)
+                return (
+                  <div
+                    key={g.id}
+                    className="rounded-xl border border-border p-4 flex flex-wrap items-center gap-4"
+                  >
+                    <Avatar name={u?.full_name ?? '?'} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[13.5px] font-semibold">{u?.full_name ?? 'Unknown'}</span>
+                        <span className="text-[11.5px] text-muted-foreground">
+                          {TYPE_LABEL[g.type] ?? g.type} · {g.amount} day · worked{' '}
+                          {format(parseISO(g.work_date), 'MMM d')}
+                        </span>
+                      </div>
+                      <div className="text-[12.5px] text-muted-foreground line-clamp-2 mt-0.5">
+                        {g.reason}
+                      </div>
+                      <div className="text-[11.5px] text-muted-foreground/80 mt-1">
+                        Manager: {manager?.full_name ?? '—'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending}
+                        onClick={() => handleDecide(g.id, 'rejected')}
+                      >
+                        Reject
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={isPending}
+                        onClick={() => handleDecide(g.id, 'approved')}
+                      >
+                        Approve
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {(approved.length > 0 || rejected.length > 0) && (
+          <div>
+            <div className="text-[13px] font-semibold mb-2">Decided</div>
+            <div className="space-y-3">
+              {[...approved, ...rejected].map((g) => {
+                const u = users.find((x) => x.id === g.user_id)
+                return (
+                  <div
+                    key={g.id}
+                    className="rounded-xl border border-border p-4 flex flex-wrap items-center gap-4 opacity-75"
+                  >
+                    <Avatar name={u?.full_name ?? '?'} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[13.5px] font-semibold">{u?.full_name ?? 'Unknown'}</span>
+                        <span className="text-[11.5px] text-muted-foreground">
+                          {TYPE_LABEL[g.type] ?? g.type} · {g.amount} day · worked{' '}
+                          {format(parseISO(g.work_date), 'MMM d')}
+                        </span>
+                      </div>
+                      <div className="text-[12.5px] text-muted-foreground line-clamp-1 mt-0.5">
+                        {g.reason}
+                      </div>
+                    </div>
+                    <Badge variant={g.status === 'approved' ? 'success' : 'muted'} className="capitalize">
+                      {g.status}
+                    </Badge>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
