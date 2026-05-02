@@ -1,0 +1,37 @@
+'use server'
+
+import { z } from 'zod'
+import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  ActionError,
+  requireCapability,
+  revalidateHR,
+  writeAudit,
+} from './_helpers'
+
+const BalanceSchema = z.object({
+  user_id: z.string().uuid(),
+  leave_year: z.number().int(),
+  type: z.enum(['wfh', 'leave', 'compoff_wfh', 'compoff_leave']),
+  allocated: z.number(),
+  used: z.number().optional(),
+})
+
+export async function upsertBalance(input: z.infer<typeof BalanceSchema>) {
+  const actor = await requireCapability('edit_balance')
+  const parsed = BalanceSchema.parse(input)
+
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient
+    .from('leave_balances')
+    .upsert(parsed, { onConflict: 'user_id,leave_year,type' })
+    .select()
+    .single()
+
+  if (error) throw new ActionError(error.message)
+  await writeAudit(actor.id, 'balance.upsert', 'leave_balance', data.id, {
+    after: data,
+  })
+  await revalidateHR()
+  return data
+}
