@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { Sparkles } from 'lucide-react'
 import SetupChecklist from './checklist'
@@ -17,6 +18,25 @@ export default async function SetupPage() {
     redirect('/')
   }
 
+  // Detect: signed-in user without a public.users row (e.g. created via Supabase dashboard)
+  const supabase = createClient()
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser()
+
+  let orphanedAuthUser: { id: string; email: string } | null = null
+  if (authUser) {
+    const { data: existingUser } = await adminClient
+      .from('users')
+      .select('id')
+      .eq('id', authUser.id)
+      .single()
+
+    if (!existingUser && authUser.email) {
+      orphanedAuthUser = { id: authUser.id, email: authUser.email }
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-lg space-y-8">
@@ -32,7 +52,10 @@ export default async function SetupPage() {
           </div>
         </div>
 
-        <SetupChecklist bootstrapState={state} />
+        <SetupChecklist
+          bootstrapState={state}
+          orphanedAuthUser={orphanedAuthUser}
+        />
       </div>
     </div>
   )

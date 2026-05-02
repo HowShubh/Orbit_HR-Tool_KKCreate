@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth/get-current-user'
+import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { AppShell } from '@/components/layout/app-shell'
 
@@ -8,28 +9,38 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode
 }) {
-  const user = await getCurrentUser()
+  const supabase = createClient()
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser()
 
-  if (!user) {
+  if (!authUser) {
     redirect('/login')
   }
 
-  if (user.status === 'exited') {
-    redirect('/login?error=account_exited')
-  }
-
-  // Check bootstrap state — redirect to setup if not operational
   const adminClient = createAdminClient()
   const { data: stateRow } = await adminClient
     .from('system_state')
     .select('bootstrap_state')
     .single()
 
+  // If bootstrap is not operational, send to setup (regardless of whether users row exists)
   if (
     stateRow?.bootstrap_state &&
     stateRow.bootstrap_state !== 'operational'
   ) {
     redirect('/setup')
+  }
+
+  const user = await getCurrentUser()
+
+  // Authed but no users row, and bootstrap is operational → not onboarded
+  if (!user) {
+    redirect('/login?error=not_onboarded')
+  }
+
+  if (user.status === 'exited') {
+    redirect('/login?error=account_exited')
   }
 
   // Fetch teams this user leads (for capability derivation)

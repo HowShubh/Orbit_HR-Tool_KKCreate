@@ -51,6 +51,63 @@ function stepStatus(
   return 'pending'
 }
 
+function PromoteOrphanedUser({ email }: { email: string }) {
+  const router = useRouter()
+  const [fullName, setFullName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handlePromote(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    const res = await fetch('/api/setup/root-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promote_current: true, full_name: fullName }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      setError(data.error ?? 'Something went wrong. Please try again.')
+      setLoading(false)
+      return
+    }
+
+    router.push('/')
+    router.refresh()
+  }
+
+  return (
+    <form onSubmit={handlePromote} className="mt-3 space-y-3">
+      <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[12.5px] text-violet-900">
+        You're signed in as <strong>{email}</strong>. Use this account as Root Admin?
+      </div>
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800">
+          {error}
+        </div>
+      )}
+      <div className="space-y-1">
+        <Label htmlFor="promote-name" className="text-[12.5px]">Full name</Label>
+        <Input
+          id="promote-name"
+          placeholder="Lokesh Sharma"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          required
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button type="submit" size="sm" disabled={loading} className="w-full">
+        {loading ? 'Setting up…' : 'Promote this account to Root Admin'}
+      </Button>
+    </form>
+  )
+}
+
 function RootAdminForm() {
   const router = useRouter()
   const [fullName, setFullName] = useState('')
@@ -147,8 +204,10 @@ function RootAdminForm() {
 
 export default function SetupChecklist({
   bootstrapState,
+  orphanedAuthUser,
 }: {
   bootstrapState: BootstrapState
+  orphanedAuthUser: { id: string; email: string } | null
 }) {
   return (
     <div className="rounded-2xl border bg-card p-6 shadow-sm space-y-6">
@@ -195,7 +254,11 @@ export default function SetupChecklist({
                   {step.description}
                 </div>
                 {status === 'active' && step.id === 'awaiting_root_admin' && (
-                  <RootAdminForm />
+                  orphanedAuthUser ? (
+                    <PromoteOrphanedUser email={orphanedAuthUser.email} />
+                  ) : (
+                    <RootAdminForm />
+                  )
                 )}
                 {status === 'active' && step.id === 'awaiting_first_hr' && (
                   <p className="mt-2 text-[12.5px] text-violet-600 font-medium">
