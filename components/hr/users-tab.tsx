@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Search, UserPlus, Edit2 } from 'lucide-react'
+import { Search, UserPlus, Edit2, Upload } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { UserFormDialog } from './user-form-dialog'
+import { UsersCsvImport } from './users-csv-import'
 import { deactivateUser, reactivateUser } from '@/lib/actions/users'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
@@ -24,6 +25,7 @@ export function UsersTab({ users, teams }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<UserWithMembership | undefined>()
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')
+  const [csvImportOpen, setCsvImportOpen] = useState(false)
 
   const filtered = users.filter((u) => {
     if (!search.trim()) return true
@@ -88,6 +90,10 @@ export function UsersTab({ users, teams }: Props) {
                 className="h-9 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
+            <Button onClick={() => setCsvImportOpen(true)} variant="outline">
+              <Upload className="h-4 w-4" />
+              Import CSV
+            </Button>
             <Button onClick={openCreate}>
               <UserPlus className="h-4 w-4" />
               Add User
@@ -199,6 +205,11 @@ export function UsersTab({ users, teams }: Props) {
         user={editingUser}
         users={users}
         teams={teams}
+      />
+
+      <UsersCsvImport
+        open={csvImportOpen}
+        onOpenChange={setCsvImportOpen}
       />
     </>
   )

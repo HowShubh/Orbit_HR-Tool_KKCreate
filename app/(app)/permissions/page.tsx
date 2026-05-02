@@ -1,12 +1,28 @@
-import { Topbar } from '@/components/layout/topbar'
+import { listUsers } from '@/lib/queries/users'
+import { listTeams } from '@/lib/queries/teams'
+import {
+  listCapabilities,
+  listBundles,
+  listUserCapabilities,
+} from '@/lib/queries/capabilities'
+import { PermissionsClient } from '@/components/permissions/permissions-client'
 
-export default function PermissionsPage() {
+export default async function PermissionsPage() {
+  const [users, teams, capabilities, bundles, userCapabilities] = await Promise.all([
+    listUsers(),
+    listTeams(),
+    listCapabilities(),
+    listBundles(),
+    listUserCapabilities(),
+  ])
+
   return (
-    <>
-      <Topbar title="Permissions" subtitle="Grant and revoke capabilities" />
-      <div className="px-5 lg:px-8 py-5 text-muted-foreground text-sm">
-        Permissions UI — coming in Phase 2.
-      </div>
-    </>
+    <PermissionsClient
+      users={users}
+      teams={teams}
+      capabilities={capabilities}
+      bundles={bundles}
+      userCapabilities={userCapabilities}
+    />
   )
 }
