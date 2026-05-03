@@ -9,8 +9,10 @@ import { HolidaysTab } from './holidays-tab'
 import { BalancesTab } from './balances-tab'
 import { CompoffTab } from './compoff-tab'
 import { AnnualResetTab } from './annual-reset-tab'
+import { AllLeavesTab } from './all-leaves-tab'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { TeamWithMembers } from '@/lib/queries/teams'
+import type { LeaveWithUser } from '@/lib/queries/leaves'
 import type { Tables } from '@/lib/supabase/database.types'
 
 interface Props {
@@ -21,6 +23,7 @@ interface Props {
   compoffBalances: Tables<'leave_balances'>[]
   grants: Tables<'compoff_grants'>[]
   leaveYear: number
+  leaves: LeaveWithUser[]
 }
 
 export function HRConsoleClient(props: Props) {
@@ -44,8 +47,9 @@ export function HRConsoleClient(props: Props) {
         subtitle="Manage people, teams, holidays, leaves, balances and compoff"
       />
       <div className="px-5 lg:px-8 py-5">
-        <Tabs defaultValue="users">
+        <Tabs defaultValue="leaves">
           <TabsList className="mb-3">
+            <TabsTrigger value="leaves">All Leaves</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="holidays">Holidays</TabsTrigger>
@@ -54,6 +58,9 @@ export function HRConsoleClient(props: Props) {
             <TabsTrigger value="reset">Annual Reset</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="leaves">
+            <AllLeavesTab leaves={props.leaves} users={props.users} />
+          </TabsContent>
           <TabsContent value="users">
             <UsersTab users={props.users} teams={props.teams} />
           </TabsContent>
