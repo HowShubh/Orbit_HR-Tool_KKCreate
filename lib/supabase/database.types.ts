@@ -77,6 +77,7 @@ export type Database = {
           manager_id: string
           decided_at: string | null
           decided_by: string | null
+          expires_at: string
           created_at: string
           updated_at: string
         }
@@ -356,6 +357,24 @@ export type Database = {
           end_date: string
           half_day_start: boolean
           half_day_end: boolean
+        }
+        Relationships: []
+      }
+      compoff_active: {
+        Row: {
+          id: string
+          user_id: string
+          type: 'compoff_wfh' | 'compoff_leave'
+          amount: number
+          work_date: string
+          reason: string
+          status: 'pending' | 'approved' | 'rejected'
+          manager_id: string
+          decided_at: string | null
+          decided_by: string | null
+          expires_at: string
+          created_at: string
+          updated_at: string
         }
         Relationships: []
       }
