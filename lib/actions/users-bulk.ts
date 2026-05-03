@@ -1,8 +1,10 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ActionError, requireCapability, writeAudit, revalidateHR } from './_helpers'
+import { requireCapability, writeAudit, revalidateHR } from './_helpers'
 
 const RowSchema = z.object({
   full_name: z.string().min(1),

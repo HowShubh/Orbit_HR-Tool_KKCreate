@@ -1,8 +1,10 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ActionError, requireUser } from './_helpers'
+import { requireUser } from './_helpers'
 
 /** Internal: create a notification row. Used by other server actions. */
 export async function notifyUser(input: {

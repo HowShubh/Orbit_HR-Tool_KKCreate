@@ -1,9 +1,10 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  ActionError,
   requireCapability,
   revalidateHR,
   writeAudit,

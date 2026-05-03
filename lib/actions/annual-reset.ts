@@ -1,8 +1,9 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
-  ActionError,
   requireCapability,
   revalidateHR,
   writeAudit,

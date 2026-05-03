@@ -1,9 +1,11 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ActionError, requireUser, writeAudit } from './_helpers'
+import { requireUser, writeAudit } from './_helpers'
 
 const ProfileSchema = z.object({
   phone: z.string().nullable().optional(),

@@ -1,9 +1,11 @@
 'use server'
 
+import { ActionError } from './errors'
+
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ActionError, requireCapability, writeAudit } from './_helpers'
+import { requireCapability, writeAudit } from './_helpers'
 
 const GrantSchema = z.object({
   user_id: z.string().uuid(),

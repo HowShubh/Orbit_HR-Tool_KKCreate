@@ -4,12 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { Database, Tables } from '@/lib/supabase/database.types'
 import { revalidatePath } from 'next/cache'
-
-export class ActionError extends Error {
-  constructor(message: string, public code: string = 'error') {
-    super(message)
-  }
-}
+import { ActionError } from './errors'
 
 export async function requireUser(): Promise<Tables<'users'>> {
   const supabase = createClient()
