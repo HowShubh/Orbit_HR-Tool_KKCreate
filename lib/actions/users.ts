@@ -4,11 +4,14 @@ import { ActionError } from './errors'
 
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { seedDefaultBalances } from '@/lib/db/seed-balances'
 import {
   requireCapability,
   revalidateHR,
   writeAudit,
 } from './_helpers'
+
+const CURRENT_LEAVE_YEAR = 2026
 
 const RoleSchema = z.enum(['employee', 'team_lead', 'hr', 'founder'])
 
@@ -73,6 +76,9 @@ export async function createUser(input: z.infer<typeof CreateUserSchema>) {
     p_user_id: userRow.id,
     p_new_role: parsed.role,
   })
+
+  // Seed default leave balances so the user's dashboard works on day one
+  await seedDefaultBalances(adminClient, userRow.id, CURRENT_LEAVE_YEAR)
 
   if (parsed.primary_team_id) {
     await adminClient.from('team_members').insert({

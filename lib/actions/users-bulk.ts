@@ -4,7 +4,10 @@ import { ActionError } from './errors'
 
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { seedDefaultBalances } from '@/lib/db/seed-balances'
 import { requireCapability, writeAudit, revalidateHR } from './_helpers'
+
+const CURRENT_LEAVE_YEAR = 2026
 
 const RowSchema = z.object({
   full_name: z.string().min(1),
@@ -78,6 +81,8 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
       p_user_id: authData.user.id,
       p_new_role: data.role,
     })
+
+    await seedDefaultBalances(adminClient, authData.user.id, CURRENT_LEAVE_YEAR)
 
     if (teamId) {
       await adminClient.from('team_members').insert({

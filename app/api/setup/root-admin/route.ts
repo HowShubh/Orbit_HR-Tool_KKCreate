@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { seedDefaultBalances } from '@/lib/db/seed-balances'
+
+const CURRENT_LEAVE_YEAR = 2026
 
 export async function POST(request: Request) {
   const adminClient = createAdminClient()
@@ -104,6 +107,9 @@ export async function POST(request: Request) {
     p_user_id: userId,
     p_new_role: 'founder',
   })
+
+  // Seed default leave balances so founder's dashboard works on day one
+  await seedDefaultBalances(adminClient, userId, CURRENT_LEAVE_YEAR)
 
   // Advance bootstrap state
   await adminClient
