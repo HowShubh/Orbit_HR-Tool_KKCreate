@@ -77,8 +77,13 @@ export async function createUser(input: z.infer<typeof CreateUserSchema>) {
     p_new_role: parsed.role,
   })
 
-  // Seed default leave balances so the user's dashboard works on day one
-  await seedDefaultBalances(adminClient, userRow.id, CURRENT_LEAVE_YEAR)
+  // Seed pro-rated leave balances based on join date
+  await seedDefaultBalances(
+    adminClient,
+    userRow.id,
+    CURRENT_LEAVE_YEAR,
+    userRow.joined_at
+  )
 
   if (parsed.primary_team_id) {
     await adminClient.from('team_members').insert({

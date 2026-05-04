@@ -48,12 +48,15 @@ export async function requireCapability(
     capability === 'manage_users' ||
     capability === 'view_audit_log' ||
     capability === 'run_annual_reset' ||
-    capability === 'edit_balance' ||
     capability === 'edit_leaves'
   ) {
     if (!isFounder && !isHR) throw new ActionError('HR or founder only', 'forbidden')
     return user
   }
+
+  // edit_balance, view_leaves, view_balance, approve_compoff are scoped:
+  // Founder/HR pass globally; team leads pass for users in their led teams;
+  // anyone passes for themselves.
 
   if (isFounder || isHR) return user
   if (targetUserId === user.id) return user

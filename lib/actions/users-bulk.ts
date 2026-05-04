@@ -82,7 +82,12 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
       p_new_role: data.role,
     })
 
-    await seedDefaultBalances(adminClient, authData.user.id, CURRENT_LEAVE_YEAR)
+    await seedDefaultBalances(
+      adminClient,
+      authData.user.id,
+      CURRENT_LEAVE_YEAR,
+      new Date().toISOString().split('T')[0]
+    )
 
     if (teamId) {
       await adminClient.from('team_members').insert({

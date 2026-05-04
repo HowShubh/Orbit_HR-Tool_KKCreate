@@ -108,8 +108,13 @@ export async function POST(request: Request) {
     p_new_role: 'founder',
   })
 
-  // Seed default leave balances so founder's dashboard works on day one
-  await seedDefaultBalances(adminClient, userId, CURRENT_LEAVE_YEAR)
+  // Seed pro-rated leave balances (founder always gets full FY allocation since they bootstrap)
+  await seedDefaultBalances(
+    adminClient,
+    userId,
+    CURRENT_LEAVE_YEAR,
+    new Date().toISOString().split('T')[0]
+  )
 
   // Advance bootstrap state
   await adminClient
