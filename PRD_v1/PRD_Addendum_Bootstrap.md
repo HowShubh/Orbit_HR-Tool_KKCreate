@@ -52,17 +52,19 @@ Fields:
 - Full name
 - Email (must match `COMPANY_EMAIL_DOMAIN`)
 - Confirm email
+- Temporary password
+- Confirm temporary password
 - A clear explanation: "This first user becomes the Root Admin (Founder role with full access). They will be able to invite other users next."
 
 On submit:
 - The form calls `POST /api/setup/root-admin`. This endpoint is only callable while `bootstrap_state = 'awaiting_root_admin'`. It uses the service role to:
   1. Create a Supabase auth user via the Admin API with role = `founder`
-  2. Send a Supabase magic link / OAuth link to that email
+  2. Set a temporary password for MVP testing
   3. Create the corresponding row in `users` table (founder role; auto-grants `founder_full` bundle)
   4. Update `system_state.bootstrap_state = 'awaiting_first_hr'`
   5. Lock the `/setup` route from creating more root admins
 
-The user receives an email, signs in via Google OAuth, and lands on the dashboard.
+The user signs in with email/password and lands on the dashboard. Google OAuth-only is deferred until after MVP testing validates the core flows.
 
 **Edge cases:**
 - Email domain mismatch → reject with clear error
@@ -86,11 +88,12 @@ Step 2 is an inline form:
 - Full name
 - Email
 - Designation (optional)
+- Temporary password
 - "This user will get the HR Admin bundle and can manage all leaves, holidays, and onboarding."
 
 On submit:
 - Calls existing `POST /api/hr/users` with role = `hr`
-- New HR user gets invite email and Google OAuth login
+- New HR user can sign in with HR-created email/password credentials for MVP testing
 - `system_state.bootstrap_state` updates to `awaiting_first_team`
 
 **Note:** the founder *can* skip adding HR and create teams/users themselves. But the system gently nudges toward HR-first because that's the cleaner long-term setup. If they skip, the HR step is marked optional and they proceed.
@@ -122,7 +125,7 @@ On submit:
 Founders / HR can now:
 - Add the rest of the team via HR Console → Users tab
 - Create more teams via HR Console → (a small "Teams" sub-tab — ADD THIS to Section 8.8)
-- Seed holidays via the existing migration OR via a one-time CSV import (recommended: build a simple "Import Holidays from CSV" tool in HR Console → Holidays tab)
+- Seed holidays via the existing migration OR via a one-time CSV import
 - Set up everyone's leave allocations during user creation
 
 The bootstrap state cannot be reset from the UI. If for some reason the system needs to be re-bootstrapped, it requires a manual SQL `UPDATE system_state SET bootstrap_state = 'awaiting_root_admin'` via the service role — deliberately friction-heavy.
@@ -148,18 +151,16 @@ Add two tabs to HR Console:
 
 Every user invited (after the root admin) goes through:
 
-1. Receives email with subject "You've been added to KK Create HR"
-2. Email contains:
-   - A welcome message
-   - A "Set up your account" button (Supabase magic link OR Google OAuth deep link)
-3. Clicks → lands on a one-time profile completion screen:
+1. Receives their temporary email/password credentials from HR/founder during MVP testing
+2. Signs in at `/login`
+3. Lands on a one-time profile completion screen:
    - Confirm name (pre-filled)
    - Add phone (optional)
    - Upload photo (optional)
    - Submit → lands on their dashboard
 4. From this point, normal app flows apply
 
-If a user opens the app without first clicking the email link, they see the standard "Your account hasn't been set up yet — check your email or contact HR" message.
+If a user opens the app before HR has created their account, they see the standard "Your account hasn't been set up yet — contact HR" message.
 
 ### 17.9 RLS during bootstrap
 
@@ -173,7 +174,7 @@ After bootstrap, the standard RLS policies apply universally. There's no "admin 
 64. ✅ The `/setup` route accepts exactly one root admin and then transitions state.
 65. ✅ The `/api/setup/root-admin` endpoint returns 410 Gone after bootstrap is complete.
 66. ✅ The root admin's first dashboard view shows the setup checklist.
-67. ✅ Adding the first HR user via the checklist works end-to-end (invite email sent, login works, HR bundle applied).
+67. ✅ Adding the first HR user via the checklist works end-to-end (temporary credentials work, HR bundle applied).
 68. ✅ Creating the first team via the checklist transitions the system to `operational` state.
 69. ✅ The setup checklist disappears once `bootstrap_state = 'operational'`.
 70. ✅ Bootstrap state cannot be reset from any UI.
@@ -183,7 +184,7 @@ After bootstrap, the standard RLS policies apply universally. There's no "admin 
 
 ### 17.11 Implementation order additions (insert into Section 12)
 
-After step 1 (Supabase + Next.js scaffold) and before step 7 (Google OAuth login), add:
+After step 1 (Supabase + Next.js scaffold) and before step 7 (email/password login), add:
 
 **1.5.** Create `system_state` table and bootstrap detection middleware.
 **1.6.** Build `/setup` page (root admin creation) and `POST /api/setup/root-admin` endpoint.
@@ -201,14 +202,14 @@ Once the system is built, KK Create's actual onboarding sequence:
 1. Shubham (or founder) opens the production URL → sees `/setup` page
 2. Creates Lokesh as the root admin (founder role)
 3. Lokesh logs in → sees setup checklist
-4. Lokesh adds Jaskirat as the first HR user (HR role; gets `hr_admin` bundle)
+4. Lokesh adds Jaskirat as the first HR user (HR role; gets `hr_admin` bundle and temporary credentials)
 5. Jaskirat logs in → setup is operational, normal HR Console available
 6. Jaskirat creates teams: Short Form, Long Form, Editing, Thumbnail, Tech, etc.
 7. Jaskirat creates each user with role + manager + team + designation + leave allocations
 8. (Optional) Jaskirat uses CSV import to bulk-add the 40 employees
 9. Jaskirat seeds holidays via SQL migration OR Holidays tab
 10. Lokesh grants special capabilities to non-default holders (e.g. tech lead bundle to Head of Tech in Phase 2)
-11. Email goes out to all 40 employees: "KK Create HR is live. Click to log in."
+11. HR shares login credentials/instructions with all 40 employees for MVP testing
 12. June 1: Annual reset is run; system is fully operational.
 
 This sequence mirrors how a SaaS HR product onboards a new customer — clean, repeatable, well-tested.

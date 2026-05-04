@@ -1,8 +1,10 @@
 # Supabase Foundation & Auth Implementation Plan
 
+> Superseded auth note: MVP testing now intentionally uses Supabase email/password login. Google OAuth-only should be restored after Core HR + Leave + Attendance/WFO + Comp-off + Org + Permissions work end-to-end.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wire the KK Create HR Tool to Supabase — install packages, deploy the full database schema, implement Google OAuth auth, capability-based permissions foundation, and the bootstrap onboarding flow — leaving mock data in place for leaves/balances until Phase 2.
+**Goal:** Wire the KK Create HR Tool to Supabase — install packages, deploy the full database schema, implement MVP email/password auth, capability-based permissions foundation, and the bootstrap onboarding flow — leaving mock data in place for leaves/balances until the next implementation pass.
 
 **Architecture:** Supabase SSR with Next.js 14 App Router. Server components use `createServerClient` from `@supabase/ssr`; client components use `createBrowserClient`. Auth is enforced via `middleware.ts` (session refresh + route protection). Capabilities are derived client-side from the user's role using hardcoded bundle definitions (auto-mapping). The `system_state` table drives the bootstrap state machine. The mock `StoreProvider` stays for leaves/balances until Phase 2; a new `CapabilityProvider` wraps it with real auth data.
 
@@ -1819,7 +1821,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_onboarded:
     "Your account hasn't been set up yet. Please contact HR to get access.",
   account_exited: 'Your account has been deactivated. Contact HR for assistance.',
-  wrong_domain: 'Please sign in with your company Google account.',
+  wrong_domain: 'Please sign in with your HR-created email/password account.',
   exchange_failed: 'Sign-in failed. Please try again.',
   no_code: 'Sign-in was cancelled. Please try again.',
 }

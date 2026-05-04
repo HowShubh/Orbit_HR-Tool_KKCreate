@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -16,6 +16,47 @@ const ERROR_MESSAGES: Record<string, string> = {
 }
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginShell />}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginShell({ children }: { children?: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="w-full max-w-sm space-y-8">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-xl">
+            <Sparkles className="h-7 w-7 text-white" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight">Orbit HR</h1>
+            <p className="text-sm text-muted-foreground mt-1">KK Create · People & Culture</p>
+          </div>
+        </div>
+
+        {children ?? (
+          <div className="rounded-2xl border bg-card p-6 shadow-sm">
+            <div className="h-5 w-32 rounded bg-muted mx-auto" />
+            <div className="mt-6 space-y-4">
+              <div className="h-10 rounded-lg bg-muted" />
+              <div className="h-10 rounded-lg bg-muted" />
+              <div className="h-10 rounded-lg bg-muted" />
+            </div>
+          </div>
+        )}
+
+        <p className="text-center text-[12px] text-muted-foreground">
+          Access is managed by HR. Contact your HR team if you need an account.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const errorKey = searchParams.get('error')
@@ -53,19 +94,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-xl">
-            <Sparkles className="h-7 w-7 text-white" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight">Orbit HR</h1>
-            <p className="text-sm text-muted-foreground mt-1">KK Create · People & Culture</p>
-          </div>
-        </div>
-
+    <LoginShell>
         {/* Sign-in card */}
         <div className="rounded-2xl border bg-card p-6 shadow-sm space-y-4">
           <div className="text-center space-y-1">
@@ -108,11 +137,6 @@ export default function LoginPage() {
             </Button>
           </form>
         </div>
-
-        <p className="text-center text-[12px] text-muted-foreground">
-          Access is managed by HR. Contact your HR team if you need an account.
-        </p>
-      </div>
-    </div>
+    </LoginShell>
   )
 }

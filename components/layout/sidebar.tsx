@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   CalendarDays,
   ClipboardList,
   History,
   LayoutDashboard,
+  Loader2,
   Network,
   ScrollText,
   Settings,
@@ -33,8 +35,22 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const { currentUser, compoffGrants } = useStore();
   const { can } = useCapabilities();
+
+  useEffect(() => {
+    setPendingHref(null);
+  }, [pathname]);
+
+  const isRouteActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  const handleNavigate = (href: string) => {
+    if (!isRouteActive(href)) {
+      setPendingHref(href);
+    }
+  };
 
   const visibleNav = NAV.filter((n) => {
     if ('always' in n && n.always) return true
@@ -72,8 +88,8 @@ export function Sidebar() {
         </div>
         <ul className="space-y-0.5">
           {visibleNav.map((item) => {
-            const isActive =
-              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            const isActive = isRouteActive(item.href);
+            const isPending = pendingHref === item.href;
             const Icon = item.icon;
             const showBadge =
               item.href === "/leaves" && pendingCompoffCount > 0 && currentUser.role === "team_lead";
@@ -81,19 +97,26 @@ export function Sidebar() {
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  prefetch
+                  onClick={() => handleNavigate(item.href)}
+                  aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] transition-colors",
-                    isActive
+                    isActive || isPending
                       ? "bg-white text-slate-900 shadow-sm font-semibold"
                       : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-white"
                   )}
                 >
-                  <Icon
-                    className={cn(
-                      "h-[17px] w-[17px] shrink-0",
-                      isActive ? "text-violet-600" : "text-sidebar-foreground/60 group-hover:text-white"
-                    )}
-                  />
+                  {isPending ? (
+                    <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-violet-600" />
+                  ) : (
+                    <Icon
+                      className={cn(
+                        "h-[17px] w-[17px] shrink-0",
+                        isActive ? "text-violet-600" : "text-sidebar-foreground/60 group-hover:text-white"
+                      )}
+                    />
+                  )}
                   <span className="flex-1">{item.label}</span>
                   {showBadge && (
                     <Badge variant="warning" className="text-[10px] py-0 px-1.5">
@@ -113,30 +136,56 @@ export function Sidebar() {
           <li>
             <Link
               href="/profile"
+              prefetch
+              onClick={() => handleNavigate("/profile")}
+              aria-current={isRouteActive("/profile") ? "page" : undefined}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] transition-colors",
-                pathname === "/profile"
+                isRouteActive("/profile") || pendingHref === "/profile"
                   ? "bg-white text-slate-900 shadow-sm font-semibold"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-white"
               )}
             >
-              <ScrollText
-                className={cn(
-                  "h-[17px] w-[17px]",
-                  pathname === "/profile"
-                    ? "text-violet-600"
-                    : "text-sidebar-foreground/60"
-                )}
-              />
+              {pendingHref === "/profile" ? (
+                <Loader2 className="h-[17px] w-[17px] animate-spin text-violet-600" />
+              ) : (
+                <ScrollText
+                  className={cn(
+                    "h-[17px] w-[17px]",
+                    isRouteActive("/profile")
+                      ? "text-violet-600"
+                      : "text-sidebar-foreground/60"
+                  )}
+                />
+              )}
               My Profile
             </Link>
           </li>
           <li>
             <Link
               href="/settings"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-white"
+              prefetch
+              onClick={() => handleNavigate("/settings")}
+              aria-current={isRouteActive("/settings") ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] transition-colors",
+                isRouteActive("/settings") || pendingHref === "/settings"
+                  ? "bg-white text-slate-900 shadow-sm font-semibold"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-white"
+              )}
             >
-              <Settings className="h-[17px] w-[17px] text-sidebar-foreground/60" />
+              {pendingHref === "/settings" ? (
+                <Loader2 className="h-[17px] w-[17px] animate-spin text-violet-600" />
+              ) : (
+                <Settings
+                  className={cn(
+                    "h-[17px] w-[17px]",
+                    isRouteActive("/settings")
+                      ? "text-violet-600"
+                      : "text-sidebar-foreground/60"
+                  )}
+                />
+              )}
               Settings
             </Link>
           </li>
