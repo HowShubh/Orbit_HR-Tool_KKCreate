@@ -1,104 +1,86 @@
-"use client";
+import { redirect } from 'next/navigation'
+import { getCurrentUser } from '@/lib/auth/get-current-user'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { listLeavesInRange } from '@/lib/queries/leaves'
+import { TeamClient } from '@/components/team/team-client'
+import type { Tables } from '@/lib/supabase/database.types'
+import type { LeaveWithUser } from '@/lib/queries/leaves'
 
-import { Topbar } from "@/components/layout/topbar";
-import { Card, CardContent } from "@/components/ui/card";
-import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { useStore } from "@/lib/store";
-import { teams, TODAY } from "@/lib/mock-data";
-import { activeLeavesOnDate, LEAVE_TYPE_LABELS, LEAVE_TYPE_PILL } from "@/lib/leave-utils";
-import { cn } from "@/lib/utils";
+export default async function TeamPage() {
+  const user = await getCurrentUser()
+  if (!user) redirect('/login')
 
-export default function TeamPage() {
-  const { currentUser, users, leaves, balances } = useStore();
+  const adminClient = createAdminClient()
 
-  if (currentUser.role === "employee") {
+  const { data: myMemberships } = await adminClient
+    .from('team_members')
+    .select('team_id, is_primary')
+    .eq('user_id', user.id)
+    .is('left_at', null)
+
+  const myTeamIds = (myMemberships ?? []).map((m) => m.team_id)
+  const primaryTeamId =
+    myMemberships?.find((m) => m.is_primary)?.team_id ?? myTeamIds[0] ?? null
+
+  if (!primaryTeamId || myTeamIds.length === 0) {
     return (
-      <div className="p-12 text-center text-muted-foreground">
-        Team view is for managers, HR and founders.
-      </div>
-    );
+      <TeamClient
+        currentUser={user}
+        myTeams={[]}
+        initialTeamId={null}
+        membersByTeam={{}}
+        leadByTeam={{}}
+        upcomingByTeam={{}}
+      />
+    )
   }
 
-  const visibleUsers =
-    currentUser.role === "team_lead"
-      ? users.filter((u) => u.manager_id === currentUser.id)
-      : users.filter((u) => u.status === "active");
+  const [teamsRes, allMembersRes] = await Promise.all([
+    adminClient.from('teams').select('*').in('id', myTeamIds),
+    adminClient
+      .from('team_members')
+      .select('user_id, team_id, is_primary')
+      .in('team_id', myTeamIds)
+      .is('left_at', null),
+  ])
 
-  const todayLeaves = activeLeavesOnDate(leaves, TODAY);
+  const memberUserIds = Array.from(new Set((allMembersRes.data ?? []).map((m) => m.user_id)))
+  const { data: memberUsers } = await adminClient
+    .from('users')
+    .select('*')
+    .in('id', memberUserIds)
+
+  const userById = new Map((memberUsers ?? []).map((u) => [u.id, u]))
+
+  const membersByTeam: Record<string, Tables<'users'>[]> = {}
+  for (const m of allMembersRes.data ?? []) {
+    if (!membersByTeam[m.team_id]) membersByTeam[m.team_id] = []
+    const u = userById.get(m.user_id)
+    if (u) membersByTeam[m.team_id].push(u)
+  }
+
+  const leadByTeam: Record<string, Tables<'users'> | null> = {}
+  for (const t of teamsRes.data ?? []) {
+    leadByTeam[t.id] = t.team_lead_id ? userById.get(t.team_lead_id) ?? null : null
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  const inThirty = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+  const upcomingByTeam: Record<string, LeaveWithUser[]> = {}
+
+  for (const teamId of myTeamIds) {
+    const ids = (membersByTeam[teamId] ?? []).map((u) => u.id)
+    upcomingByTeam[teamId] = ids.length > 0 ? await listLeavesInRange(today, inThirty, { userIds: ids }) : []
+  }
 
   return (
-    <>
-      <Topbar
-        title="My team"
-        subtitle="Today's status and leave balances at a glance"
-      />
-      <div className="px-5 lg:px-8 py-5 space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {visibleUsers.map((u) => {
-            const status = todayLeaves.find((x) => x.user_id === u.id);
-            const team = teams.find((t) => t.id === u.primary_team_id);
-            const leaveBal = balances.find((b) => b.user_id === u.id && b.type === "leave");
-            const wfhBal = balances.find((b) => b.user_id === u.id && b.type === "wfh");
-            return (
-              <Card key={u.id}>
-                <CardContent className="p-5 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={u.full_name} size="lg" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold truncate">{u.full_name}</div>
-                      <div className="text-[12px] text-muted-foreground truncate">
-                        {u.designation}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <Badge variant="muted">{team?.name}</Badge>
-                    {status ? (
-                      <span
-                        className={cn(
-                          "px-2 py-0.5 rounded-full text-[10.5px] font-semibold ring-1 ring-inset",
-                          LEAVE_TYPE_PILL[status.type]
-                        )}
-                      >
-                        {LEAVE_TYPE_LABELS[status.type]} today
-                      </span>
-                    ) : (
-                      <Badge variant="success">In office</Badge>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-border p-2.5">
-                      <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                        Leave
-                      </div>
-                      <div className="text-[15px] font-semibold tabular-nums">
-                        {(leaveBal ? leaveBal.allocated - leaveBal.used : 0).toFixed(1)}{" "}
-                        <span className="text-[11px] text-muted-foreground font-normal">
-                          / {leaveBal?.allocated ?? 0}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-border p-2.5">
-                      <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                        WFH
-                      </div>
-                      <div className="text-[15px] font-semibold tabular-nums">
-                        {(wfhBal ? wfhBal.allocated - wfhBal.used : 0).toFixed(1)}{" "}
-                        <span className="text-[11px] text-muted-foreground font-normal">
-                          / {wfhBal?.allocated ?? 0}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
-    </>
-  );
+    <TeamClient
+      currentUser={user}
+      myTeams={teamsRes.data ?? []}
+      initialTeamId={primaryTeamId}
+      membersByTeam={membersByTeam}
+      leadByTeam={leadByTeam}
+      upcomingByTeam={upcomingByTeam}
+    />
+  )
 }
