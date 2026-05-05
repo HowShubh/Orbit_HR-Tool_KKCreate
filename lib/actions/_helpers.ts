@@ -106,6 +106,11 @@ export async function writeAudit(
   })
 }
 
+/**
+ * Invalidate the whole app's RSC cache. Use after any mutation so that
+ * navigating to other pages (Dashboard, Calendar, My Leaves, etc.) shows
+ * fresh data — not a stale snapshot from before the change.
+ */
 export async function revalidateHR() {
-  revalidatePath('/hr')
+  revalidatePath('/', 'layout')
 }

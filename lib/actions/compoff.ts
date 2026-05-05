@@ -59,8 +59,7 @@ export async function decideCompoff(
     related_entity_id: grantId,
   })
 
-  revalidatePath('/')
-  revalidatePath('/leaves')
+  revalidatePath('/', 'layout')
   await revalidateHR()
   return after
 }
@@ -133,7 +132,6 @@ export async function requestCompoff(input: z.infer<typeof RequestCompoffSchema>
     related_entity_id: grant.id,
   })
 
-  revalidatePath('/leaves')
-  revalidatePath('/hr')
+  revalidatePath('/', 'layout')
   return grant
 }

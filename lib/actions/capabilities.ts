@@ -41,7 +41,7 @@ export async function grantCapability(input: z.infer<typeof GrantSchema>) {
   await writeAudit(actor.id, 'capability.grant', 'user_capability', data.id, {
     after: data,
   })
-  revalidatePath('/permissions')
+  revalidatePath('/', 'layout')
   return data
 }
 
@@ -64,7 +64,7 @@ export async function revokeCapability(id: string) {
   if (error) throw new ActionError(error.message)
 
   await writeAudit(actor.id, 'capability.revoke', 'user_capability', id, { before })
-  revalidatePath('/permissions')
+  revalidatePath('/', 'layout')
 }
 
 export async function applyBundleToUser(input: { user_id: string; bundle_key: string }) {
@@ -83,5 +83,5 @@ export async function applyBundleToUser(input: { user_id: string; bundle_key: st
   await writeAudit(actor.id, 'bundle.apply', 'user', input.user_id, {
     after: { bundle: input.bundle_key },
   })
-  revalidatePath('/permissions')
+  revalidatePath('/', 'layout')
 }

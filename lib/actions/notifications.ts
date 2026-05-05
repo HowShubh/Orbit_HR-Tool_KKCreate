@@ -37,7 +37,7 @@ export async function markNotificationRead(notificationId: string) {
     .eq('id', notificationId)
     .eq('user_id', user.id)
   if (error) throw new ActionError(error.message)
-  revalidatePath('/')
+  revalidatePath('/', 'layout')
 }
 
 export async function markAllNotificationsRead() {
@@ -49,5 +49,5 @@ export async function markAllNotificationsRead() {
     .eq('user_id', user.id)
     .is('read_at', null)
   if (error) throw new ActionError(error.message)
-  revalidatePath('/')
+  revalidatePath('/', 'layout')
 }

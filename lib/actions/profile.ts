@@ -27,7 +27,6 @@ export async function updateMyProfile(input: z.infer<typeof ProfileSchema>) {
   if (error || !data) throw new ActionError(error?.message ?? 'Update failed')
 
   await writeAudit(user.id, 'profile.update', 'user', user.id, { after: parsed })
-  revalidatePath('/settings')
-  revalidatePath('/profile')
+  revalidatePath('/', 'layout')
   return data
 }

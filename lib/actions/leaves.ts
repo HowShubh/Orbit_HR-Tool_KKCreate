@@ -167,9 +167,7 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
   await bumpUsed(adminClient, targetUserId, parsed.type, days)
   await writeAudit(user.id, 'leave.create', 'leave', leave.id, { after: leave })
 
-  revalidatePath('/')
-  revalidatePath('/leaves')
-  revalidatePath('/calendar')
+  revalidatePath('/', 'layout')
   return leave
 }
 
@@ -225,10 +223,7 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
     related_entity_id: leave.id,
   })
 
-  revalidatePath('/')
-  revalidatePath('/leaves')
-  revalidatePath('/calendar')
-  revalidatePath('/hr')
+  revalidatePath('/', 'layout')
   return leave
 }
 
@@ -286,8 +281,5 @@ export async function deleteLeave(leaveId: string) {
     })
   }
 
-  revalidatePath('/')
-  revalidatePath('/leaves')
-  revalidatePath('/calendar')
-  revalidatePath('/hr')
+  revalidatePath('/', 'layout')
 }
