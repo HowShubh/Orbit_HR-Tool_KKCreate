@@ -5,11 +5,13 @@ import {
   ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { compoffGrants as seedGrants, leaves as seedLeaves, leaveBalances as seedBalances, notifications as seedNotifs, users } from "./mock-data";
 import { CompoffGrant, Leave, LeaveBalance, Notification, Role, User } from "./types";
+import { markAllNotificationsRead } from "@/lib/actions/notifications";
 import type { Tables } from "@/lib/supabase/database.types";
 
 interface StoreShape {
@@ -41,12 +43,29 @@ const StoreContext = createContext<StoreShape | null>(null);
 
 const DEFAULT_USER_ID = "u-rahul";
 
+function mapRealNotification(notification: Tables<'notifications'>): Notification {
+  return {
+    id: notification.id,
+    user_id: notification.user_id,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body,
+    link_url: notification.link_url ?? undefined,
+    related_entity_type: notification.related_entity_type ?? undefined,
+    related_entity_id: notification.related_entity_id ?? undefined,
+    read_at: notification.read_at ?? undefined,
+    created_at: notification.created_at,
+  }
+}
+
 export function StoreProvider({
   children,
   realUser,
+  realNotifications,
 }: {
   children: ReactNode
   realUser?: Tables<'users'>
+  realNotifications?: Tables<'notifications'>[]
 }) {
   const [currentUser, setCurrentUserRaw] = useState<User>(() => {
     if (realUser) {
@@ -72,8 +91,16 @@ export function StoreProvider({
   const [leaves, setLeaves] = useState<Leave[]>(seedLeaves);
   const [balances, setBalances] = useState<LeaveBalance[]>(seedBalances);
   const [grants, setGrants] = useState<CompoffGrant[]>(seedGrants);
-  const [notifs, setNotifs] = useState<Notification[]>(seedNotifs);
+  const [notifs, setNotifs] = useState<Notification[]>(() =>
+    realNotifications ? realNotifications.map(mapRealNotification) : seedNotifs
+  );
   const [toasts, setToasts] = useState<StoreShape["toasts"]>([]);
+
+  useEffect(() => {
+    if (realNotifications) {
+      setNotifs(realNotifications.map(mapRealNotification))
+    }
+  }, [realNotifications])
 
   const pushToast: StoreShape["pushToast"] = useCallback((t) => {
     const id = Math.random().toString(36).slice(2);
@@ -172,6 +199,9 @@ export function StoreProvider({
   const markNotificationsRead = useCallback(() => {
     const now = new Date().toISOString();
     setNotifs((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: now })));
+    void markAllNotificationsRead().catch(() => {
+      setNotifs((prev) => prev.map((n) => (n.read_at === now ? { ...n, read_at: undefined } : n)));
+    });
   }, []);
 
   const value = useMemo<StoreShape>(

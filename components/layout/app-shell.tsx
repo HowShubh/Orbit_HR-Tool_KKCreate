@@ -12,6 +12,7 @@ interface AppShellProps {
   currentUser: Tables<'users'>
   ledTeamIds: string[]
   membersByTeam: Record<string, string[]>
+  notifications: Tables<'notifications'>[]
   children: ReactNode
 }
 
@@ -19,10 +20,11 @@ export function AppShell({
   currentUser,
   ledTeamIds,
   membersByTeam,
+  notifications,
   children,
 }: AppShellProps) {
   return (
-    <StoreProvider realUser={currentUser}>
+    <StoreProvider realUser={currentUser} realNotifications={notifications}>
       <CapabilityProvider
         userId={currentUser.id}
         role={currentUser.role}

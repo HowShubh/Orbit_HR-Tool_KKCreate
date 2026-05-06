@@ -59,7 +59,7 @@ export function LeaveFormDialog({ trigger }: Props) {
           half_day_position: showPosition ? halfDayPosition : null,
           reason: reason || null,
         })
-        pushToast({ title: 'Leave applied', variant: 'success' })
+        pushToast({ title: 'Leave request submitted', body: 'It will appear after HR approval.', variant: 'success' })
         setOpen(false)
         router.refresh()
       } catch (err) {
@@ -197,7 +197,7 @@ export function LeaveFormDialog({ trigger }: Props) {
               Cancel
             </Button>
             <Button type="submit" disabled={isPending}>
-              {isPending ? 'Submitting…' : 'Apply for leave'}
+              {isPending ? 'Submitting…' : 'Submit request'}
             </Button>
           </DialogFooter>
         </form>

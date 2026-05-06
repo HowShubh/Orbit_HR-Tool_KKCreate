@@ -166,8 +166,10 @@ export type Database = {
           half_day_position: 'first_half' | 'second_half' | null
           reason: string | null
           days_deducted: number
-          status: 'active' | 'deleted'
+          status: 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
           created_by: string
+          decided_by: string | null
+          decided_at: string | null
           deleted_by: string | null
           deleted_at: string | null
           created_at: string
@@ -184,8 +186,10 @@ export type Database = {
           half_day_position?: 'first_half' | 'second_half' | null
           reason?: string | null
           days_deducted: number
-          status?: 'active' | 'deleted'
+          status?: 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
           created_by: string
+          decided_by?: string | null
+          decided_at?: string | null
           deleted_by?: string | null
           deleted_at?: string | null
           created_at?: string

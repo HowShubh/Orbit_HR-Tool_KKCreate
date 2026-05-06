@@ -210,6 +210,8 @@ export function UsersTab({ users, teams }: Props) {
       <UsersCsvImport
         open={csvImportOpen}
         onOpenChange={setCsvImportOpen}
+        users={users}
+        teams={teams}
       />
     </>
   )

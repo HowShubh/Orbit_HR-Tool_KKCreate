@@ -1,6 +1,32 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { Tables } from '@/lib/supabase/database.types'
-import { listLeavesToday, listUpcomingLeaves, type LeaveWithUser } from './leaves'
+import {
+  listLeavesToday,
+  listPendingLeaves,
+  listUpcomingLeaves,
+  type LeaveWithUser,
+} from './leaves'
+
+export type DashboardTeamMember = Pick<
+  Tables<'users'>,
+  'id' | 'email' | 'full_name' | 'designation' | 'role' | 'manager_id' | 'joined_at' | 'status'
+>
+
+export type DashboardTeam = Pick<
+  Tables<'teams'>,
+  'id' | 'name' | 'wfo_pattern' | 'team_lead_id'
+> & {
+  team_lead_name: string | null
+  members: DashboardTeamMember[]
+}
+
+export type WorkAnniversary = {
+  id: string
+  full_name: string
+  designation: string | null
+  joined_at: string
+  years: number
+}
 
 export interface DashboardData {
   leavesToday: LeaveWithUser[]
@@ -9,8 +35,14 @@ export interface DashboardData {
   myBalances: Tables<'leave_balances'>[]
   myCompoffBalance: Tables<'leave_balances'>[]
   pendingApprovalsForMe: Tables<'compoff_grants'>[]
+  pendingLeaveApprovalsForMe: LeaveWithUser[]
   upcomingHolidays: Tables<'holidays'>[]
+  weekHolidays: Tables<'holidays'>[]
   unreadNotifications: number
+  primaryTeamId: string | null
+  employeeTeams: DashboardTeam[]
+  teamLeavesToday: LeaveWithUser[]
+  workAnniversariesToday: WorkAnniversary[]
 }
 
 const CURRENT_LEAVE_YEAR = 2026
@@ -22,6 +54,81 @@ export async function getDashboardData(
   membersByTeam: Record<string, string[]>
 ): Promise<DashboardData> {
   const adminClient = createAdminClient()
+  let primaryTeamId: string | null = null
+  let employeeTeams: DashboardTeam[] = []
+  let teamMemberIds: string[] = []
+  let workAnniversariesToday: WorkAnniversary[] = []
+
+  if (currentUserRole === 'employee') {
+    const { data: myMemberships } = await adminClient
+      .from('team_members')
+      .select('team_id, is_primary')
+      .eq('user_id', currentUserId)
+      .is('left_at', null)
+
+    const myTeamIds = Array.from(new Set((myMemberships ?? []).map((m) => m.team_id)))
+    primaryTeamId =
+      (myMemberships ?? []).find((m) => m.is_primary)?.team_id ?? myTeamIds[0] ?? null
+
+    const [myTeamsRes, myTeamMembersRes] = await Promise.all([
+      myTeamIds.length > 0
+        ? adminClient
+            .from('teams')
+            .select('id, name, wfo_pattern, team_lead_id')
+            .in('id', myTeamIds)
+        : Promise.resolve({ data: [] as Pick<Tables<'teams'>, 'id' | 'name' | 'wfo_pattern' | 'team_lead_id'>[] }),
+      myTeamIds.length > 0
+        ? adminClient
+            .from('team_members')
+            .select('team_id, user_id')
+            .in('team_id', myTeamIds)
+            .is('left_at', null)
+        : Promise.resolve({ data: [] as { team_id: string; user_id: string }[] }),
+    ])
+
+    const myTeams = myTeamsRes.data ?? []
+    const myTeamMemberships = myTeamMembersRes.data ?? []
+    teamMemberIds = Array.from(new Set(myTeamMemberships.map((m) => m.user_id)))
+    const teamLeadIds = myTeams.map((team) => team.team_lead_id).filter(Boolean) as string[]
+    const myTeamUserIds = Array.from(new Set([...teamMemberIds, ...teamLeadIds]))
+
+    const { data: teamUsers } = myTeamUserIds.length > 0
+      ? await adminClient
+          .from('users')
+          .select('id, email, full_name, designation, role, manager_id, joined_at, status')
+          .in('id', myTeamUserIds)
+          .eq('status', 'active')
+      : { data: [] as DashboardTeamMember[] }
+
+    const userById = new Map((teamUsers ?? []).map((user) => [user.id, user]))
+    employeeTeams = myTeams.map((team) => ({
+      ...team,
+      team_lead_name: team.team_lead_id
+        ? userById.get(team.team_lead_id)?.full_name ?? null
+        : null,
+      members: myTeamMemberships
+        .filter((membership) => membership.team_id === team.id)
+        .map((membership) => userById.get(membership.user_id))
+        .filter((user): user is DashboardTeamMember => Boolean(user))
+        .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+    }))
+
+    const today = new Date()
+    const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate()
+    ).padStart(2, '0')}`
+    const currentYear = today.getFullYear()
+    workAnniversariesToday = Array.from(userById.values())
+      .filter((user) => user.joined_at.slice(5, 10) === todayMonthDay)
+      .map((user) => ({
+        id: user.id,
+        full_name: user.full_name,
+        designation: user.designation,
+        joined_at: user.joined_at,
+        years: Math.max(0, currentYear - Number(user.joined_at.slice(0, 4))),
+      }))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  }
 
   // For team_leads → only people in teams they lead.
   // For HR/founders → everyone in the org (excluding themselves).
@@ -49,22 +156,37 @@ export async function getDashboardData(
   }
 
   // Run as much as we can in parallel
-  const todayDate = new Date().toISOString().split('T')[0]
-  const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+  const now = new Date()
+  const todayDate = now.toISOString().split('T')[0]
+  const futureDate = new Date(now.getTime() + 30 * 86400000).toISOString().split('T')[0]
+  const weekDay = now.getDay() === 0 ? 7 : now.getDay()
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - weekDay + 1)
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekStart.getDate() + 6)
+  const weekStartDate = weekStart.toISOString().split('T')[0]
+  const weekEndDate = weekEnd.toISOString().split('T')[0]
 
   const [
     leavesToday,
     upcomingMine,
     upcomingTeam,
+    pendingLeaveApprovals,
     balancesRes,
     compoffBalRes,
     approvalsRes,
     holidaysRes,
+    weekHolidaysRes,
     notifRes,
   ] = await Promise.all([
     listLeavesToday(),
     listUpcomingLeaves(60, [currentUserId]),
     teamUserIds.length > 0 ? listUpcomingLeaves(30, teamUserIds) : Promise.resolve([]),
+    isOrgWide
+      ? listPendingLeaves()
+      : teamUserIds.length > 0
+        ? listPendingLeaves(teamUserIds)
+        : Promise.resolve([]),
     adminClient
       .from('leave_balances')
       .select('*')
@@ -88,6 +210,12 @@ export async function getDashboardData(
       .lte('date', futureDate)
       .order('date', { ascending: true }),
     adminClient
+      .from('holidays')
+      .select('*')
+      .gte('date', weekStartDate)
+      .lte('date', weekEndDate)
+      .order('date', { ascending: true }),
+    adminClient
       .from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', currentUserId)
@@ -101,7 +229,13 @@ export async function getDashboardData(
     myBalances: balancesRes.data ?? [],
     myCompoffBalance: compoffBalRes.data ?? [],
     pendingApprovalsForMe: approvalsRes.data ?? [],
+    pendingLeaveApprovalsForMe: pendingLeaveApprovals,
     upcomingHolidays: holidaysRes.data ?? [],
+    weekHolidays: weekHolidaysRes.data ?? [],
     unreadNotifications: notifRes.count ?? 0,
+    primaryTeamId,
+    employeeTeams,
+    teamLeavesToday: leavesToday.filter((leave) => teamMemberIds.includes(leave.user_id)),
+    workAnniversariesToday,
   }
 }

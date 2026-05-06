@@ -17,7 +17,7 @@ export default async function HRConsolePage() {
       listBalancesForYear(CURRENT_LEAVE_YEAR),
       listCompoffBalances(),
       listCompoffGrants(),
-      listLeavesInRange('2025-06-01', '2027-06-30'),
+      listLeavesInRange('2025-06-01', '2027-06-30', { statuses: 'all' }),
     ])
 
   return (

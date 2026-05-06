@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
 import { LeaveFormDialog } from '@/components/leave/leave-form-dialog'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
-import { deleteLeave } from '@/lib/actions/leaves'
+import { deleteLeave, requestLeaveDeletion } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { AppUser } from '@/lib/auth/get-current-user'
@@ -32,6 +32,22 @@ const LEAVE_TYPE_PILL: Record<string, string> = {
   leave: 'bg-orange-50 text-orange-700 ring-orange-100',
   compoff_wfh: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
   compoff_leave: 'bg-amber-50 text-amber-700 ring-amber-100',
+}
+
+const LEAVE_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  active: 'Approved',
+  delete_requested: 'Delete Requested',
+  rejected: 'Rejected',
+  deleted: 'Deleted',
+}
+
+const LEAVE_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'muted'> = {
+  pending: 'warning',
+  active: 'success',
+  delete_requested: 'warning',
+  rejected: 'danger',
+  deleted: 'muted',
 }
 
 function TypePill({ type }: { type: string }) {
@@ -75,8 +91,6 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
   const [search, setSearch] = useState('')
   const [isPending, startTransition] = useTransition()
 
-  const today = new Date().toISOString().split('T')[0]
-
   const allBalances = [...balances, ...compoffBalances]
   const balanceSummary = (['leave', 'wfh', 'compoff_leave', 'compoff_wfh'] as const).map((type) => {
     const bal = allBalances.find((b) => b.type === type)
@@ -85,9 +99,6 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
     const remaining = Math.max(0, allocated - used)
     return { type, label: LEAVE_TYPE_LABELS[type], allocated, used, remaining }
   })
-
-  const activeLeaves = leaves.filter((l) => l.status === 'active')
-  const deletedLeaves = leaves.filter((l) => l.status === 'deleted')
 
   const filteredLeaves = useMemo(() => {
     if (!search.trim()) return leaves
@@ -113,15 +124,24 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
     )
   }, [compoff, search])
 
-  function handleDelete(leaveId: string) {
-    if (!window.confirm('Are you sure you want to delete this leave?')) return
+  function handleDelete(leave: Tables<'leaves'>) {
+    const isApproved = leave.status === 'active'
+    const message = isApproved
+      ? 'Request deletion for this approved leave? It will stay approved until HR or your manager approves the deletion.'
+      : 'Delete this pending leave request?'
+    if (!window.confirm(message)) return
     startTransition(async () => {
       try {
-        await deleteLeave(leaveId)
-        pushToast({ title: 'Leave deleted', variant: 'success' })
+        if (isApproved) {
+          await requestLeaveDeletion(leave.id)
+          pushToast({ title: 'Deletion request sent', variant: 'success' })
+        } else {
+          await deleteLeave(leave.id)
+          pushToast({ title: 'Leave request deleted', variant: 'success' })
+        }
         router.refresh()
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to delete leave'
+        const msg = err instanceof Error ? err.message : 'Failed to update leave'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
       }
     })
@@ -133,7 +153,7 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
       rangeLabel(l.start_date, l.end_date),
       LEAVE_TYPE_LABELS[l.type] ?? l.type,
       l.days_deducted.toString(),
-      l.status,
+      LEAVE_STATUS_LABEL[l.status] ?? l.status,
       l.reason ?? '',
     ])
     const csv = [headers, ...body]
@@ -175,7 +195,7 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
           <Tabs value={tab} onValueChange={(v) => setTab(v as LeavesTab)}>
             <TabsList>
               <TabsTrigger value="leaves">
-                Leaves {activeLeaves.length > 0 && `(${activeLeaves.length})`}
+                Leaves {leaves.length > 0 && `(${leaves.length})`}
               </TabsTrigger>
               <TabsTrigger value="compoff">
                 Compoff Requests {compoff.length > 0 && `(${compoff.length})`}
@@ -241,8 +261,9 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
                     ) : (
                       filteredLeaves.map((leave) => {
                         const isDeleted = leave.status === 'deleted'
-                        const isFuture = leave.start_date > today
-                        const canDelete = !isDeleted && isFuture
+                        const canDelete =
+                          leave.status === 'active' ||
+                          leave.status === 'pending'
 
                         return (
                           <tr
@@ -268,8 +289,8 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
                               {formatDays(leave.days_deducted)}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3">
-                              <Badge variant={isDeleted ? 'danger' : 'success'}>
-                                {isDeleted ? 'Deleted' : 'Active'}
+                              <Badge variant={LEAVE_STATUS_VARIANT[leave.status] ?? 'muted'}>
+                                {LEAVE_STATUS_LABEL[leave.status] ?? leave.status}
                               </Badge>
                             </td>
                             <td className="min-w-[180px] px-4 py-3 text-muted-foreground">
@@ -281,10 +302,10 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
                                   variant="outline"
                                   size="sm"
                                   disabled={isPending}
-                                  onClick={() => handleDelete(leave.id)}
+                                  onClick={() => handleDelete(leave)}
                                   className="text-rose-600 border-rose-200 hover:bg-rose-50"
                                 >
-                                  Delete
+                                  {leave.status === 'active' ? 'Request Delete' : 'Delete'}
                                 </Button>
                               )}
                             </td>

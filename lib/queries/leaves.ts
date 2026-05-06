@@ -26,16 +26,26 @@ export async function listLeavesForUser(
 export async function listLeavesInRange(
   startDate: string,
   endDate: string,
-  options?: { userIds?: string[] }
+  options?: {
+    userIds?: string[]
+    statuses?: Array<Tables<'leaves'>['status']> | 'all'
+  }
 ): Promise<LeaveWithUser[]> {
   const adminClient = createAdminClient()
   let query = adminClient
     .from('leaves')
     .select('*')
-    .eq('status', 'active')
     .lte('start_date', endDate)
     .gte('end_date', startDate)
     .order('start_date', { ascending: true })
+
+  if (options?.statuses === 'all') {
+    // No status filter.
+  } else if (options?.statuses && options.statuses.length > 0) {
+    query = query.in('status', options.statuses)
+  } else {
+    query = query.in('status', ['active', 'delete_requested'])
+  }
 
   if (options?.userIds && options.userIds.length > 0) {
     query = query.in('user_id', options.userIds)
@@ -73,4 +83,32 @@ export async function listUpcomingLeaves(
   const todayStr = today.toISOString().split('T')[0]
   const futureStr = future.toISOString().split('T')[0]
   return listLeavesInRange(todayStr, futureStr, { userIds })
+}
+
+export async function listPendingLeaves(userIds?: string[]): Promise<LeaveWithUser[]> {
+  const adminClient = createAdminClient()
+  let query = adminClient
+    .from('leaves')
+    .select('*')
+    .in('status', ['pending', 'delete_requested'])
+    .order('updated_at', { ascending: false })
+
+  if (userIds && userIds.length > 0) {
+    query = query.in('user_id', userIds)
+  }
+
+  const { data: leaves } = await query
+  if (!leaves || leaves.length === 0) return []
+
+  const leaveUserIds = Array.from(new Set(leaves.map((leave) => leave.user_id)))
+  const { data: users } = await adminClient
+    .from('users')
+    .select('id, full_name')
+    .in('id', leaveUserIds)
+  const nameMap = new Map((users ?? []).map((user) => [user.id, user.full_name]))
+
+  return leaves.map((leave) => ({
+    ...leave,
+    user_full_name: nameMap.get(leave.user_id) ?? 'Unknown',
+  }))
 }

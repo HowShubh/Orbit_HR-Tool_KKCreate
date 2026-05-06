@@ -9,7 +9,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
 import { BackdateLeaveDialog } from './backdate-leave-dialog'
-import { deleteLeave } from '@/lib/actions/leaves'
+import {
+  approveLeave,
+  approveLeaveDeletion,
+  deleteLeave,
+  rejectLeave,
+  rejectLeaveDeletion,
+} from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { LeaveWithUser } from '@/lib/queries/leaves'
@@ -32,6 +38,22 @@ const LEAVE_TYPE_PILL: Record<string, string> = {
   leave: 'bg-orange-50 text-orange-700 ring-orange-100',
   compoff_wfh: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
   compoff_leave: 'bg-amber-50 text-amber-700 ring-amber-100',
+}
+
+const LEAVE_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  active: 'Approved',
+  delete_requested: 'Delete Requested',
+  rejected: 'Rejected',
+  deleted: 'Deleted',
+}
+
+const LEAVE_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'muted'> = {
+  pending: 'warning',
+  active: 'success',
+  delete_requested: 'warning',
+  rejected: 'danger',
+  deleted: 'muted',
 }
 
 function TypePill({ type }: { type: string }) {
@@ -84,7 +106,34 @@ export function AllLeavesTab({ leaves, users }: Props) {
     })
   }
 
+  function handleDecision(leave: LeaveWithUser, decision: 'approve' | 'reject') {
+    startTransition(async () => {
+      try {
+        const isDeletionRequest = leave.status === 'delete_requested'
+        if (decision === 'approve' && isDeletionRequest) {
+          await approveLeaveDeletion(leave.id)
+          pushToast({ title: 'Leave deletion approved', variant: 'success' })
+        } else if (decision === 'reject' && isDeletionRequest) {
+          await rejectLeaveDeletion(leave.id)
+          pushToast({ title: 'Leave deletion rejected', variant: 'info' })
+        } else if (decision === 'approve') {
+          await approveLeave(leave.id)
+          pushToast({ title: 'Leave approved', variant: 'success' })
+        } else {
+          await rejectLeave(leave.id)
+          pushToast({ title: 'Leave rejected', variant: 'info' })
+        }
+        router.refresh()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to update leave'
+        pushToast({ title: 'Error', body: msg, variant: 'error' })
+      }
+    })
+  }
+
   const activeCount = leaves.filter((l) => l.status === 'active').length
+  const pendingCount = leaves.filter((l) => l.status === 'pending').length
+  const deleteRequestCount = leaves.filter((l) => l.status === 'delete_requested').length
 
   return (
     <div className="space-y-4">
@@ -100,7 +149,7 @@ export function AllLeavesTab({ leaves, users }: Props) {
             />
           </div>
           <span className="text-sm text-muted-foreground">
-            {activeCount} active leave{activeCount !== 1 ? 's' : ''}
+            {pendingCount} pending · {deleteRequestCount} delete requested · {activeCount} approved
           </span>
         </div>
 
@@ -141,6 +190,8 @@ export function AllLeavesTab({ leaves, users }: Props) {
                 ) : (
                   filteredLeaves.map((leave) => {
                     const isDeleted = leave.status === 'deleted'
+                    const isPendingLeave = leave.status === 'pending'
+                    const isDeleteRequest = leave.status === 'delete_requested'
                     const createdByUser = users.find((u) => u.id === leave.created_by)
                     const dateRange =
                       leave.start_date === leave.end_date
@@ -175,8 +226,8 @@ export function AllLeavesTab({ leaves, users }: Props) {
                           {formatDays(leave.days_deducted)}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
-                          <Badge variant={isDeleted ? 'danger' : 'success'}>
-                            {isDeleted ? 'Deleted' : 'Active'}
+                          <Badge variant={LEAVE_STATUS_VARIANT[leave.status] ?? 'muted'}>
+                            {LEAVE_STATUS_LABEL[leave.status] ?? leave.status}
                           </Badge>
                         </td>
                         <td className="min-w-[160px] max-w-[240px] px-4 py-3 text-muted-foreground truncate">
@@ -189,8 +240,27 @@ export function AllLeavesTab({ leaves, users }: Props) {
                             ? 'Self'
                             : 'HR'}
                         </td>
-                        <td className="px-4 py-3">
-                          {!isDeleted && (
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {isPendingLeave || isDeleteRequest ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isPending}
+                                onClick={() => handleDecision(leave, 'reject')}
+                                className="text-rose-600 border-rose-200 hover:bg-rose-50"
+                              >
+                                Reject
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={isPending}
+                                onClick={() => handleDecision(leave, 'approve')}
+                              >
+                                {isDeleteRequest ? 'Approve Delete' : 'Approve'}
+                              </Button>
+                            </div>
+                          ) : !isDeleted && leave.status === 'active' ? (
                             <Button
                               variant="outline"
                               size="sm"
@@ -199,6 +269,17 @@ export function AllLeavesTab({ leaves, users }: Props) {
                               className="text-rose-600 border-rose-200 hover:bg-rose-50"
                             >
                               Delete
+                            </Button>
+                          ) : null}
+                          {isPendingLeave && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isPending}
+                              onClick={() => handleDelete(leave.id)}
+                              className="mt-1 text-muted-foreground"
+                            >
+                              Delete request
                             </Button>
                           )}
                         </td>

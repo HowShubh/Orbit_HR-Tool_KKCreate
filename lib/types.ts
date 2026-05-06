@@ -2,7 +2,7 @@ export type Role = "employee" | "team_lead" | "hr" | "founder";
 
 export type LeaveType = "wfh" | "leave" | "compoff_wfh" | "compoff_leave";
 
-export type LeaveStatus = "active" | "deleted";
+export type LeaveStatus = "active" | "pending" | "delete_requested" | "rejected" | "deleted";
 
 export type DayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
 
@@ -78,6 +78,7 @@ export interface Notification {
   title: string;
   body: string;
   link_url?: string;
+  related_entity_type?: string;
   related_entity_id?: string;
   read_at?: string;
   created_at: string;

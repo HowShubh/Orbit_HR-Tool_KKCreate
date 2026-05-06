@@ -4,6 +4,7 @@ import {
   getCurrentUser,
   getCurrentUserTeamContext,
 } from '@/lib/auth/get-current-user'
+import { listMyNotifications } from '@/lib/queries/notifications'
 import { AppShell } from '@/components/layout/app-shell'
 
 export default async function AppLayout({
@@ -34,13 +35,17 @@ export default async function AppLayout({
     redirect('/login?error=account_exited')
   }
 
-  const { ledTeamIds, membersByTeam } = await getCurrentUserTeamContext(user.id)
+  const [{ ledTeamIds, membersByTeam }, notifications] = await Promise.all([
+    getCurrentUserTeamContext(user.id),
+    listMyNotifications(user.id, 20),
+  ])
 
   return (
     <AppShell
       currentUser={user}
       ledTeamIds={ledTeamIds}
       membersByTeam={membersByTeam}
+      notifications={notifications}
     >
       {children}
     </AppShell>
