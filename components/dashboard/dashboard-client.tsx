@@ -1,7 +1,6 @@
 'use client'
 
-import { useTransition, type ComponentType } from 'react'
-import { useRouter } from 'next/navigation'
+import { type ComponentType } from 'react'
 import { addDays, differenceInDays, format, isWeekend, parseISO, startOfWeek } from 'date-fns'
 import {
   BriefcaseBusiness,
@@ -28,13 +27,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LeaveFormDialog } from '@/components/leave/leave-form-dialog'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
-import {
-  approveLeave,
-  approveLeaveDeletion,
-  rejectLeave,
-  rejectLeaveDeletion,
-} from '@/lib/actions/leaves'
-import { useStore } from '@/lib/store'
+import { ApprovalQueueClient } from '@/components/approvals/approval-queue-client'
 import { cn } from '@/lib/utils'
 import type { AppUser } from '@/lib/auth/get-current-user'
 import type { DashboardData } from '@/lib/queries/dashboard'
@@ -201,8 +194,16 @@ export function DashboardClient({ currentUser, data }: Props) {
           )}
 
           {/* Pending approvals */}
-          {data.pendingLeaveApprovalsForMe.length > 0 && (
-            <PendingLeaveApprovalsCard leaves={data.pendingLeaveApprovalsForMe} />
+          {data.pendingApprovalRequests.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50/50 lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-amber-900">Leave Approvals</CardTitle>
+                <Badge variant="warning">{data.pendingApprovalRequests.length}</Badge>
+              </CardHeader>
+              <CardContent>
+                <ApprovalQueueClient initialRequests={data.pendingApprovalRequests} />
+              </CardContent>
+            </Card>
           )}
           {data.pendingApprovalsForMe.length > 0 && (
             <PendingApprovalsCard count={data.pendingApprovalsForMe.length} />
@@ -923,131 +924,6 @@ function HolidaysCard({ holidays }: { holidays: DashboardData['upcomingHolidays'
             })}
           </div>
         )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function PendingLeaveApprovalsCard({
-  leaves,
-}: {
-  leaves: DashboardData['pendingLeaveApprovalsForMe']
-}) {
-  const router = useRouter()
-  const { pushToast } = useStore()
-  const [isPending, startTransition] = useTransition()
-
-  function decide(
-    leave: DashboardData['pendingLeaveApprovalsForMe'][number],
-    decision: 'approve' | 'reject'
-  ) {
-    startTransition(async () => {
-      try {
-        const isDeletionRequest = leave.status === 'delete_requested'
-        if (decision === 'approve' && isDeletionRequest) {
-          await approveLeaveDeletion(leave.id)
-          pushToast({ title: 'Leave deletion approved', variant: 'success' })
-        } else if (decision === 'reject' && isDeletionRequest) {
-          await rejectLeaveDeletion(leave.id)
-          pushToast({ title: 'Leave deletion rejected', variant: 'info' })
-        } else if (decision === 'approve') {
-          await approveLeave(leave.id)
-          pushToast({ title: 'Leave approved', variant: 'success' })
-        } else {
-          await rejectLeave(leave.id)
-          pushToast({ title: 'Leave rejected', variant: 'info' })
-        }
-        router.refresh()
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to update leave'
-        pushToast({ title: 'Error', body: msg, variant: 'error' })
-      }
-    })
-  }
-
-  const groups = Array.from(
-    leaves.reduce((map, leave) => {
-      const key = leave.request_id ?? leave.id
-      const group = map.get(key)
-      if (group) {
-        group.leaves.push(leave)
-      } else {
-        map.set(key, { id: key, leaves: [leave] })
-      }
-      return map
-    }, new Map<string, { id: string; leaves: DashboardData['pendingLeaveApprovalsForMe'] }>())
-  ).map(([, group]) => ({
-    ...group,
-    leaves: group.leaves.sort((a, b) => a.start_date.localeCompare(b.start_date)),
-  }))
-
-  return (
-    <Card className="border-amber-200 bg-amber-50/50 lg:col-span-2">
-      <CardHeader>
-        <CardTitle className="text-amber-900">Leave Approvals</CardTitle>
-        <Badge variant="warning">{groups.length}</Badge>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {groups.slice(0, 4).map((group) => {
-            const leave = group.leaves[0]
-            const isDeletionRequest = leave.status === 'delete_requested'
-            return (
-              <div
-                key={group.id}
-                className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-white/70 p-3"
-              >
-                <Avatar name={leave.user_full_name} size="sm" />
-                <div className="min-w-[180px] flex-1">
-                  <div className="text-[13.5px] font-semibold text-amber-950">
-                    {leave.user_full_name}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-amber-800">
-                    {isDeletionRequest ? 'Delete approved leave' : 'Approve leave'} ·{' '}
-                    {group.leaves.length} day{group.leaves.length !== 1 ? 's' : ''}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {group.leaves.slice(0, 5).map((item) => (
-                      <span
-                        key={item.id}
-                        className={cn(
-                          'rounded px-1.5 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset',
-                          LEAVE_TYPE_PILL[item.type] ?? 'bg-muted text-muted-foreground ring-border'
-                        )}
-                      >
-                        {format(parseISO(item.start_date), 'MMM d')}: {LEAVE_TYPE_LABELS[item.type] ?? item.type}
-                      </span>
-                    ))}
-                    {group.leaves.length > 5 && (
-                      <span className="text-[10.5px] text-amber-800">
-                        +{group.leaves.length - 5} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="ml-auto flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isPending}
-                    onClick={() => decide(leave, 'reject')}
-                    className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                  >
-                    Reject
-                  </Button>
-                  <Button size="sm" disabled={isPending} onClick={() => decide(leave, 'approve')}>
-                    {isDeletionRequest ? 'Approve Delete' : 'Approve'}
-                  </Button>
-                </div>
-              </div>
-            )
-          })}
-          {groups.length > 4 && (
-            <p className="text-[12px] text-amber-800">
-              +{groups.length - 4} more request{groups.length - 4 !== 1 ? 's' : ''} pending.
-            </p>
-          )}
-        </div>
       </CardContent>
     </Card>
   )

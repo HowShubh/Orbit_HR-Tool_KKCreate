@@ -2,10 +2,11 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import type { Tables } from '@/lib/supabase/database.types'
 import {
   listLeavesToday,
-  listPendingLeaves,
   listUpcomingLeaves,
   type LeaveWithUser,
 } from './leaves'
+import { listPendingApprovalsForReviewer } from './leave-requests'
+import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 
 export type DashboardTeamMember = Pick<
   Tables<'users'>,
@@ -35,7 +36,7 @@ export interface DashboardData {
   myBalances: Tables<'leave_balances'>[]
   myCompoffBalance: Tables<'leave_balances'>[]
   pendingApprovalsForMe: Tables<'compoff_grants'>[]
-  pendingLeaveApprovalsForMe: LeaveWithUser[]
+  pendingApprovalRequests: LeaveRequestWithDays[]
   upcomingHolidays: Tables<'holidays'>[]
   weekHolidays: Tables<'holidays'>[]
   unreadNotifications: number
@@ -171,7 +172,6 @@ export async function getDashboardData(
     leavesToday,
     upcomingMine,
     upcomingTeam,
-    pendingLeaveApprovals,
     balancesRes,
     compoffBalRes,
     approvalsRes,
@@ -182,11 +182,6 @@ export async function getDashboardData(
     listLeavesToday(),
     listUpcomingLeaves(60, [currentUserId]),
     teamUserIds.length > 0 ? listUpcomingLeaves(30, teamUserIds) : Promise.resolve([]),
-    isOrgWide
-      ? listPendingLeaves()
-      : teamUserIds.length > 0
-        ? listPendingLeaves(teamUserIds)
-        : Promise.resolve([]),
     adminClient
       .from('leave_balances')
       .select('*')
@@ -222,6 +217,9 @@ export async function getDashboardData(
       .is('read_at', null),
   ])
 
+  const approvalScope: 'hr' | 'team' = isOrgWide ? 'hr' : 'team'
+  const pendingApprovalRequests = await listPendingApprovalsForReviewer(currentUserId, approvalScope)
+
   return {
     leavesToday,
     upcomingMine,
@@ -229,7 +227,7 @@ export async function getDashboardData(
     myBalances: balancesRes.data ?? [],
     myCompoffBalance: compoffBalRes.data ?? [],
     pendingApprovalsForMe: approvalsRes.data ?? [],
-    pendingLeaveApprovalsForMe: pendingLeaveApprovals,
+    pendingApprovalRequests,
     upcomingHolidays: holidaysRes.data ?? [],
     weekHolidays: weekHolidaysRes.data ?? [],
     unreadNotifications: notifRes.count ?? 0,
