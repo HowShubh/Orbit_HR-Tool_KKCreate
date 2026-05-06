@@ -12,7 +12,7 @@ import { AnnualResetTab } from './annual-reset-tab'
 import { AllLeavesTab } from './all-leaves-tab'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { TeamWithMembers } from '@/lib/queries/teams'
-import type { LeaveWithUser } from '@/lib/queries/leaves'
+import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 import type { Tables } from '@/lib/supabase/database.types'
 
 interface Props {
@@ -23,7 +23,8 @@ interface Props {
   compoffBalances: Tables<'leave_balances'>[]
   grants: Tables<'compoff_grants'>[]
   leaveYear: number
-  leaves: LeaveWithUser[]
+  pendingRequests: LeaveRequestWithDays[]
+  history: LeaveRequestWithDays[]
 }
 
 export function HRConsoleClient(props: Props) {
@@ -59,7 +60,11 @@ export function HRConsoleClient(props: Props) {
           </TabsList>
 
           <TabsContent value="leaves">
-            <AllLeavesTab leaves={props.leaves} users={props.users} />
+            <AllLeavesTab
+              pendingRequests={props.pendingRequests}
+              history={props.history}
+              users={props.users}
+            />
           </TabsContent>
           <TabsContent value="users">
             <UsersTab users={props.users} teams={props.teams} />
