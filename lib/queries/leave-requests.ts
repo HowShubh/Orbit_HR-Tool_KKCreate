@@ -186,3 +186,76 @@ export async function listPendingApprovalsForReviewer(
   result.sort((a, b) => a.created_at.localeCompare(b.created_at))
   return result
 }
+
+export async function listRosterContext(
+  teamId: string,
+  startDate: string,
+  endDate: string
+): Promise<RosterCell[]> {
+  const adminClient = createAdminClient()
+
+  const { data: members } = await adminClient
+    .from('team_members')
+    .select('user_id, users:user_id(id, full_name)')
+    .eq('team_id', teamId)
+    .is('left_at', null)
+  const memberIds = (members ?? []).map((m) => m.user_id)
+  const memberNameById = new Map(
+    (members ?? []).map((m) => {
+      const u = (m as unknown as { users: { id: string; full_name: string } | null }).users
+      return [m.user_id, u?.full_name ?? 'Unknown']
+    })
+  )
+  if (memberIds.length === 0) return []
+
+  const { data: leaves } = await adminClient
+    .from('leaves')
+    .select('user_id, start_date, end_date, type, half_day_position')
+    .in('user_id', memberIds)
+    .in('status', ACTIVE_STATUSES as unknown as ('active' | 'pending' | 'delete_requested')[])
+    .lte('start_date', endDate)
+    .gte('end_date', startDate)
+
+  const { data: holidays } = await adminClient
+    .from('holidays')
+    .select('date, name')
+    .gte('date', startDate)
+    .lte('date', endDate)
+
+  const cells: RosterCell[] = []
+
+  for (const l of leaves ?? []) {
+    // expand multi-day legacy leaves into per-day cells
+    let cursor = l.start_date
+    while (cursor <= l.end_date) {
+      cells.push({
+        user_id: l.user_id,
+        user_full_name: memberNameById.get(l.user_id) ?? 'Unknown',
+        date: cursor,
+        type: l.type as RosterCell['type'],
+        half_day_position: (l.half_day_position ?? null) as RosterCell['half_day_position'],
+      })
+      cursor = addOneDay(cursor)
+    }
+  }
+
+  // Holidays appear as one cell per member per holiday date — caller renders as a column shade
+  for (const h of holidays ?? []) {
+    cells.push({
+      user_id: '__holiday__',
+      user_full_name: h.name,
+      date: h.date,
+      type: 'holiday',
+      half_day_position: null,
+    })
+  }
+
+  return cells
+}
+
+function addOneDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  return dt.toISOString().slice(0, 10)
+}
