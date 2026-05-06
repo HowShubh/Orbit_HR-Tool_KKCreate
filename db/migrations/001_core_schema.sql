@@ -48,10 +48,28 @@ CREATE TABLE public.team_members (
 );
 
 -- ============================================================
+-- LEAVE REQUESTS
+-- ============================================================
+CREATE TABLE public.leave_requests (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES public.users(id),
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'delete_requested', 'rejected', 'deleted')),
+  reason       TEXT,
+  created_by   UUID NOT NULL REFERENCES public.users(id),
+  decided_by   UUID REFERENCES public.users(id),
+  decided_at   TIMESTAMPTZ,
+  deleted_by   UUID REFERENCES public.users(id),
+  deleted_at   TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
 -- LEAVES
 -- ============================================================
 CREATE TABLE public.leaves (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id        UUID REFERENCES public.leave_requests(id) ON DELETE SET NULL,
   user_id           UUID NOT NULL REFERENCES public.users(id),
   type              TEXT NOT NULL CHECK (type IN ('wfh', 'leave', 'compoff_wfh', 'compoff_leave')),
   start_date        DATE NOT NULL,

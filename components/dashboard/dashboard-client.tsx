@@ -965,19 +965,36 @@ function PendingLeaveApprovalsCard({
     })
   }
 
+  const groups = Array.from(
+    leaves.reduce((map, leave) => {
+      const key = leave.request_id ?? leave.id
+      const group = map.get(key)
+      if (group) {
+        group.leaves.push(leave)
+      } else {
+        map.set(key, { id: key, leaves: [leave] })
+      }
+      return map
+    }, new Map<string, { id: string; leaves: DashboardData['pendingLeaveApprovalsForMe'] }>())
+  ).map(([, group]) => ({
+    ...group,
+    leaves: group.leaves.sort((a, b) => a.start_date.localeCompare(b.start_date)),
+  }))
+
   return (
     <Card className="border-amber-200 bg-amber-50/50 lg:col-span-2">
       <CardHeader>
         <CardTitle className="text-amber-900">Leave Approvals</CardTitle>
-        <Badge variant="warning">{leaves.length}</Badge>
+        <Badge variant="warning">{groups.length}</Badge>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {leaves.slice(0, 4).map((leave) => {
+          {groups.slice(0, 4).map((group) => {
+            const leave = group.leaves[0]
             const isDeletionRequest = leave.status === 'delete_requested'
             return (
               <div
-                key={leave.id}
+                key={group.id}
                 className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-white/70 p-3"
               >
                 <Avatar name={leave.user_full_name} size="sm" />
@@ -987,12 +1004,27 @@ function PendingLeaveApprovalsCard({
                   </div>
                   <div className="mt-0.5 text-[12px] text-amber-800">
                     {isDeletionRequest ? 'Delete approved leave' : 'Approve leave'} ·{' '}
-                    {formatDateRange(leave.start_date, leave.end_date)} ·{' '}
-                    {formatDays(Number(leave.days_deducted))} day
-                    {Number(leave.days_deducted) !== 1 ? 's' : ''}
+                    {group.leaves.length} day{group.leaves.length !== 1 ? 's' : ''}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {group.leaves.slice(0, 5).map((item) => (
+                      <span
+                        key={item.id}
+                        className={cn(
+                          'rounded px-1.5 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset',
+                          LEAVE_TYPE_PILL[item.type] ?? 'bg-muted text-muted-foreground ring-border'
+                        )}
+                      >
+                        {format(parseISO(item.start_date), 'MMM d')}: {LEAVE_TYPE_LABELS[item.type] ?? item.type}
+                      </span>
+                    ))}
+                    {group.leaves.length > 5 && (
+                      <span className="text-[10.5px] text-amber-800">
+                        +{group.leaves.length - 5} more
+                      </span>
+                    )}
                   </div>
                 </div>
-                <TypePill type={leave.type} />
                 <div className="ml-auto flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -1010,9 +1042,9 @@ function PendingLeaveApprovalsCard({
               </div>
             )
           })}
-          {leaves.length > 4 && (
+          {groups.length > 4 && (
             <p className="text-[12px] text-amber-800">
-              +{leaves.length - 4} more request{leaves.length - 4 !== 1 ? 's' : ''} pending.
+              +{groups.length - 4} more request{groups.length - 4 !== 1 ? 's' : ''} pending.
             </p>
           )}
         </div>

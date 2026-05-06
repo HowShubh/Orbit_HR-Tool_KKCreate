@@ -154,9 +154,40 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['leave_year_resets']['Insert']>
         Relationships: []
       }
+      leave_requests: {
+        Row: {
+          id: string
+          user_id: string
+          status: 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
+          reason: string | null
+          created_by: string
+          decided_by: string | null
+          decided_at: string | null
+          deleted_by: string | null
+          deleted_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          status?: 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
+          reason?: string | null
+          created_by: string
+          decided_by?: string | null
+          decided_at?: string | null
+          deleted_by?: string | null
+          deleted_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['leave_requests']['Insert']>
+        Relationships: []
+      }
       leaves: {
         Row: {
           id: string
+          request_id: string | null
           user_id: string
           type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
           start_date: string
@@ -177,6 +208,7 @@ export type Database = {
         }
         Insert: {
           id?: string
+          request_id?: string | null
           user_id: string
           type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
           start_date: string
