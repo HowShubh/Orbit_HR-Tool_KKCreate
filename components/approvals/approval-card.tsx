@@ -9,7 +9,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
-import { approveLeave, rejectLeave } from '@/lib/actions/leaves'
+import {
+  approveLeave,
+  approveLeaveDeletion,
+  rejectLeave,
+  rejectLeaveDeletion,
+} from '@/lib/actions/leaves'
 import { ConflictPill } from './conflict-pill'
 import { ApprovalCardExpanded } from './approval-card-expanded'
 import type { LeaveRequestWithDays } from './leave-request-types'
@@ -48,7 +53,13 @@ export function ApprovalCard({
   function decide(decision: 'approve' | 'reject') {
     startTransition(async () => {
       try {
-        if (decision === 'approve') {
+        if (decision === 'approve' && isDeleteRequest) {
+          await approveLeaveDeletion(request.decision_leave_id)
+          pushToast({ title: 'Leave deletion approved', variant: 'success' })
+        } else if (decision === 'reject' && isDeleteRequest) {
+          await rejectLeaveDeletion(request.decision_leave_id)
+          pushToast({ title: 'Leave deletion rejected', variant: 'info' })
+        } else if (decision === 'approve') {
           await approveLeave(request.decision_leave_id)
           pushToast({ title: 'Request approved', variant: 'success' })
         } else {

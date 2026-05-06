@@ -15,6 +15,7 @@ export function ApprovalCardExpanded({ request }: { request: LeaveRequestWithDay
     | { kind: 'error'; message: string }
     | { kind: 'no-team' }
   >(() => (request.user_team_id ? { kind: 'loading' } : { kind: 'no-team' }))
+  const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -37,7 +38,7 @@ export function ApprovalCardExpanded({ request }: { request: LeaveRequestWithDay
     return () => {
       cancelled = true
     }
-  }, [request.user_team_id, request.summary.start_date, request.summary.end_date])
+  }, [request.user_team_id, request.summary.start_date, request.summary.end_date, retryNonce])
 
   if (state.kind === 'no-team') {
     return (
@@ -63,7 +64,10 @@ export function ApprovalCardExpanded({ request }: { request: LeaveRequestWithDay
         Couldn't load team context — {state.message}.{' '}
         <button
           className="underline"
-          onClick={() => setState({ kind: 'loading' })}
+          onClick={() => {
+            setState({ kind: 'loading' })
+            setRetryNonce((n) => n + 1)
+          }}
         >
           Retry
         </button>

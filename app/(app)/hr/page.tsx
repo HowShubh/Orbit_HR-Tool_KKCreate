@@ -20,7 +20,7 @@ export default async function HRConsolePage() {
       listCompoffBalances(),
       listCompoffGrants(),
       listPendingApprovalsForReviewer(me.id, 'hr'),
-      listLeaveRequestHistory(me.id, 'hr', { limit: 200 }),
+      listLeaveRequestHistory(me.id, 'hr', { limit: 1000 }),
     ])
 
   return (

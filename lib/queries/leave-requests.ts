@@ -144,7 +144,6 @@ export async function listPendingApprovalsForReviewer(
       const overlap = (teammateLeaves ?? []).filter(
         (t) =>
           t.user_id !== first.user_id &&
-          (team === null || true) && // team filter applied below for HR scope too
           t.start_date <= d.date &&
           t.end_date >= d.date
       )
