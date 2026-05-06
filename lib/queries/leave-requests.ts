@@ -259,3 +259,128 @@ function addOneDay(iso: string): string {
   dt.setUTCDate(dt.getUTCDate() + 1)
   return dt.toISOString().slice(0, 10)
 }
+
+export async function listLeaveRequestHistory(
+  reviewerUserId: string,
+  scope: ApprovalQueueScope,
+  options?: { limit?: number; statuses?: Array<LeaveRequestWithDays['status']> }
+): Promise<LeaveRequestWithDays[]> {
+  const adminClient = createAdminClient()
+  const statuses = options?.statuses ?? (['active', 'rejected', 'deleted'] as const)
+  const limit = options?.limit ?? 100
+
+  // Resolve visible user_ids the same way as the pending query
+  let visibleUserIds: string[] | null = null
+  if (scope === 'team') {
+    const { data: ledTeams } = await adminClient
+      .from('teams')
+      .select('id')
+      .eq('team_lead_id', reviewerUserId)
+    const teamIds = (ledTeams ?? []).map((t) => t.id)
+    const { data: members } = teamIds.length
+      ? await adminClient
+          .from('team_members')
+          .select('user_id')
+          .in('team_id', teamIds)
+          .is('left_at', null)
+      : { data: [] as { user_id: string }[] }
+    const { data: directReports } = await adminClient
+      .from('users')
+      .select('id')
+      .eq('manager_id', reviewerUserId)
+    const ids = new Set<string>()
+    for (const m of members ?? []) ids.add(m.user_id)
+    for (const u of directReports ?? []) ids.add(u.id)
+    ids.delete(reviewerUserId)
+    visibleUserIds = Array.from(ids)
+    if (visibleUserIds.length === 0) return []
+  }
+
+  let q = adminClient
+    .from('leaves')
+    .select('id, request_id, user_id, type, start_date, end_date, days_deducted, half_day_position, status, reason, created_at')
+    .in('status', statuses as unknown as ('active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted')[])
+    .order('start_date', { ascending: false })
+    .limit(limit * 6) // a request can be up to ~6 days; over-fetch then group
+  if (visibleUserIds) q = q.in('user_id', visibleUserIds)
+
+  const { data: leaves } = await q
+  if (!leaves || leaves.length === 0) return []
+
+  // Reuse the same grouping shape as listPendingApprovalsForReviewer
+  // (without conflicts — history doesn't need them)
+  const userIds = Array.from(new Set(leaves.map((l) => l.user_id)))
+  const { data: users } = await adminClient
+    .from('users')
+    .select('id, full_name')
+    .in('id', userIds)
+  const userNameById = new Map((users ?? []).map((u) => [u.id, u.full_name]))
+
+  const requestIds = Array.from(
+    new Set(leaves.map((l) => l.request_id).filter((id): id is string => !!id))
+  )
+  const { data: parents } = requestIds.length
+    ? await adminClient
+        .from('leave_requests')
+        .select('id, status, reason, created_at, decided_at')
+        .in('id', requestIds)
+    : { data: [] as Array<{
+        id: string
+        status: LeaveRequestWithDays['status']
+        reason: string | null
+        created_at: string
+        decided_at: string | null
+      }> }
+  const parentById = new Map((parents ?? []).map((p) => [p.id, p]))
+
+  const buckets = new Map<string, typeof leaves>()
+  for (const l of leaves) {
+    const key = l.request_id ?? `legacy:${l.id}`
+    const arr = buckets.get(key) ?? []
+    arr.push(l)
+    buckets.set(key, arr)
+  }
+
+  const out: LeaveRequestWithDays[] = []
+  for (const [key, group] of buckets) {
+    const first = group[0]
+    const parent = first.request_id ? parentById.get(first.request_id) : null
+    const days: LeaveRequestDay[] = group.map((l) => ({
+      leave_id: l.id,
+      date: l.start_date,
+      type: l.type as LeaveRequestDay['type'],
+      days_deducted: Number(l.days_deducted ?? 0),
+      half_day_position: l.half_day_position as LeaveRequestDay['half_day_position'],
+    }))
+    days.sort((a, b) => a.date.localeCompare(b.date))
+    const leaveDays = days
+      .filter((d) => d.type === 'leave' || d.type === 'compoff_leave')
+      .reduce((s, d) => s + d.days_deducted, 0)
+    const wfhDays = days
+      .filter((d) => d.type === 'wfh' || d.type === 'compoff_wfh')
+      .reduce((s, d) => s + d.days_deducted, 0)
+    out.push({
+      id: key,
+      user_id: first.user_id,
+      user_full_name: userNameById.get(first.user_id) ?? 'Unknown',
+      user_team_id: null,
+      user_team_name: null,
+      status: (parent?.status ?? first.status) as LeaveRequestWithDays['status'],
+      reason: parent?.reason ?? first.reason ?? null,
+      created_at: parent?.created_at ?? first.created_at,
+      decided_at: parent?.decided_at ?? null,
+      days,
+      summary: {
+        leave_days: leaveDays,
+        wfh_days: wfhDays,
+        start_date: days[0].date,
+        end_date: days[days.length - 1].date,
+      },
+      conflicts: [],
+      decision_leave_id: first.id,
+    })
+  }
+
+  out.sort((a, b) => b.created_at.localeCompare(a.created_at))
+  return out.slice(0, limit)
+}
