@@ -17,15 +17,36 @@ const CURRENT_LEAVE_YEAR = 2026
 
 export async function getDashboardData(
   currentUserId: string,
+  currentUserRole: 'employee' | 'team_lead' | 'hr' | 'founder',
   ledTeamIds: string[],
   membersByTeam: Record<string, string[]>
 ): Promise<DashboardData> {
   const adminClient = createAdminClient()
 
-  // Build the set of "my team's user_ids" for upcoming-team widget
-  const teamUserIds = Array.from(
-    new Set(ledTeamIds.flatMap((teamId) => membersByTeam[teamId] ?? []))
-  ).filter((id) => id !== currentUserId)
+  // For team_leads → only people in teams they lead.
+  // For HR/founders → everyone in the org (excluding themselves).
+  // For employees → no team widget (empty list).
+  const isOrgWide = currentUserRole === 'hr' || currentUserRole === 'founder'
+
+  let teamUserIds: string[]
+  if (isOrgWide) {
+    const allUserIds = new Set<string>()
+    for (const ids of Object.values(membersByTeam)) {
+      for (const id of ids) allUserIds.add(id)
+    }
+    // Also include users that aren't in any team yet (still part of the org)
+    const { data: allActive } = await adminClient
+      .from('users')
+      .select('id')
+      .eq('status', 'active')
+    for (const u of allActive ?? []) allUserIds.add(u.id)
+    allUserIds.delete(currentUserId)
+    teamUserIds = Array.from(allUserIds)
+  } else {
+    teamUserIds = Array.from(
+      new Set(ledTeamIds.flatMap((teamId) => membersByTeam[teamId] ?? []))
+    ).filter((id) => id !== currentUserId)
+  }
 
   // Run as much as we can in parallel
   const todayDate = new Date().toISOString().split('T')[0]

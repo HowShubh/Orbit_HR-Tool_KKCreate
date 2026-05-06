@@ -15,7 +15,7 @@ export default async function DashboardPage() {
   const { ledTeamIds, membersByTeam } = await getCurrentUserTeamContext(user.id)
 
   const [data, notifications] = await Promise.all([
-    getDashboardData(user.id, ledTeamIds, membersByTeam),
+    getDashboardData(user.id, user.role, ledTeamIds, membersByTeam),
     listMyNotifications(user.id, 20),
   ])
 
