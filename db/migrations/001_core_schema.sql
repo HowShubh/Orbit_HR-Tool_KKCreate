@@ -48,6 +48,37 @@ CREATE TABLE public.team_members (
 );
 
 -- ============================================================
+-- LEAVE TYPES / POLICIES
+-- ============================================================
+CREATE TABLE public.leave_types (
+  key              TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  category         TEXT NOT NULL CHECK (category IN ('leave', 'wfh', 'compoff_leave', 'compoff_wfh')),
+  annual_quota     NUMERIC(5,1) NOT NULL DEFAULT 0,
+  monthly_quota    NUMERIC(4,1) CHECK (monthly_quota IS NULL OR monthly_quota >= 0),
+  eligibility_mode TEXT NOT NULL DEFAULT 'all' CHECK (eligibility_mode IN ('all', 'selected')),
+  is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+  is_system        BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE public.user_leave_type_eligibility (
+  user_id        UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  leave_type_key TEXT NOT NULL REFERENCES public.leave_types(key) ON DELETE CASCADE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, leave_type_key)
+);
+
+INSERT INTO public.leave_types (key, name, category, annual_quota, eligibility_mode, is_system)
+VALUES
+  ('leave', 'Leave', 'leave', 18, 'all', TRUE),
+  ('wfh', 'WFH', 'wfh', 36, 'all', TRUE),
+  ('compoff_leave', 'Comp-off Leave', 'compoff_leave', 0, 'all', TRUE),
+  ('compoff_wfh', 'Comp-off WFH', 'compoff_wfh', 0, 'all', TRUE)
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
 -- LEAVE REQUESTS
 -- ============================================================
 CREATE TABLE public.leave_requests (
@@ -71,7 +102,8 @@ CREATE TABLE public.leaves (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id        UUID REFERENCES public.leave_requests(id) ON DELETE SET NULL,
   user_id           UUID NOT NULL REFERENCES public.users(id),
-  type              TEXT NOT NULL CHECK (type IN ('wfh', 'leave', 'compoff_wfh', 'compoff_leave')),
+  type              TEXT NOT NULL REFERENCES public.leave_types(key),
+  requested_type    TEXT REFERENCES public.leave_types(key),
   start_date        DATE NOT NULL,
   end_date          DATE NOT NULL,
   half_day_start    BOOLEAN NOT NULL DEFAULT FALSE,
@@ -97,7 +129,7 @@ CREATE TABLE public.leave_balances (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    UUID NOT NULL REFERENCES public.users(id),
   leave_year INT NOT NULL,
-  type       TEXT NOT NULL CHECK (type IN ('wfh', 'leave', 'compoff_wfh', 'compoff_leave')),
+  type       TEXT NOT NULL REFERENCES public.leave_types(key),
   allocated  NUMERIC(5,1) NOT NULL DEFAULT 0,
   used       NUMERIC(5,1) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

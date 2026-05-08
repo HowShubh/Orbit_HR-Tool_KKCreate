@@ -26,7 +26,14 @@ export async function decideCompoff(
 
   if (!grant) throw new ActionError('Compoff grant not found')
 
-  const actor = await requireCapability('approve_compoff', grant.user_id)
+  if (grant.status !== 'pending') {
+    throw new ActionError('Only pending compoff requests can be decided')
+  }
+
+  const actor = await requireUser()
+  if (grant.manager_id !== actor.id) {
+    await requireCapability('approve_compoff', grant.user_id)
+  }
 
   const { data: after, error } = await adminClient
     .from('compoff_grants')
@@ -127,7 +134,7 @@ export async function requestCompoff(input: z.infer<typeof RequestCompoffSchema>
     type: 'compoff_request',
     title: 'New compoff request',
     body: `${user.full_name} requested ${parsed.amount} day(s) of ${parsed.type} for work done on ${parsed.work_date}.`,
-    link_url: '/hr',
+    link_url: '/',
     related_entity_type: 'compoff_grant',
     related_entity_id: grant.id,
   })

@@ -119,7 +119,7 @@ export type Database = {
           id: string
           user_id: string
           leave_year: number
-          type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+          type: string
           allocated: number
           used: number
           created_at: string
@@ -129,13 +129,41 @@ export type Database = {
           id?: string
           user_id: string
           leave_year: number
-          type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+          type: string
           allocated?: number
           used?: number
           created_at?: string
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['leave_balances']['Insert']>
+        Relationships: []
+      }
+      leave_types: {
+        Row: {
+          key: string
+          name: string
+          category: 'leave' | 'wfh' | 'compoff_leave' | 'compoff_wfh'
+          annual_quota: number
+          monthly_quota: number | null
+          eligibility_mode: 'all' | 'selected'
+          is_active: boolean
+          is_system: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          key: string
+          name: string
+          category: 'leave' | 'wfh' | 'compoff_leave' | 'compoff_wfh'
+          annual_quota?: number
+          monthly_quota?: number | null
+          eligibility_mode?: 'all' | 'selected'
+          is_active?: boolean
+          is_system?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['leave_types']['Insert']>
         Relationships: []
       }
       leave_year_resets: {
@@ -189,7 +217,8 @@ export type Database = {
           id: string
           request_id: string | null
           user_id: string
-          type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+          type: string
+          requested_type: string | null
           start_date: string
           end_date: string
           half_day_start: boolean
@@ -210,7 +239,8 @@ export type Database = {
           id?: string
           request_id?: string | null
           user_id: string
-          type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+          type: string
+          requested_type?: string | null
           start_date: string
           end_date: string
           half_day_start?: boolean
@@ -382,13 +412,27 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['users']['Insert']>
         Relationships: []
       }
+      user_leave_type_eligibility: {
+        Row: {
+          user_id: string
+          leave_type_key: string
+          created_at: string
+        }
+        Insert: {
+          user_id: string
+          leave_type_key: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['user_leave_type_eligibility']['Insert']>
+        Relationships: []
+      }
     }
     Views: {
       leaves_today: {
         Row: {
           id: string
           user_id: string
-          type: 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+          type: string
           start_date: string
           end_date: string
           half_day_start: boolean

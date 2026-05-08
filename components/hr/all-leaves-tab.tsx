@@ -8,14 +8,16 @@ import { RequestHistoryTable } from '@/components/approvals/request-history-tabl
 import { BackdateLeaveDialog } from './backdate-leave-dialog'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 import type { UserWithMembership } from '@/lib/queries/users'
+import type { LeaveTypePolicy } from '@/lib/leave-types'
 
 interface Props {
   pendingRequests: LeaveRequestWithDays[]
   history: LeaveRequestWithDays[]
   users: UserWithMembership[]
+  leaveTypes: LeaveTypePolicy[]
 }
 
-export function AllLeavesTab({ pendingRequests, history, users }: Props) {
+export function AllLeavesTab({ pendingRequests, history, users, leaveTypes }: Props) {
   const [search, setSearch] = useState('')
 
   const filteredHistory = search.trim()
@@ -49,6 +51,7 @@ export function AllLeavesTab({ pendingRequests, history, users }: Props) {
         </div>
         <BackdateLeaveDialog
           users={users}
+          leaveTypes={leaveTypes}
           trigger={<Button size="sm">Backdate Leave</Button>}
         />
       </div>

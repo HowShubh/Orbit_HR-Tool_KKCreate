@@ -1,8 +1,21 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  DEFAULT_LEAVE_TYPES,
+  leaveTypeCategory,
+  leaveTypeLabel,
+  type LeaveTypeCategory,
+} from '@/lib/leave-types'
 import type { Tables } from '@/lib/supabase/database.types'
 
 export type LeaveWithUser = Tables<'leaves'> & {
   user_full_name: string
+  type_name: string
+  type_category: LeaveTypeCategory
+}
+
+async function loadLeaveTypes(adminClient: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await adminClient.from('leave_types').select('*')
+  return error || !data || data.length === 0 ? DEFAULT_LEAVE_TYPES : data
 }
 
 export async function listLeavesForUser(
@@ -60,10 +73,13 @@ export async function listLeavesInRange(
     .select('id, full_name')
     .in('id', userIds)
   const nameMap = new Map((users ?? []).map((u) => [u.id, u.full_name]))
+  const leaveTypes = await loadLeaveTypes(adminClient)
 
   return leaves.map((l) => ({
     ...l,
     user_full_name: nameMap.get(l.user_id) ?? 'Unknown',
+    type_name: leaveTypeLabel(l.requested_type ?? l.type, leaveTypes),
+    type_category: leaveTypeCategory(l.requested_type ?? l.type, leaveTypes),
   }))
 }
 
@@ -106,9 +122,12 @@ export async function listPendingLeaves(userIds?: string[]): Promise<LeaveWithUs
     .select('id, full_name')
     .in('id', leaveUserIds)
   const nameMap = new Map((users ?? []).map((user) => [user.id, user.full_name]))
+  const leaveTypes = await loadLeaveTypes(adminClient)
 
   return leaves.map((leave) => ({
     ...leave,
     user_full_name: nameMap.get(leave.user_id) ?? 'Unknown',
+    type_name: leaveTypeLabel(leave.requested_type ?? leave.type, leaveTypes),
+    type_category: leaveTypeCategory(leave.requested_type ?? leave.type, leaveTypes),
   }))
 }

@@ -6,6 +6,8 @@ import {
   type LeaveWithUser,
 } from './leaves'
 import { listPendingApprovalsForReviewer } from './leave-requests'
+import { listLeaveTypes } from './leave-types'
+import { isEligibleForPolicy, type LeaveTypePolicy } from '@/lib/leave-types'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 
 export type DashboardTeamMember = Pick<
@@ -29,13 +31,19 @@ export type WorkAnniversary = {
   years: number
 }
 
+export type DashboardCompoffApproval = Tables<'compoff_grants'> & {
+  user_full_name: string
+  user_designation: string | null
+}
+
 export interface DashboardData {
   leavesToday: LeaveWithUser[]
   upcomingMine: LeaveWithUser[]
   upcomingTeam: LeaveWithUser[]
   myBalances: Tables<'leave_balances'>[]
   myCompoffBalance: Tables<'leave_balances'>[]
-  pendingApprovalsForMe: Tables<'compoff_grants'>[]
+  leaveTypes: LeaveTypePolicy[]
+  pendingApprovalsForMe: DashboardCompoffApproval[]
   pendingApprovalRequests: LeaveRequestWithDays[]
   upcomingHolidays: Tables<'holidays'>[]
   weekHolidays: Tables<'holidays'>[]
@@ -178,6 +186,7 @@ export async function getDashboardData(
     holidaysRes,
     weekHolidaysRes,
     notifRes,
+    leaveTypes,
   ] = await Promise.all([
     listLeavesToday(),
     listUpcomingLeaves(60, [currentUserId]),
@@ -215,10 +224,21 @@ export async function getDashboardData(
       .select('id', { count: 'exact', head: true })
       .eq('user_id', currentUserId)
       .is('read_at', null),
+    listLeaveTypes(),
   ])
 
   const approvalScope: 'hr' | 'team' = isOrgWide ? 'hr' : 'team'
   const pendingApprovalRequests = await listPendingApprovalsForReviewer(currentUserId, approvalScope)
+  const compoffRequesterIds = Array.from(
+    new Set((approvalsRes.data ?? []).map((grant) => grant.user_id))
+  )
+  const { data: compoffRequesters } = compoffRequesterIds.length > 0
+    ? await adminClient
+        .from('users')
+        .select('id, full_name, designation')
+        .in('id', compoffRequesterIds)
+    : { data: [] as Pick<Tables<'users'>, 'id' | 'full_name' | 'designation'>[] }
+  const requesterById = new Map((compoffRequesters ?? []).map((user) => [user.id, user]))
 
   return {
     leavesToday,
@@ -226,7 +246,14 @@ export async function getDashboardData(
     upcomingTeam,
     myBalances: balancesRes.data ?? [],
     myCompoffBalance: compoffBalRes.data ?? [],
-    pendingApprovalsForMe: approvalsRes.data ?? [],
+    leaveTypes: leaveTypes.filter(
+      (policy) => policy.is_active && isEligibleForPolicy(policy, currentUserId)
+    ),
+    pendingApprovalsForMe: (approvalsRes.data ?? []).map((grant) => ({
+      ...grant,
+      user_full_name: requesterById.get(grant.user_id)?.full_name ?? 'Unknown',
+      user_designation: requesterById.get(grant.user_id)?.designation ?? null,
+    })),
     pendingApprovalRequests,
     upcomingHolidays: holidaysRes.data ?? [],
     weekHolidays: weekHolidaysRes.data ?? [],

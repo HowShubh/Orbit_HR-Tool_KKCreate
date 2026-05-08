@@ -1,6 +1,7 @@
 'use client'
 
-import { type ComponentType } from 'react'
+import { type ComponentType, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { addDays, differenceInDays, format, isWeekend, parseISO, startOfWeek } from 'date-fns'
 import {
   BriefcaseBusiness,
@@ -28,6 +29,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LeaveFormDialog } from '@/components/leave/leave-form-dialog'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
 import { ApprovalQueueClient } from '@/components/approvals/approval-queue-client'
+import { decideCompoff } from '@/lib/actions/compoff'
+import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { AppUser } from '@/lib/auth/get-current-user'
 import type { DashboardData } from '@/lib/queries/dashboard'
@@ -48,7 +51,7 @@ const LEAVE_TYPE_PILL: Record<string, string> = {
 
 type LeaveTypePill = keyof typeof LEAVE_TYPE_PILL
 
-function TypePill({ type }: { type: string }) {
+function TypePill({ type, label }: { type: string; label?: string }) {
   return (
     <span
       className={cn(
@@ -56,7 +59,7 @@ function TypePill({ type }: { type: string }) {
         LEAVE_TYPE_PILL[type as LeaveTypePill] ?? 'bg-muted text-muted-foreground ring-border'
       )}
     >
-      {LEAVE_TYPE_LABELS[type] ?? type}
+      {label ?? LEAVE_TYPE_LABELS[type] ?? type}
     </span>
   )
 }
@@ -180,7 +183,11 @@ export function DashboardClient({ currentUser, data }: Props) {
           <WhosOutTodayCard leaves={data.leavesToday} />
 
           {/* My balances */}
-          <MyBalancesCard balances={data.myBalances} compoffBalances={data.myCompoffBalance} />
+          <MyBalancesCard
+            balances={data.myBalances}
+            compoffBalances={data.myCompoffBalance}
+            leaveTypes={data.leaveTypes}
+          />
 
           {/* Upcoming holidays */}
           <HolidaysCard holidays={data.upcomingHolidays} />
@@ -206,7 +213,7 @@ export function DashboardClient({ currentUser, data }: Props) {
             </Card>
           )}
           {data.pendingApprovalsForMe.length > 0 && (
-            <PendingApprovalsCard count={data.pendingApprovalsForMe.length} />
+            <PendingApprovalsCard approvals={data.pendingApprovalsForMe} />
           )}
         </div>
       </div>
@@ -268,6 +275,7 @@ function EmployeeDashboard({
               <MyBalancesCard
                 balances={data.myBalances}
                 compoffBalances={data.myCompoffBalance}
+                leaveTypes={data.leaveTypes}
               />
               <EmployeeQuickActionsCard />
             </div>
@@ -301,17 +309,17 @@ function EmployeeStatusCard({
   const todayCode = DAY_CODE_BY_INDEX[today.getDay()]
 
   const status = (() => {
-    if (leave?.type === 'leave' || leave?.type === 'compoff_leave') {
+    if (leave?.type_category === 'leave' || leave?.type_category === 'compoff_leave') {
       return {
-        label: leave.type === 'compoff_leave' ? 'Comp-off Leave' : 'On Leave',
+        label: leave.type_name ?? (leave.type === 'compoff_leave' ? 'Comp-off Leave' : 'On Leave'),
         detail: formatDateRange(leave.start_date, leave.end_date),
         icon: CalendarDays,
         className: 'bg-orange-50 text-orange-700 ring-orange-100',
       }
     }
-    if (leave?.type === 'wfh' || leave?.type === 'compoff_wfh') {
+    if (leave?.type_category === 'wfh' || leave?.type_category === 'compoff_wfh') {
       return {
-        label: leave.type === 'compoff_wfh' ? 'Comp-off WFH' : 'Working From Home',
+        label: leave.type_name ?? (leave.type === 'compoff_wfh' ? 'Comp-off WFH' : 'Working From Home'),
         detail: team ? `${team.name} team schedule` : 'Remote work',
         icon: Home,
         className: 'bg-blue-50 text-blue-700 ring-blue-100',
@@ -624,7 +632,7 @@ function TeamLeavesTodayList({ leaves }: { leaves: DashboardData['teamLeavesToda
               {formatDateRange(leave.start_date, leave.end_date)}
             </div>
           </div>
-          <TypePill type={leave.type} />
+          <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
         </div>
       ))}
     </div>
@@ -751,7 +759,7 @@ function WhosOutTodayCard({ leaves }: { leaves: DashboardData['leavesToday'] }) 
                 <div className="min-w-0 flex-1">
                   <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
                 </div>
-                <TypePill type={leave.type} />
+                <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
               </div>
             ))}
             {leaves.length > 6 && (
@@ -767,12 +775,14 @@ function WhosOutTodayCard({ leaves }: { leaves: DashboardData['leavesToday'] }) 
 function MyBalancesCard({
   balances,
   compoffBalances,
+  leaveTypes,
 }: {
   balances: DashboardData['myBalances']
   compoffBalances: DashboardData['myCompoffBalance']
+  leaveTypes: DashboardData['leaveTypes']
 }) {
   const allBalances = [...balances, ...compoffBalances]
-  const types = ['leave', 'wfh', 'compoff_leave', 'compoff_wfh'] as const
+  const visibleTypes = leaveTypes.filter((type) => type.is_active)
 
   return (
     <Card>
@@ -784,17 +794,17 @@ function MyBalancesCard({
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-3">
-          {types.map((type) => {
-            const bal = allBalances.find((b) => b.type === type)
+          {visibleTypes.map((type) => {
+            const bal = allBalances.find((b) => b.type === type.key)
             const allocated = bal?.allocated ?? 0
             const used = bal?.used ?? 0
             const remaining = Math.max(0, allocated - used)
             const pct = allocated > 0 ? Math.min(100, (remaining / allocated) * 100) : 0
 
             return (
-              <div key={type} className="rounded-lg border border-border/60 p-3">
+              <div key={type.key} className="rounded-lg border border-border/60 p-3">
                 <div className="text-[11px] font-medium text-muted-foreground truncate">
-                  {LEAVE_TYPE_LABELS[type]}
+                  {type.name}
                 </div>
                 <div className="mt-1 text-[20px] font-semibold tabular-nums">
                   {formatDays(remaining)}
@@ -844,7 +854,7 @@ function UpcomingMineCard({ leaves }: { leaves: DashboardData['upcomingMine'] })
                     {leave.days_deducted} day{leave.days_deducted !== 1 ? 's' : ''}
                   </div>
                 </div>
-                <TypePill type={leave.type} />
+                <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
               </div>
             ))}
           </div>
@@ -877,7 +887,7 @@ function UpcomingTeamCard({ leaves }: { leaves: DashboardData['upcomingTeam'] })
                     {formatDateRange(leave.start_date, leave.end_date)}
                   </div>
                 </div>
-                <TypePill type={leave.type} />
+                <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
               </div>
             ))}
             {leaves.length > 6 && (
@@ -929,22 +939,79 @@ function HolidaysCard({ holidays }: { holidays: DashboardData['upcomingHolidays'
   )
 }
 
-function PendingApprovalsCard({ count }: { count: number }) {
+function PendingApprovalsCard({
+  approvals,
+}: {
+  approvals: DashboardData['pendingApprovalsForMe']
+}) {
+  const router = useRouter()
+  const { pushToast } = useStore()
+  const [isPending, startTransition] = useTransition()
+
+  function decide(grantId: string, decision: 'approved' | 'rejected') {
+    startTransition(async () => {
+      try {
+        await decideCompoff(grantId, decision)
+        pushToast({
+          title: decision === 'approved' ? 'Comp-off approved' : 'Comp-off rejected',
+          variant: decision === 'approved' ? 'success' : 'info',
+        })
+        router.refresh()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to update comp-off request'
+        pushToast({ title: 'Error', body: message, variant: 'error' })
+      }
+    })
+  }
+
   return (
-    <Card className="border-amber-200 bg-amber-50/50">
+    <Card className="border-amber-200 bg-amber-50/50 lg:col-span-2">
       <CardHeader>
-        <CardTitle className="text-amber-900">Pending Compoff</CardTitle>
-        <Badge variant="warning">{count}</Badge>
+        <CardTitle className="text-amber-900">Comp-off Approvals</CardTitle>
+        <Badge variant="warning">{approvals.length}</Badge>
       </CardHeader>
-      <CardContent>
-        <p className="text-sm text-amber-800">
-          You have {count} compoff request{count !== 1 ? 's' : ''} waiting for your decision.
-        </p>
-        <Link href="/hr">
-          <Button size="sm" variant="outline" className="mt-3 border-amber-300 text-amber-900 hover:bg-amber-100">
-            Review in HR Console
-          </Button>
-        </Link>
+      <CardContent className="space-y-3">
+        {approvals.slice(0, 5).map((approval) => (
+          <div
+            key={approval.id}
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-white/80 p-3"
+          >
+            <Avatar name={approval.user_full_name} size="sm" />
+            <div className="min-w-[180px] flex-1">
+              <div className="text-[13.5px] font-semibold text-foreground">
+                {approval.user_full_name}
+              </div>
+              <div className="text-[11.5px] text-muted-foreground">
+                {format(parseISO(approval.work_date), 'MMM d, yyyy')} · {formatDays(approval.amount)} day{approval.amount !== 1 ? 's' : ''}
+                {approval.reason ? ` · ${approval.reason}` : ''}
+              </div>
+            </div>
+            <TypePill type={approval.type} />
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => decide(approval.id, 'rejected')}
+                className="border-rose-200 text-rose-700 hover:bg-rose-50"
+              >
+                Reject
+              </Button>
+              <Button
+                size="sm"
+                disabled={isPending}
+                onClick={() => decide(approval.id, 'approved')}
+              >
+                Approve
+              </Button>
+            </div>
+          </div>
+        ))}
+        {approvals.length > 5 && (
+          <p className="text-[12px] text-amber-800">
+            +{approvals.length - 5} more pending comp-off request{approvals.length - 5 !== 1 ? 's' : ''}.
+          </p>
+        )}
       </CardContent>
     </Card>
   )

@@ -84,9 +84,14 @@ export function RequestHistoryTable({
                           </div>
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">
-                          {r.summary.leave_days > 0 && `${r.summary.leave_days} Leave`}
-                          {r.summary.leave_days > 0 && r.summary.wfh_days > 0 && ' + '}
-                          {r.summary.wfh_days > 0 && `${r.summary.wfh_days} WFH`}
+                          {Array.from(
+                            r.days.reduce((totals, day) => {
+                              totals.set(day.type_name, (totals.get(day.type_name) ?? 0) + day.days_deducted)
+                              return totals
+                            }, new Map<string, number>())
+                          )
+                            .map(([label, days]) => `${days} ${label}`)
+                            .join(' + ')}
                         </td>
                         <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
                           {r.summary.start_date === r.summary.end_date

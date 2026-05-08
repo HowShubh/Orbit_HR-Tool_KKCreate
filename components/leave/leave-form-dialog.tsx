@@ -41,13 +41,20 @@ import {
 } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import {
+  isAwayCategory,
+  isWfhCategory,
+  leaveTypeCategory,
+  leaveTypeLabel,
+  type LeaveTypeCategory,
+} from '@/lib/leave-types'
 
 interface Props {
   trigger?: React.ReactNode
 }
 
 type PlannerData = Awaited<ReturnType<typeof getMyLeavePlannerData>>
-type PlanType = 'leave' | 'wfh'
+type PlanType = string
 type SelectedDay = {
   date: string
   type: PlanType
@@ -62,11 +69,18 @@ const TYPE_PILL: Record<string, string> = {
   compoff_leave: 'bg-amber-50 text-amber-700 ring-amber-100',
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  wfh: 'WFH',
-  leave: 'Leave',
-  compoff_wfh: 'Comp-off WFH',
-  compoff_leave: 'Comp-off Leave',
+const CATEGORY_PILL: Record<LeaveTypeCategory, string> = {
+  leave: 'bg-orange-50 text-orange-700 ring-orange-100',
+  wfh: 'bg-blue-50 text-blue-700 ring-blue-100',
+  compoff_leave: 'bg-amber-50 text-amber-700 ring-amber-100',
+  compoff_wfh: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
+}
+
+const CATEGORY_BG: Record<LeaveTypeCategory, string> = {
+  leave: 'bg-orange-50',
+  wfh: 'bg-blue-50',
+  compoff_leave: 'bg-amber-50',
+  compoff_wfh: 'bg-cyan-50',
 }
 
 function todayIso() {
@@ -101,40 +115,36 @@ function balanceFor(data: PlannerData | null, type: string) {
   }
 }
 
+function policyCategory(data: PlannerData | null, type: string): LeaveTypeCategory {
+  return leaveTypeCategory(type, data?.allLeaveTypes)
+}
+
+function labelFor(data: PlannerData | null, type: string) {
+  return leaveTypeLabel(type, data?.allLeaveTypes)
+}
+
+function pillFor(data: PlannerData | null, type: string) {
+  return TYPE_PILL[type] ?? CATEGORY_PILL[policyCategory(data, type)]
+}
+
 function buildAllocation(data: PlannerData | null, selectedDays: SelectedDay[]) {
-  const available = {
-    compoff_leave: balanceFor(data, 'compoff_leave').remaining,
-    leave: balanceFor(data, 'leave').remaining,
-    compoff_wfh: balanceFor(data, 'compoff_wfh').remaining,
-    wfh: balanceFor(data, 'wfh').remaining,
+  const available = new Map<string, number>()
+  for (const balance of data?.balances ?? []) {
+    available.set(balance.type, Number(balance.allocated ?? 0) - Number(balance.used ?? 0))
   }
 
-  const used = {
-    compoff_leave: 0,
-    leave: 0,
-    compoff_wfh: 0,
-    wfh: 0,
+  const used = new Map<string, number>()
+  const deduct = (type: string) => {
+    available.set(type, (available.get(type) ?? 0) - 1)
+    used.set(type, (used.get(type) ?? 0) + 1)
   }
 
   for (const day of selectedDays.sort((a, b) => a.date.localeCompare(b.date))) {
-    if (day.type === 'leave') {
-      if (available.compoff_leave > 0) {
-        available.compoff_leave -= 1
-        used.compoff_leave += 1
-      } else {
-        available.leave -= 1
-        used.leave += 1
-      }
-    } else if (available.compoff_wfh > 0) {
-      available.compoff_wfh -= 1
-      used.compoff_wfh += 1
-    } else {
-      available.wfh -= 1
-      used.wfh += 1
-    }
+    deduct(day.type)
   }
 
-  return { available, used }
+  const shortages = Array.from(available.entries()).filter(([, remaining]) => remaining < 0)
+  return { available, used, shortages }
 }
 
 export function LeaveFormDialog({ trigger }: Props) {
@@ -161,6 +171,13 @@ export function LeaveFormDialog({ trigger }: Props) {
       })
       .finally(() => setLoading(false))
   }, [data, loading, open, pushToast])
+
+  useEffect(() => {
+    if (!data || data.leaveTypes.length === 0) return
+    if (!data.leaveTypes.some((type) => type.key === mode)) {
+      setMode(data.leaveTypes[0].key)
+    }
+  }, [data, mode])
 
   function reset() {
     setSelectedDays([])
@@ -210,10 +227,12 @@ export function LeaveFormDialog({ trigger }: Props) {
     () => buildAllocation(data, [...selectedDays]),
     [data, selectedDays]
   )
-  const insufficientLeave = allocation.available.leave < 0
-  const insufficientWfh = allocation.available.wfh < 0
+  const shortageLabels = allocation.shortages.map(([type]) => labelFor(data, type))
   const canSubmit =
-    selectedDays.length > 0 && !insufficientLeave && !insufficientWfh && !isPending
+    selectedDays.length > 0 &&
+    shortageLabels.length === 0 &&
+    (data?.leaveTypes.length ?? 0) > 0 &&
+    !isPending
 
   function leavesOn(dateIso: string) {
     return (data?.leaves ?? []).filter(
@@ -226,12 +245,12 @@ export function LeaveFormDialog({ trigger }: Props) {
     if (iso < todayIso()) return `${iso} is in the past.`
     if (dayCode(date) === 'SUN') return `${iso} is Sunday!`
     if (holidayByDate.has(iso)) return `${iso} is a Holiday!`
-    if (type === 'wfh' && !wfoDays.has(dayCode(date))) {
+    if (isWfhCategory(policyCategory(data, type)) && !wfoDays.has(dayCode(date))) {
       return `${iso} is a WFH day for YOU!`
     }
     const ownOverlap = leavesOn(iso).find((leave) => leave.user_id === data?.currentUserId)
     if (ownOverlap) {
-      return `${iso} already has your ${TYPE_LABEL[ownOverlap.type] ?? ownOverlap.type} request.`
+      return `${iso} already has your ${ownOverlap.type_name ?? labelFor(data, ownOverlap.type)} request.`
     }
     return null
   }
@@ -261,8 +280,8 @@ export function LeaveFormDialog({ trigger }: Props) {
     return selectedDays
       .map((day) => {
         const teamLeaves = leavesOn(day.date).filter((leave) => leave.user_id !== data?.currentUserId)
-        const away = teamLeaves.filter((leave) => leave.type === 'leave' || leave.type === 'compoff_leave')
-        const wfh = teamLeaves.filter((leave) => leave.type === 'wfh' || leave.type === 'compoff_wfh')
+        const away = teamLeaves.filter((leave) => isAwayCategory(leave.type_category ?? policyCategory(data, leave.type)))
+        const wfh = teamLeaves.filter((leave) => isWfhCategory(leave.type_category ?? policyCategory(data, leave.type)))
         if (away.length === 0 && wfh.length === 0) return null
         return {
           date: day.date,
@@ -305,6 +324,16 @@ export function LeaveFormDialog({ trigger }: Props) {
 
   const selectedDateLeaves = selectedDate ? leavesOn(selectedDate) : []
   const warnings = selectedDayWarnings()
+  const selectableKeys = new Set(data?.leaveTypes.map((type) => type.key) ?? [])
+  const balanceTypes = (data?.allLeaveTypes ?? [])
+    .filter(
+      (type) =>
+        type.is_active &&
+        (selectableKeys.has(type.key) ||
+          type.category === 'compoff_leave' ||
+          type.category === 'compoff_wfh' ||
+          data?.balances.some((balance) => balance.type === type.key))
+    )
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -356,21 +385,27 @@ export function LeaveFormDialog({ trigger }: Props) {
                 </div>
 
                 <div className="flex rounded-lg border bg-background p-1">
-                  {(['leave', 'wfh'] as const).map((item) => (
+                  {data.leaveTypes.map((item) => (
                     <button
-                      key={item}
+                      key={item.key}
                       type="button"
-                      onClick={() => setMode(item)}
+                      onClick={() => setMode(item.key)}
                       className={cn(
                         'rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
-                        mode === item ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                        mode === item.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      {TYPE_LABEL[item]}
+                      {item.name}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {data.leaveTypes.length === 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  No active leave or WFH policy is available for your profile. Ask HR to update your eligibility.
+                </div>
+              )}
 
               <div className="rounded-xl border">
                 <div className="grid grid-cols-7 border-b">
@@ -394,7 +429,10 @@ export function LeaveFormDialog({ trigger }: Props) {
                     const isOwnWfhDay = !isSundayDay && !holiday && !wfoDays.has(dayCode(day))
                     const selectedType = selectedByDate.get(iso)
                     const teamLeaves = leavesOn(iso).filter((leave) => leave.user_id !== data.currentUserId)
-                    const teamAway = teamLeaves.filter((leave) => leave.type === 'leave' || leave.type === 'compoff_leave')
+                    const teamAway = teamLeaves.filter((leave) =>
+                      isAwayCategory(leave.type_category ?? policyCategory(data, leave.type))
+                    )
+                    const selectedCategory = selectedType ? policyCategory(data, selectedType) : null
 
                     return (
                       <button
@@ -406,8 +444,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                           !inMonth && 'bg-muted/10 opacity-45',
                           isSundayDay && 'bg-muted/40',
                           isToday && 'ring-2 ring-primary ring-inset',
-                          selectedType === 'leave' && 'bg-orange-50',
-                          selectedType === 'wfh' && 'bg-blue-50'
+                          selectedCategory && CATEGORY_BG[selectedCategory]
                         )}
                       >
                         <div className="flex items-start justify-between gap-1">
@@ -415,8 +452,8 @@ export function LeaveFormDialog({ trigger }: Props) {
                             {format(day, 'd')}
                           </span>
                           {selectedType && (
-                            <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset', TYPE_PILL[selectedType])}>
-                              {TYPE_LABEL[selectedType]}
+                            <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset', pillFor(data, selectedType))}>
+                              {labelFor(data, selectedType)}
                             </span>
                           )}
                         </div>
@@ -446,10 +483,10 @@ export function LeaveFormDialog({ trigger }: Props) {
                           {teamLeaves.slice(0, 2).map((leave) => (
                             <div
                               key={leave.id}
-                              className={cn('truncate rounded px-1 py-0.5 text-[10px] font-medium ring-1 ring-inset', TYPE_PILL[leave.type])}
-                              title={`${leave.user_full_name} - ${TYPE_LABEL[leave.type] ?? leave.type}`}
+                              className={cn('truncate rounded px-1 py-0.5 text-[10px] font-medium ring-1 ring-inset', pillFor(data, leave.type))}
+                              title={`${leave.user_full_name} - ${leave.type_name ?? labelFor(data, leave.type)}`}
                             >
-                              {leave.user_full_name.split(' ')[0]}: {TYPE_LABEL[leave.type] ?? leave.type}
+                              {leave.user_full_name.split(' ')[0]}: {leave.type_name ?? labelFor(data, leave.type)}
                             </div>
                           ))}
                         </div>
@@ -464,16 +501,17 @@ export function LeaveFormDialog({ trigger }: Props) {
               <div className="rounded-xl border p-4">
                 <div className="text-sm font-semibold">Balances</div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  {(['compoff_leave', 'leave', 'compoff_wfh', 'wfh'] as const).map((type) => {
-                    const balance = balanceFor(data, type)
-                    const used = allocation.used[type]
+                  {balanceTypes.map((type) => {
+                    const balance = balanceFor(data, type.key)
+                    const used = allocation.used.get(type.key) ?? 0
+                    const remainingAfterRequest = allocation.available.get(type.key) ?? balance.remaining
                     return (
-                      <div key={type} className="rounded-lg border p-3">
+                      <div key={type.key} className="rounded-lg border p-3">
                         <div className="text-[11px] font-medium text-muted-foreground">
-                          {TYPE_LABEL[type]}
+                          {type.name}
                         </div>
                         <div className="mt-1 text-lg font-semibold tabular-nums">
-                          {formatDays(balance.remaining - used)}
+                          {formatDays(remainingAfterRequest)}
                         </div>
                         <div className="text-[10px] text-muted-foreground">
                           {used > 0 ? `-${formatDays(used)} in this request` : `of ${formatDays(balance.allocated)}`}
@@ -482,9 +520,9 @@ export function LeaveFormDialog({ trigger }: Props) {
                     )
                   })}
                 </div>
-                {(insufficientLeave || insufficientWfh) && (
+                {shortageLabels.length > 0 && (
                   <div className="mt-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-700 ring-1 ring-rose-100">
-                    Selected days exceed available {insufficientLeave ? 'leave' : 'WFH'} balance.
+                    Selected days exceed available {shortageLabels.join(', ')} balance.
                   </div>
                 )}
               </div>
@@ -497,7 +535,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                 <div className="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
                   {selectedDays.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      Choose Leave or WFH, then click working days in the calendar.
+                      Choose a request type, then click working days in the calendar.
                     </p>
                   ) : (
                     selectedDays
@@ -513,8 +551,8 @@ export function LeaveFormDialog({ trigger }: Props) {
                               {data.primaryTeam?.name ?? 'No primary team'}
                             </div>
                           </div>
-                          <span className={cn('rounded px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset', TYPE_PILL[day.type])}>
-                            {TYPE_LABEL[day.type]}
+                          <span className={cn('rounded px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset', pillFor(data, day.type))}>
+                            {labelFor(data, day.type)}
                           </span>
                         </div>
                       ))
@@ -554,7 +592,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs font-medium">{leave.user_full_name}</div>
                             <div className="text-[11px] text-muted-foreground">
-                              {TYPE_LABEL[leave.type] ?? leave.type}
+                              {leave.type_name ?? labelFor(data, leave.type)}
                             </div>
                           </div>
                         </div>

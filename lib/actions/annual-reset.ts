@@ -8,11 +8,7 @@ import {
   revalidateHR,
   writeAudit,
 } from './_helpers'
-
-const ANNUAL_DEFAULTS = {
-  leave: 18,
-  wfh: 36,
-}
+import { DEFAULT_LEAVE_TYPES } from '@/lib/leave-types'
 
 export async function runAnnualReset(leaveYear: number) {
   const actor = await requireCapability('run_annual_reset')
@@ -37,22 +33,48 @@ export async function runAnnualReset(leaveYear: number) {
     throw new ActionError('No active users to reset')
   }
 
-  const rows = users.flatMap((u) => [
-    {
-      user_id: u.id,
-      leave_year: leaveYear,
-      type: 'leave' as const,
-      allocated: ANNUAL_DEFAULTS.leave,
-      used: 0,
-    },
-    {
-      user_id: u.id,
-      leave_year: leaveYear,
-      type: 'wfh' as const,
-      allocated: ANNUAL_DEFAULTS.wfh,
-      used: 0,
-    },
+  const [{ data: leaveTypes }, { data: eligibility }] = await Promise.all([
+    adminClient
+      .from('leave_types')
+      .select('key, category, annual_quota, eligibility_mode, is_active')
+      .in('category', ['leave', 'wfh'])
+      .eq('is_active', true),
+    adminClient
+      .from('user_leave_type_eligibility')
+      .select('user_id, leave_type_key'),
   ])
+
+  const activePolicies =
+    leaveTypes && leaveTypes.length > 0
+      ? leaveTypes
+      : DEFAULT_LEAVE_TYPES.filter((type) => type.category === 'leave' || type.category === 'wfh')
+
+  const eligibleByType = new Map<string, Set<string>>()
+  for (const row of eligibility ?? []) {
+    const ids = eligibleByType.get(row.leave_type_key) ?? new Set<string>()
+    ids.add(row.user_id)
+    eligibleByType.set(row.leave_type_key, ids)
+  }
+
+  const rows = users.flatMap((user) =>
+    activePolicies
+      .filter(
+        (policy) =>
+          policy.eligibility_mode === 'all' ||
+          eligibleByType.get(policy.key)?.has(user.id)
+      )
+      .map((policy) => ({
+        user_id: user.id,
+        leave_year: leaveYear,
+        type: policy.key,
+        allocated: Number(policy.annual_quota ?? 0),
+        used: 0,
+      }))
+  )
+
+  if (rows.length === 0) {
+    throw new ActionError('No active leave policies to reset')
+  }
 
   const { error } = await adminClient
     .from('leave_balances')

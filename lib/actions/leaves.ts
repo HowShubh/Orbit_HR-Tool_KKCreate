@@ -12,15 +12,24 @@ import {
 } from './_helpers'
 import { notifyUser } from './notifications'
 import type { Tables } from '@/lib/supabase/database.types'
+import {
+  COMPOFF_YEAR,
+  CURRENT_LEAVE_YEAR,
+  DEFAULT_LEAVE_TYPES,
+  isEligibleForPolicy,
+  isSelectablePlanCategory,
+  isWfhCategory,
+  leaveTypeCategory,
+  leaveTypeLabel,
+  leaveYearForCategory,
+  type LeaveTypePolicy,
+} from '@/lib/leave-types'
 
-const CURRENT_LEAVE_YEAR = 2026
-const COMPOFF_YEAR = 0
-
-const LeaveTypeSchema = z.enum(['wfh', 'leave', 'compoff_wfh', 'compoff_leave'])
+const LeaveTypeSchema = z.string().trim().min(1)
 type LeaveStatus = 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
 type LeaveReviewerUser = Pick<Tables<'users'>, 'id' | 'role' | 'manager_id' | 'full_name'>
 
-const DayPlanTypeSchema = z.enum(['leave', 'wfh'])
+const DayPlanTypeSchema = z.string().trim().min(1)
 
 const CreateLeaveSchema = z.object({
   user_id: z.string().uuid().optional(), // omit = self
@@ -88,10 +97,144 @@ function calcDays(input: z.infer<typeof CreateLeaveSchema>): number {
   return Math.max(0.5, days)
 }
 
-async function getYearForType(type: z.infer<typeof LeaveTypeSchema>): Promise<number> {
-  return type === 'compoff_wfh' || type === 'compoff_leave'
-    ? COMPOFF_YEAR
-    : CURRENT_LEAVE_YEAR
+async function getLeaveTypePolicies(
+  adminClient: ReturnType<typeof createAdminClient>
+): Promise<LeaveTypePolicy[]> {
+  const [{ data: types, error }, { data: eligibility }] = await Promise.all([
+    adminClient.from('leave_types').select('*'),
+    adminClient.from('user_leave_type_eligibility').select('user_id, leave_type_key'),
+  ])
+
+  if (error || !types || types.length === 0) return DEFAULT_LEAVE_TYPES
+
+  const eligibleByType = new Map<string, string[]>()
+  for (const row of eligibility ?? []) {
+    const ids = eligibleByType.get(row.leave_type_key) ?? []
+    ids.push(row.user_id)
+    eligibleByType.set(row.leave_type_key, ids)
+  }
+
+  return types.map((type) => ({
+    ...type,
+    eligible_user_ids: eligibleByType.get(type.key) ?? [],
+  }))
+}
+
+function policyMap(policies: LeaveTypePolicy[]) {
+  return new Map(policies.map((policy) => [policy.key, policy]))
+}
+
+function getPolicyOrThrow(policies: LeaveTypePolicy[], type: string) {
+  const policy = policyMap(policies).get(type)
+  if (!policy) throw new ActionError(`Leave type "${type}" is not configured.`)
+  return policy
+}
+
+function getYearForType(type: string, policies: LeaveTypePolicy[]): number {
+  return leaveYearForCategory(leaveTypeCategory(type, policies))
+}
+
+function monthStartIso(date: string) {
+  return `${date.slice(0, 7)}-01`
+}
+
+function monthEndIso(date: string) {
+  const [year, month] = date.split('-').map(Number)
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+}
+
+function monthLabel(monthStart: string) {
+  return dateFromIso(monthStart).toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+function addOneDayIso(date: string) {
+  const [year, month, day] = date.split('-').map(Number)
+  const next = new Date(Date.UTC(year, month - 1, day))
+  next.setUTCDate(next.getUTCDate() + 1)
+  return next.toISOString().slice(0, 10)
+}
+
+function expandRequestedRange(input: z.infer<typeof CreateLeaveSchema>) {
+  const days: Array<{ date: string; type: string; days_deducted: number }> = []
+  let cursor = input.start_date
+  while (cursor <= input.end_date) {
+    let daysDeducted = 1
+    if (cursor === input.start_date && input.half_day_start) daysDeducted = 0.5
+    if (cursor === input.end_date && input.half_day_end) daysDeducted = 0.5
+    days.push({ date: cursor, type: input.type, days_deducted: daysDeducted })
+    cursor = addOneDayIso(cursor)
+  }
+  return days
+}
+
+async function ensureMonthlyQuota(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+  requestedDays: Array<{ date: string; type: string; days_deducted: number }>,
+  policies: LeaveTypePolicy[]
+) {
+  const limitedKeys = new Set(
+    policies
+      .filter((policy) => policy.monthly_quota !== null && Number(policy.monthly_quota) > 0)
+      .map((policy) => policy.key)
+  )
+  const relevantDays = requestedDays.filter((day) => limitedKeys.has(day.type))
+  if (relevantDays.length === 0) return
+
+  const requestedByTypeMonth = new Map<string, number>()
+  for (const day of relevantDays) {
+    const key = `${day.type}:${monthStartIso(day.date)}`
+    requestedByTypeMonth.set(
+      key,
+      (requestedByTypeMonth.get(key) ?? 0) + Number(day.days_deducted)
+    )
+  }
+
+  const requestedMonths = Array.from(requestedByTypeMonth.keys()).map((key) => key.split(':')[1])
+  const minMonth = requestedMonths.reduce((a, b) => (a < b ? a : b))
+  const maxMonth = requestedMonths.reduce((a, b) => (a > b ? a : b))
+
+  const { data: existingLeaves } = await adminClient
+    .from('leaves')
+    .select('id, start_date, end_date, type, requested_type, days_deducted, status')
+    .eq('user_id', userId)
+    .in('status', ['active', 'pending', 'delete_requested'])
+    .lte('start_date', monthEndIso(maxMonth))
+    .gte('end_date', minMonth)
+
+  const existingByTypeMonth = new Map<string, number>()
+  for (const leave of existingLeaves ?? []) {
+    const requestedType = leave.requested_type ?? leave.type
+    if (!limitedKeys.has(requestedType)) continue
+
+    let cursor = leave.start_date
+    while (cursor <= leave.end_date) {
+      const month = monthStartIso(cursor)
+      if (month >= minMonth && month <= maxMonth) {
+        const key = `${requestedType}:${month}`
+        const dayValue = leave.start_date === leave.end_date
+          ? Number(leave.days_deducted ?? 0)
+          : 1
+        existingByTypeMonth.set(key, (existingByTypeMonth.get(key) ?? 0) + dayValue)
+      }
+      cursor = addOneDayIso(cursor)
+    }
+  }
+
+  for (const [key, requested] of requestedByTypeMonth.entries()) {
+    const [type, month] = key.split(':')
+    const policy = getPolicyOrThrow(policies, type)
+    const quota = Number(policy.monthly_quota ?? 0)
+    const existing = existingByTypeMonth.get(key) ?? 0
+    if (existing + requested > quota) {
+      throw new ActionError(
+        `${policy.name} allows ${fmtDays(quota)} day(s) per month. ${monthLabel(month)} already has ${fmtDays(existing)} day(s), and this request adds ${fmtDays(requested)} day(s).`
+      )
+    }
+  }
 }
 
 async function ensureNoOverlap(
@@ -104,7 +247,7 @@ async function ensureNoOverlap(
 ) {
   let q = adminClient
     .from('leaves')
-    .select('id, start_date, end_date, type')
+    .select('id, start_date, end_date, type, requested_type')
     .eq('user_id', userId)
     .in('status', statuses)
     .lte('start_date', end)
@@ -115,7 +258,7 @@ async function ensureNoOverlap(
   if (data && data.length > 0) {
     const first = data[0]
     throw new ActionError(
-      `This leave overlaps an existing ${first.type} from ${first.start_date} to ${first.end_date}. Contact HR if you need this resolved.`
+      `This leave overlaps an existing ${first.requested_type ?? first.type} from ${first.start_date} to ${first.end_date}. Contact HR if you need this resolved.`
     )
   }
 }
@@ -222,10 +365,11 @@ async function requireLeaveApprover(
 async function ensureBalance(
   adminClient: ReturnType<typeof createAdminClient>,
   userId: string,
-  type: z.infer<typeof LeaveTypeSchema>,
-  daysNeeded: number
+  type: string,
+  daysNeeded: number,
+  policies: LeaveTypePolicy[]
 ) {
-  const year = await getYearForType(type)
+  const year = getYearForType(type, policies)
   const { data: bal } = await adminClient
     .from('leave_balances')
     .select('allocated, used')
@@ -237,7 +381,7 @@ async function ensureBalance(
   const remaining = (bal?.allocated ?? 0) - (bal?.used ?? 0)
   if (remaining < daysNeeded) {
     throw new ActionError(
-      `Insufficient ${type} balance: you have ${remaining} day(s) available but need ${daysNeeded}. Contact HR for help.`
+      `Insufficient ${leaveTypeLabel(type, policies)} balance: you have ${remaining} day(s) available but need ${daysNeeded}. Contact HR for help.`
     )
   }
 }
@@ -252,7 +396,7 @@ async function getBalanceRemaining(
     .eq('user_id', userId)
     .in('leave_year', [CURRENT_LEAVE_YEAR, COMPOFF_YEAR])
 
-  const remaining = new Map<z.infer<typeof LeaveTypeSchema>, number>()
+  const remaining = new Map<string, number>()
   for (const balance of balances ?? []) {
     remaining.set(
       balance.type,
@@ -264,67 +408,60 @@ async function getBalanceRemaining(
 
 function buildPlanRows(
   days: Array<{ date: string; type: z.infer<typeof DayPlanTypeSchema> }>,
-  remaining: Map<z.infer<typeof LeaveTypeSchema>, number>
+  remaining: Map<string, number>,
+  policies: LeaveTypePolicy[]
 ) {
-  const available = {
-    compoff_leave: remaining.get('compoff_leave') ?? 0,
-    leave: remaining.get('leave') ?? 0,
-    compoff_wfh: remaining.get('compoff_wfh') ?? 0,
-    wfh: remaining.get('wfh') ?? 0,
-  }
-
+  const available = new Map(remaining)
   const rows: Array<{
     date: string
-    type: z.infer<typeof LeaveTypeSchema>
+    type: string
+    requested_type: string
     days_deducted: number
   }> = []
 
   for (const day of days) {
-    if (day.type === 'leave') {
-      if (available.compoff_leave >= 1) {
-        available.compoff_leave -= 1
-        rows.push({ ...day, type: 'compoff_leave', days_deducted: 1 })
-      } else {
-        available.leave -= 1
-        rows.push({ ...day, type: 'leave', days_deducted: 1 })
-      }
-    } else if (available.compoff_wfh >= 1) {
-      available.compoff_wfh -= 1
-      rows.push({ ...day, type: 'compoff_wfh', days_deducted: 1 })
-    } else {
-      available.wfh -= 1
-      rows.push({ ...day, type: 'wfh', days_deducted: 1 })
+    const policy = getPolicyOrThrow(policies, day.type)
+    if (!policy.is_active || !isSelectablePlanCategory(policy.category)) {
+      throw new ActionError(`${leaveTypeLabel(day.type, policies)} cannot be requested from the planner.`)
     }
+
+    available.set(day.type, (available.get(day.type) ?? 0) - 1)
+    rows.push({ ...day, type: day.type, requested_type: day.type, days_deducted: 1 })
   }
 
-  if (available.leave < 0) {
-    throw new ActionError(`Insufficient leave balance. You need ${fmtDays(Math.abs(available.leave))} more day(s).`)
-  }
-  if (available.wfh < 0) {
-    throw new ActionError(`Insufficient WFH balance. You need ${fmtDays(Math.abs(available.wfh))} more day(s).`)
+  for (const [type, balance] of available.entries()) {
+    if (balance < 0) {
+      throw new ActionError(
+        `Insufficient ${leaveTypeLabel(type, policies)} balance. You need ${fmtDays(Math.abs(balance))} more day(s).`
+      )
+    }
   }
 
   return rows
 }
 
-function summarizePlanRows(rows: Array<{ type: z.infer<typeof LeaveTypeSchema>; days_deducted: number }>) {
-  const totals = new Map<z.infer<typeof LeaveTypeSchema>, number>()
+function summarizePlanRows(
+  rows: Array<{ requested_type: string; days_deducted: number }>,
+  policies: LeaveTypePolicy[]
+) {
+  const totals = new Map<string, number>()
   for (const row of rows) {
-    totals.set(row.type, (totals.get(row.type) ?? 0) + Number(row.days_deducted))
+    totals.set(row.requested_type, (totals.get(row.requested_type) ?? 0) + Number(row.days_deducted))
   }
 
   return Array.from(totals.entries())
-    .map(([type, days]) => `${fmtDays(days)} ${type.replaceAll('_', ' ')}`)
+    .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
     .join(', ')
 }
 
 async function bumpUsed(
   adminClient: ReturnType<typeof createAdminClient>,
   userId: string,
-  type: z.infer<typeof LeaveTypeSchema>,
-  delta: number
+  type: string,
+  delta: number,
+  policies: LeaveTypePolicy[]
 ) {
-  const year = await getYearForType(type)
+  const year = getYearForType(type, policies)
   const { data: bal } = await adminClient
     .from('leave_balances')
     .select('id, allocated, used')
@@ -366,10 +503,17 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
   }
 
   const adminClient = createAdminClient()
+  const policies = await getLeaveTypePolicies(adminClient)
   const days = calcDays(parsed)
+  const policy = getPolicyOrThrow(policies, parsed.type)
+
+  if (!policy.is_active || !isEligibleForPolicy(policy, user.id)) {
+    throw new ActionError(`${leaveTypeLabel(parsed.type, policies)} is not available for your profile.`)
+  }
 
   await ensureNoOverlap(adminClient, targetUserId, parsed.start_date, parsed.end_date)
-  await ensureBalance(adminClient, targetUserId, parsed.type, days)
+  await ensureMonthlyQuota(adminClient, targetUserId, expandRequestedRange(parsed), policies)
+  await ensureBalance(adminClient, targetUserId, parsed.type, days, policies)
   const reviewers = await getLeaveReviewers(adminClient, user)
   if (reviewers.length === 0) {
     throw new ActionError('No leave approver is available. Contact HR or your founder.')
@@ -380,6 +524,7 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
     .insert({
       user_id: targetUserId,
       type: parsed.type,
+      requested_type: parsed.type,
       start_date: parsed.start_date,
       end_date: parsed.end_date,
       half_day_start: parsed.half_day_start ?? false,
@@ -401,7 +546,7 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
         user_id: reviewerId,
         type: 'leave_requested',
         title: 'Leave approval needed',
-        body: `${user.full_name} requested ${parsed.type} from ${parsed.start_date} to ${parsed.end_date}.`,
+        body: `${user.full_name} requested ${leaveTypeLabel(parsed.type, policies)} from ${parsed.start_date} to ${parsed.end_date}.`,
         link_url: '/',
         related_entity_type: 'leave',
         related_entity_id: leave.id,
@@ -425,6 +570,13 @@ export async function getMyLeavePlannerData() {
   const endDate = new Date(today.getFullYear(), today.getMonth() + 4, 0)
     .toISOString()
     .split('T')[0]
+  const allLeaveTypes = await getLeaveTypePolicies(adminClient)
+  const eligibleLeaveTypes = allLeaveTypes.filter(
+    (policy) =>
+      policy.is_active &&
+      isSelectablePlanCategory(policy.category) &&
+      isEligibleForPolicy(policy, user.id)
+  )
 
   const { data: memberships } = await adminClient
     .from('team_members')
@@ -497,9 +649,13 @@ export async function getMyLeavePlannerData() {
     teamMembers: (usersRes.data ?? []).sort((a, b) => a.full_name.localeCompare(b.full_name)),
     holidays: holidaysRes.data ?? [],
     balances: balancesRes.data ?? [],
+    leaveTypes: eligibleLeaveTypes,
+    allLeaveTypes,
     leaves: (leavesRes.data ?? []).map((leave) => ({
       ...leave,
       user_full_name: userById.get(leave.user_id)?.full_name ?? 'Unknown',
+      type_name: leaveTypeLabel(leave.requested_type ?? leave.type, allLeaveTypes),
+      type_category: leaveTypeCategory(leave.requested_type ?? leave.type, allLeaveTypes),
     })),
   }
 }
@@ -508,6 +664,7 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
   const user = await requireUser()
   const parsed = CreateLeavePlanSchema.parse(input)
   const adminClient = createAdminClient()
+  const policies = await getLeaveTypePolicies(adminClient)
   const today = new Date().toISOString().split('T')[0]
 
   const sortedDays = Array.from(
@@ -517,6 +674,16 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
   const startDate = sortedDays[0]?.date
   const endDate = sortedDays[sortedDays.length - 1]?.date
   if (!startDate || !endDate) throw new ActionError('Select at least one working day.')
+
+  for (const day of sortedDays) {
+    const policy = getPolicyOrThrow(policies, day.type)
+    if (!policy.is_active || !isSelectablePlanCategory(policy.category)) {
+      throw new ActionError(`${leaveTypeLabel(day.type, policies)} cannot be requested from the planner.`)
+    }
+    if (!isEligibleForPolicy(policy, user.id)) {
+      throw new ActionError(`${leaveTypeLabel(day.type, policies)} is not available for your profile.`)
+    }
+  }
 
   if (startDate < today) {
     throw new ActionError('Leaves must start today or later. HR can backdate leaves on your behalf.')
@@ -555,14 +722,15 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     if (holidayByDate.has(day.date)) {
       throw new ActionError(`${day.date} is a Holiday!`)
     }
-    if (day.type === 'wfh' && !isWfoDayForPattern(day.date, wfoPattern)) {
+    const category = leaveTypeCategory(day.type, policies)
+    if (isWfhCategory(category) && !isWfoDayForPattern(day.date, wfoPattern)) {
       throw new ActionError(`${day.date} is a WFH day for YOU!`)
     }
   }
 
   const { data: overlaps } = await adminClient
     .from('leaves')
-    .select('id, start_date, end_date, type')
+    .select('id, start_date, end_date, type, requested_type')
     .eq('user_id', user.id)
     .in('status', ['active', 'pending', 'delete_requested'])
     .lte('start_date', endDate)
@@ -573,14 +741,22 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
       (leave) => leave.start_date <= day.date && leave.end_date >= day.date
     )
     if (overlap) {
+      const overlapType = overlap.requested_type ?? overlap.type
       throw new ActionError(
-        `${day.date} overlaps an existing ${overlap.type} from ${overlap.start_date} to ${overlap.end_date}.`
+        `${day.date} overlaps an existing ${leaveTypeLabel(overlapType, policies)} from ${overlap.start_date} to ${overlap.end_date}.`
       )
     }
   }
 
+  await ensureMonthlyQuota(
+    adminClient,
+    user.id,
+    sortedDays.map((day) => ({ ...day, days_deducted: 1 })),
+    policies
+  )
+
   const balances = await getBalanceRemaining(adminClient, user.id)
-  const planRows = buildPlanRows(sortedDays, balances)
+  const planRows = buildPlanRows(sortedDays, balances, policies)
   const reviewers = await getLeaveReviewers(adminClient, user)
   if (reviewers.length === 0) {
     throw new ActionError('No leave approver is available. Contact HR or your founder.')
@@ -608,6 +784,7 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
         request_id: request.id,
         user_id: user.id,
         type: row.type,
+        requested_type: row.requested_type,
         start_date: row.date,
         end_date: row.date,
         days_deducted: row.days_deducted,
@@ -622,7 +799,7 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     throw new ActionError(leavesError?.message ?? 'Create leave request days failed')
   }
 
-  const summary = summarizePlanRows(planRows)
+  const summary = summarizePlanRows(planRows, policies)
   await Promise.all(
     reviewers.map((reviewerId) =>
       notifyUser({
@@ -659,6 +836,8 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
   }
 
   const adminClient = createAdminClient()
+  const policies = await getLeaveTypePolicies(adminClient)
+  getPolicyOrThrow(policies, parsed.type)
   const days = calcDays(parsed)
 
   await ensureNoOverlap(adminClient, parsed.user_id, parsed.start_date, parsed.end_date)
@@ -669,6 +848,7 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
     .insert({
       user_id: parsed.user_id,
       type: parsed.type,
+      requested_type: parsed.type,
       start_date: parsed.start_date,
       end_date: parsed.end_date,
       half_day_start: parsed.half_day_start ?? false,
@@ -683,7 +863,7 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
 
   if (error || !leave) throw new ActionError(error?.message ?? 'Create leave failed')
 
-  await bumpUsed(adminClient, parsed.user_id, parsed.type, days)
+  await bumpUsed(adminClient, parsed.user_id, parsed.type, days, policies)
   await writeAudit(actor.id, 'leave.create_on_behalf', 'leave', leave.id, { after: leave })
 
   // Notify the user
@@ -691,7 +871,7 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
     user_id: parsed.user_id,
     type: 'leave_created_for_you',
     title: 'A leave was added to your record',
-    body: `${actor.full_name} added a ${parsed.type} from ${parsed.start_date} to ${parsed.end_date}.`,
+    body: `${actor.full_name} added ${leaveTypeLabel(parsed.type, policies)} from ${parsed.start_date} to ${parsed.end_date}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
@@ -730,6 +910,7 @@ async function approveLeaveRequestById(
   requestId: string
 ) {
   const requestLeaves = await getPendingRequestLeaves(adminClient, requestId)
+  const policies = await getLeaveTypePolicies(adminClient)
   const firstLeave = requestLeaves[0]
   const actor = await requireLeaveApprover(adminClient, firstLeave.user_id)
 
@@ -744,12 +925,12 @@ async function approveLeaveRequestById(
     )
   }
 
-  const totals = new Map<z.infer<typeof LeaveTypeSchema>, number>()
+  const totals = new Map<string, number>()
   for (const leave of requestLeaves) {
     totals.set(leave.type, (totals.get(leave.type) ?? 0) + Number(leave.days_deducted))
   }
   for (const [type, days] of totals.entries()) {
-    await ensureBalance(adminClient, firstLeave.user_id, type, days)
+    await ensureBalance(adminClient, firstLeave.user_id, type, days, policies)
   }
 
   const decidedAt = new Date().toISOString()
@@ -774,7 +955,7 @@ async function approveLeaveRequestById(
   }
 
   for (const [type, days] of totals.entries()) {
-    await bumpUsed(adminClient, firstLeave.user_id, type, days)
+    await bumpUsed(adminClient, firstLeave.user_id, type, days, policies)
   }
 
   await writeAudit(actor.id, 'leave_request.approve', 'leave_request', requestId, {
@@ -858,6 +1039,7 @@ export async function approveLeave(leaveId: string) {
     return approveLeaveRequestById(adminClient, leave.request_id)
   }
 
+  const policies = await getLeaveTypePolicies(adminClient)
   const actor = await requireLeaveApprover(adminClient, leave.user_id)
 
   await ensureNoOverlap(
@@ -868,7 +1050,7 @@ export async function approveLeave(leaveId: string) {
     leave.id,
     ['active']
   )
-  await ensureBalance(adminClient, leave.user_id, leave.type, Number(leave.days_deducted))
+  await ensureBalance(adminClient, leave.user_id, leave.type, Number(leave.days_deducted), policies)
 
   const { data: updated, error } = await adminClient
     .from('leaves')
@@ -883,13 +1065,13 @@ export async function approveLeave(leaveId: string) {
 
   if (error || !updated) throw new ActionError(error?.message ?? 'Approve leave failed')
 
-  await bumpUsed(adminClient, leave.user_id, leave.type, Number(leave.days_deducted))
+  await bumpUsed(adminClient, leave.user_id, leave.type, Number(leave.days_deducted), policies)
   await writeAudit(actor.id, 'leave.approve', 'leave', leaveId, { before: leave, after: updated })
   await notifyUser({
     user_id: leave.user_id,
     type: 'leave_approved',
     title: 'Leave approved',
-    body: `${actor.full_name} approved your ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+    body: `${actor.full_name} approved your ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
@@ -915,6 +1097,7 @@ export async function rejectLeave(leaveId: string) {
     return rejectLeaveRequestById(adminClient, leave.request_id)
   }
 
+  const policies = await getLeaveTypePolicies(adminClient)
   const actor = await requireLeaveApprover(adminClient, leave.user_id)
 
   const { data: updated, error } = await adminClient
@@ -935,7 +1118,7 @@ export async function rejectLeave(leaveId: string) {
     user_id: leave.user_id,
     type: 'leave_rejected',
     title: 'Leave rejected',
-    body: `${actor.full_name} rejected your ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+    body: `${actor.full_name} rejected your ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
@@ -982,13 +1165,14 @@ export async function requestLeaveDeletion(leaveId: string) {
     throw new ActionError(error?.message ?? 'Request leave deletion failed')
   }
 
+  const policies = await getLeaveTypePolicies(adminClient)
   await Promise.all(
     reviewers.map((reviewerId) =>
       notifyUser({
         user_id: reviewerId,
         type: 'leave_delete_requested',
         title: 'Leave deletion approval needed',
-        body: `${user.full_name} requested deletion of ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+        body: `${user.full_name} requested deletion of ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
         link_url: '/',
         related_entity_type: 'leave',
         related_entity_id: leave.id,
@@ -1019,6 +1203,7 @@ export async function approveLeaveDeletion(leaveId: string) {
   }
 
   const actor = await requireLeaveApprover(adminClient, leave.user_id)
+  const policies = await getLeaveTypePolicies(adminClient)
   const { data: updated, error } = await adminClient
     .from('leaves')
     .update({
@@ -1034,7 +1219,7 @@ export async function approveLeaveDeletion(leaveId: string) {
     throw new ActionError(error?.message ?? 'Approve leave deletion failed')
   }
 
-  await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted))
+  await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted), policies)
   await writeAudit(actor.id, 'leave.delete_approve', 'leave', leaveId, {
     before: leave,
     after: updated,
@@ -1043,7 +1228,7 @@ export async function approveLeaveDeletion(leaveId: string) {
     user_id: leave.user_id,
     type: 'leave_delete_approved',
     title: 'Leave deletion approved',
-    body: `${actor.full_name} approved deletion of your ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+    body: `${actor.full_name} approved deletion of your ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
@@ -1068,6 +1253,7 @@ export async function rejectLeaveDeletion(leaveId: string) {
   }
 
   const actor = await requireLeaveApprover(adminClient, leave.user_id)
+  const policies = await getLeaveTypePolicies(adminClient)
   const { data: updated, error } = await adminClient
     .from('leaves')
     .update({ status: 'active' })
@@ -1087,7 +1273,7 @@ export async function rejectLeaveDeletion(leaveId: string) {
     user_id: leave.user_id,
     type: 'leave_delete_rejected',
     title: 'Leave deletion rejected',
-    body: `${actor.full_name} rejected deletion of your ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+    body: `${actor.full_name} rejected deletion of your ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
@@ -1118,6 +1304,7 @@ export async function deleteLeave(leaveId: string) {
 
   const isOwner = leave.user_id === user.id
   const isHR = user.role === 'hr' || user.role === 'founder'
+  const policies = await getLeaveTypePolicies(adminClient)
 
   if (isOwner && leave.status === 'active' && !isHR) {
     return requestLeaveDeletion(leaveId)
@@ -1144,7 +1331,7 @@ export async function deleteLeave(leaveId: string) {
 
   if (leave.status === 'active' || leave.status === 'delete_requested') {
     // Pending requests have not consumed balance yet.
-    await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted))
+    await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted), policies)
   }
 
   await writeAudit(user.id, 'leave.delete', 'leave', leaveId, { before: leave })
@@ -1154,7 +1341,7 @@ export async function deleteLeave(leaveId: string) {
       user_id: leave.user_id,
       type: 'leave_deleted_for_you',
       title: 'A leave was removed from your record',
-      body: `${user.full_name} removed your ${leave.type} from ${leave.start_date} to ${leave.end_date}.`,
+      body: `${user.full_name} removed your ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
       link_url: '/leaves',
     })
   }

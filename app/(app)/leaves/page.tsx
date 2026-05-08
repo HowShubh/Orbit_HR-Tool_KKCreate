@@ -2,6 +2,7 @@ import { getCurrentUser } from '@/lib/auth/get-current-user'
 import { redirect } from 'next/navigation'
 import { listLeavesForUser } from '@/lib/queries/leaves'
 import { listCompoffForUser } from '@/lib/queries/compoff'
+import { listLeaveTypes } from '@/lib/queries/leave-types'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { MyLeavesClient } from '@/components/leaves/my-leaves-client'
 
@@ -12,7 +13,7 @@ export default async function MyLeavesPage() {
   if (!user) redirect('/login')
 
   const adminClient = createAdminClient()
-  const [leaves, compoff, balancesRes, compoffBalRes] = await Promise.all([
+  const [leaves, compoff, balancesRes, compoffBalRes, leaveTypes] = await Promise.all([
     listLeavesForUser(user.id, 'all'),
     listCompoffForUser(user.id),
     adminClient
@@ -25,6 +26,7 @@ export default async function MyLeavesPage() {
       .select('*')
       .eq('user_id', user.id)
       .eq('leave_year', 0),
+    listLeaveTypes(),
   ])
 
   return (
@@ -34,6 +36,7 @@ export default async function MyLeavesPage() {
       compoff={compoff}
       balances={balancesRes.data ?? []}
       compoffBalances={compoffBalRes.data ?? []}
+      leaveTypes={leaveTypes}
     />
   )
 }

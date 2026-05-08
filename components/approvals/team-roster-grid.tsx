@@ -5,6 +5,7 @@ import { format, parseISO } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/ui/avatar'
 import type { RosterCell, RosterCellType, LeaveRequestDay } from './leave-request-types'
+import type { LeaveTypeCategory } from '@/lib/leave-types'
 
 interface Props {
   applicantId: string
@@ -35,16 +36,20 @@ function expandDates(start: string, end: string): string[] {
   return out
 }
 
-function cellLabel(type: RosterCellType, half: 'first_half' | 'second_half' | null): string {
+function cellLabel(
+  type: RosterCellType,
+  category: LeaveTypeCategory | undefined,
+  half: 'first_half' | 'second_half' | null
+): string {
   const base =
-    type === 'leave' || type === 'compoff_leave' ? 'L' :
-    type === 'wfh' || type === 'compoff_wfh' ? 'W' :
+    category === 'leave' || category === 'compoff_leave' ? 'L' :
+    category === 'wfh' || category === 'compoff_wfh' ? 'W' :
     type === 'holiday' ? 'H' : ''
   return half ? `½${base}` : base
 }
 
-function cellClass(type: RosterCellType): string {
-  switch (type) {
+function cellClass(type: RosterCellType, category?: LeaveTypeCategory): string {
+  switch (category ?? type) {
     case 'leave':
     case 'compoff_leave':
       return 'bg-orange-100 text-orange-800'
@@ -185,6 +190,8 @@ export function TeamRosterGrid({
                     )
                   }
                   const type = ('type' in cell ? cell.type : 'leave') as RosterCellType
+                  const category =
+                    'type_category' in cell ? cell.type_category : undefined
                   const half =
                     ('half_day_position' in cell
                       ? cell.half_day_position
@@ -194,10 +201,11 @@ export function TeamRosterGrid({
                       <span
                         className={cn(
                           'inline-flex h-6 min-w-[26px] items-center justify-center rounded px-1 text-[11px] font-semibold',
-                          cellClass(type)
+                          cellClass(type, category)
                         )}
+                        title={'type_name' in cell ? cell.type_name : type}
                       >
-                        {cellLabel(type, half)}
+                        {cellLabel(type, category, half)}
                       </span>
                     </td>
                   )

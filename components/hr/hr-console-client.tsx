@@ -10,9 +10,11 @@ import { BalancesTab } from './balances-tab'
 import { CompoffTab } from './compoff-tab'
 import { AnnualResetTab } from './annual-reset-tab'
 import { AllLeavesTab } from './all-leaves-tab'
+import { LeaveTypesTab } from './leave-types-tab'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { TeamWithMembers } from '@/lib/queries/teams'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
+import type { LeaveTypePolicy } from '@/lib/leave-types'
 import type { Tables } from '@/lib/supabase/database.types'
 
 interface Props {
@@ -22,6 +24,7 @@ interface Props {
   balances: Tables<'leave_balances'>[]
   compoffBalances: Tables<'leave_balances'>[]
   grants: Tables<'compoff_grants'>[]
+  leaveTypes: LeaveTypePolicy[]
   leaveYear: number
   pendingRequests: LeaveRequestWithDays[]
   history: LeaveRequestWithDays[]
@@ -55,6 +58,7 @@ export function HRConsoleClient(props: Props) {
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="holidays">Holidays</TabsTrigger>
             <TabsTrigger value="balances">Balances</TabsTrigger>
+            <TabsTrigger value="leave-types">Leave Types</TabsTrigger>
             <TabsTrigger value="compoff">Compoff</TabsTrigger>
             <TabsTrigger value="reset">Annual Reset</TabsTrigger>
           </TabsList>
@@ -64,6 +68,7 @@ export function HRConsoleClient(props: Props) {
               pendingRequests={props.pendingRequests}
               history={props.history}
               users={props.users}
+              leaveTypes={props.leaveTypes}
             />
           </TabsContent>
           <TabsContent value="users">
@@ -80,8 +85,12 @@ export function HRConsoleClient(props: Props) {
               users={props.users}
               balances={props.balances}
               compoffBalances={props.compoffBalances}
+              leaveTypes={props.leaveTypes}
               leaveYear={props.leaveYear}
             />
+          </TabsContent>
+          <TabsContent value="leave-types">
+            <LeaveTypesTab leaveTypes={props.leaveTypes} users={props.users} />
           </TabsContent>
           <TabsContent value="compoff">
             <CompoffTab grants={props.grants} users={props.users} />

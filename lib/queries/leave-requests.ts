@@ -6,14 +6,30 @@ import type {
   ApprovalQueueScope,
   RosterCell,
 } from '@/components/approvals/leave-request-types'
+import {
+  DEFAULT_LEAVE_TYPES,
+  isAwayCategory,
+  isWfhCategory,
+  leaveTypeCategory,
+  leaveTypeLabel,
+  type LeaveTypePolicy,
+} from '@/lib/leave-types'
 
 const ACTIVE_STATUSES = ['active', 'pending', 'delete_requested'] as const
+
+async function loadLeaveTypePolicies(
+  adminClient: ReturnType<typeof createAdminClient>
+): Promise<LeaveTypePolicy[]> {
+  const { data, error } = await adminClient.from('leave_types').select('*')
+  return error || !data || data.length === 0 ? DEFAULT_LEAVE_TYPES : data
+}
 
 export async function listPendingApprovalsForReviewer(
   reviewerUserId: string,
   scope: ApprovalQueueScope
 ): Promise<LeaveRequestWithDays[]> {
   const adminClient = createAdminClient()
+  const policies = await loadLeaveTypePolicies(adminClient)
 
   // Step A: figure out which user_ids are visible to this reviewer
   let visibleUserIds: string[] | null = null   // null = all users (HR scope)
@@ -48,7 +64,7 @@ export async function listPendingApprovalsForReviewer(
   // Step B: pull pending leaves (grouped + legacy)
   let leavesQuery = adminClient
     .from('leaves')
-    .select('id, request_id, user_id, type, start_date, end_date, days_deducted, half_day_position, status, reason, created_at')
+    .select('id, request_id, user_id, type, requested_type, start_date, end_date, days_deducted, half_day_position, status, reason, created_at')
     .in('status', ['pending', 'delete_requested'])
     .order('start_date', { ascending: true })
   if (visibleUserIds) leavesQuery = leavesQuery.in('user_id', visibleUserIds)
@@ -126,17 +142,19 @@ export async function listPendingApprovalsForReviewer(
     const days: LeaveRequestDay[] = group.map((l) => ({
       leave_id: l.id,
       date: l.start_date,
-      type: l.type as LeaveRequestDay['type'],
+      type: l.requested_type ?? l.type,
+      type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+      type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
       days_deducted: Number(l.days_deducted ?? 0),
       half_day_position: l.half_day_position as LeaveRequestDay['half_day_position'],
     }))
     days.sort((a, b) => a.date.localeCompare(b.date))
 
     const leaveDays = days
-      .filter((d) => d.type === 'leave' || d.type === 'compoff_leave')
+      .filter((d) => isAwayCategory(d.type_category))
       .reduce((s, d) => s + d.days_deducted, 0)
     const wfhDays = days
-      .filter((d) => d.type === 'wfh' || d.type === 'compoff_wfh')
+      .filter((d) => isWfhCategory(d.type_category))
       .reduce((s, d) => s + d.days_deducted, 0)
 
     const conflicts: LeaveRequestConflict[] = []
@@ -192,6 +210,7 @@ export async function listRosterContext(
   endDate: string
 ): Promise<RosterCell[]> {
   const adminClient = createAdminClient()
+  const policies = await loadLeaveTypePolicies(adminClient)
 
   const { data: members } = await adminClient
     .from('team_members')
@@ -209,7 +228,7 @@ export async function listRosterContext(
 
   const { data: leaves } = await adminClient
     .from('leaves')
-    .select('user_id, start_date, end_date, type, half_day_position')
+    .select('user_id, start_date, end_date, type, requested_type, half_day_position')
     .in('user_id', memberIds)
     .in('status', ACTIVE_STATUSES as unknown as ('active' | 'pending' | 'delete_requested')[])
     .lte('start_date', endDate)
@@ -231,7 +250,9 @@ export async function listRosterContext(
         user_id: l.user_id,
         user_full_name: memberNameById.get(l.user_id) ?? 'Unknown',
         date: cursor,
-        type: l.type as RosterCell['type'],
+        type: l.requested_type ?? l.type,
+        type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+        type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
         half_day_position: (l.half_day_position ?? null) as RosterCell['half_day_position'],
       })
       cursor = addOneDay(cursor)
@@ -265,6 +286,7 @@ export async function listLeaveRequestHistory(
   options?: { limit?: number; statuses?: Array<LeaveRequestWithDays['status']> }
 ): Promise<LeaveRequestWithDays[]> {
   const adminClient = createAdminClient()
+  const policies = await loadLeaveTypePolicies(adminClient)
   const statuses = options?.statuses ?? (['active', 'rejected', 'deleted'] as const)
   const limit = options?.limit ?? 100
 
@@ -297,7 +319,7 @@ export async function listLeaveRequestHistory(
 
   let q = adminClient
     .from('leaves')
-    .select('id, request_id, user_id, type, start_date, end_date, days_deducted, half_day_position, status, reason, created_at')
+    .select('id, request_id, user_id, type, requested_type, start_date, end_date, days_deducted, half_day_position, status, reason, created_at')
     .in('status', statuses as unknown as ('active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted')[])
     .order('start_date', { ascending: false })
     .limit(limit * 6) // a request can be up to ~6 days; over-fetch then group
@@ -347,16 +369,18 @@ export async function listLeaveRequestHistory(
     const days: LeaveRequestDay[] = group.map((l) => ({
       leave_id: l.id,
       date: l.start_date,
-      type: l.type as LeaveRequestDay['type'],
+      type: l.requested_type ?? l.type,
+      type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+      type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
       days_deducted: Number(l.days_deducted ?? 0),
       half_day_position: l.half_day_position as LeaveRequestDay['half_day_position'],
     }))
     days.sort((a, b) => a.date.localeCompare(b.date))
     const leaveDays = days
-      .filter((d) => d.type === 'leave' || d.type === 'compoff_leave')
+      .filter((d) => isAwayCategory(d.type_category))
       .reduce((s, d) => s + d.days_deducted, 0)
     const wfhDays = days
-      .filter((d) => d.type === 'wfh' || d.type === 'compoff_wfh')
+      .filter((d) => isWfhCategory(d.type_category))
       .reduce((s, d) => s + d.days_deducted, 0)
     out.push({
       id: key,

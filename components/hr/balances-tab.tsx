@@ -9,16 +9,18 @@ import { Save } from 'lucide-react'
 import { upsertBalance } from '@/lib/actions/balances'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
+import type { LeaveTypePolicy } from '@/lib/leave-types'
 import type { Tables } from '@/lib/supabase/database.types'
 
 interface Props {
   users: UserWithMembership[]
   balances: Tables<'leave_balances'>[]
   compoffBalances: Tables<'leave_balances'>[]
+  leaveTypes: LeaveTypePolicy[]
   leaveYear: number
 }
 
-type BalanceType = 'leave' | 'wfh' | 'compoff_leave' | 'compoff_wfh'
+type BalanceType = string
 
 interface EditState {
   userId: string
@@ -26,7 +28,7 @@ interface EditState {
   value: string
 }
 
-export function BalancesTab({ users, balances, compoffBalances, leaveYear }: Props) {
+export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leaveYear }: Props) {
   const { pushToast } = useStore()
   const [isPending, startTransition] = useTransition()
   const [editing, setEditing] = useState<EditState | null>(null)
@@ -52,11 +54,15 @@ export function BalancesTab({ users, balances, compoffBalances, leaveYear }: Pro
 
     const existing = getBalance(userId, type)
 
+    const policy = leaveTypes.find((leaveType) => leaveType.key === type)
     startTransition(async () => {
       try {
         await upsertBalance({
           user_id: userId,
-          leave_year: type.startsWith('compoff') ? 0 : leaveYear,
+          leave_year:
+            policy?.category === 'compoff_leave' || policy?.category === 'compoff_wfh'
+              ? 0
+              : leaveYear,
           type,
           allocated,
           used: existing?.used ?? 0,
@@ -133,6 +139,7 @@ export function BalancesTab({ users, balances, compoffBalances, leaveYear }: Pro
   }
 
   const activeUsers = users.filter((u) => u.status === 'active')
+  const visibleLeaveTypes = leaveTypes.filter((type) => type.is_active)
 
   return (
     <Card>
@@ -146,19 +153,15 @@ export function BalancesTab({ users, balances, compoffBalances, leaveYear }: Pro
           <thead>
             <tr className="text-left text-muted-foreground bg-muted/40">
               <th className="font-medium px-4 py-3">Employee</th>
-              <th className="font-medium px-4 py-3">Leave alloc (rem/total)</th>
-              <th className="font-medium px-4 py-3">Leave used</th>
-              <th className="font-medium px-4 py-3">WFH alloc (rem/total)</th>
-              <th className="font-medium px-4 py-3">WFH used</th>
-              <th className="font-medium px-4 py-3">Compoff Leave bal</th>
-              <th className="font-medium px-4 py-3">Compoff WFH bal</th>
+              {visibleLeaveTypes.map((type) => (
+                <th key={type.key} className="font-medium px-4 py-3">
+                  {type.name} (rem/total)
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {activeUsers.map((u) => {
-              const leave = getBalance(u.id, 'leave')
-              const wfh = getBalance(u.id, 'wfh')
-
               return (
                 <tr key={u.id} className="border-t hover:bg-muted/30">
                   <td className="px-4 py-3">
@@ -172,30 +175,17 @@ export function BalancesTab({ users, balances, compoffBalances, leaveYear }: Pro
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <BalanceCell userId={u.id} type="leave" />
-                  </td>
-                  <td className="px-4 py-3 tabular-nums">
-                    {leave ? leave.used : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <BalanceCell userId={u.id} type="wfh" />
-                  </td>
-                  <td className="px-4 py-3 tabular-nums">
-                    {wfh ? wfh.used : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <BalanceCell userId={u.id} type="compoff_leave" />
-                  </td>
-                  <td className="px-4 py-3">
-                    <BalanceCell userId={u.id} type="compoff_wfh" />
-                  </td>
+                  {visibleLeaveTypes.map((type) => (
+                    <td key={type.key} className="px-4 py-3">
+                      <BalanceCell userId={u.id} type={type.key} />
+                    </td>
+                  ))}
                 </tr>
               )
             })}
             {activeUsers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                <td colSpan={Math.max(2, visibleLeaveTypes.length + 1)} className="px-4 py-8 text-center text-muted-foreground text-sm">
                   No active users
                 </td>
               </tr>

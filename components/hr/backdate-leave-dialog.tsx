@@ -22,20 +22,22 @@ import {
 import { backdateLeave } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
+import type { LeaveTypePolicy } from '@/lib/leave-types'
 
 interface Props {
   users: UserWithMembership[]
+  leaveTypes: LeaveTypePolicy[]
   trigger?: React.ReactNode
 }
 
-export function BackdateLeaveDialog({ users, trigger }: Props) {
+export function BackdateLeaveDialog({ users, leaveTypes, trigger }: Props) {
   const router = useRouter()
   const { pushToast } = useStore()
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   const [userId, setUserId] = useState('')
-  const [type, setType] = useState<'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'>('leave')
+  const [type, setType] = useState(leaveTypes.find((leaveType) => leaveType.is_active)?.key ?? 'leave')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [halfDayStart, setHalfDayStart] = useState(false)
@@ -80,7 +82,7 @@ export function BackdateLeaveDialog({ users, trigger }: Props) {
     setOpen(v)
     if (!v) {
       setUserId('')
-      setType('leave')
+      setType(leaveTypes.find((leaveType) => leaveType.is_active)?.key ?? 'leave')
       setStartDate('')
       setEndDate('')
       setHalfDayStart(false)
@@ -120,15 +122,16 @@ export function BackdateLeaveDialog({ users, trigger }: Props) {
 
           <div className="space-y-1.5">
             <Label>Type</Label>
-            <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
+            <Select value={type} onValueChange={setType}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="leave">Leave</SelectItem>
-                <SelectItem value="wfh">Work From Home (WFH)</SelectItem>
-                <SelectItem value="compoff_leave">Comp-off Leave</SelectItem>
-                <SelectItem value="compoff_wfh">Comp-off WFH</SelectItem>
+                {leaveTypes.filter((leaveType) => leaveType.is_active).map((leaveType) => (
+                  <SelectItem key={leaveType.key} value={leaveType.key}>
+                    {leaveType.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

@@ -47,6 +47,13 @@ const TYPE_LABEL: Record<string, string> = {
   compoff_leave: 'C-Leave',
 }
 
+function leavePillClass(leave: LeaveWithUser) {
+  return TYPE_PILL[leave.requested_type ?? leave.type] ??
+    (leave.type_category === 'wfh' || leave.type_category === 'compoff_wfh'
+      ? 'bg-blue-100 text-blue-800'
+      : 'bg-orange-100 text-orange-800')
+}
+
 interface Props {
   currentUser: Tables<'users'>
   users: UserWithMembership[]
@@ -268,10 +275,10 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
                             key={l.id}
                             className={cn(
                               'rounded px-1 py-0.5 text-[9.5px] font-medium truncate',
-                              TYPE_PILL[l.type],
+                              leavePillClass(l),
                               isHalf && 'opacity-70 italic'
                             )}
-                            title={`${l.user_full_name} — ${TYPE_LABEL[l.type]}${isHalf ? ' (½)' : ''}`}
+                            title={`${l.user_full_name} — ${l.type_name ?? TYPE_LABEL[l.requested_type ?? l.type] ?? l.requested_type ?? l.type}${isHalf ? ' (½)' : ''}`}
                           >
                             {isHalf ? '½ ' : ''}
                             {l.user_full_name.split(' ')[0]}
@@ -324,8 +331,8 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
                           {l.reason ? ` · ${l.reason}` : ''}
                         </div>
                       </div>
-                      <span className={cn('rounded px-1.5 py-0.5 text-[10.5px] font-medium', TYPE_PILL[l.type])}>
-                        {TYPE_LABEL[l.type]}
+                      <span className={cn('rounded px-1.5 py-0.5 text-[10.5px] font-medium', leavePillClass(l))}>
+                        {l.type_name ?? TYPE_LABEL[l.requested_type ?? l.type] ?? l.requested_type ?? l.type}
                       </span>
                     </li>
                   ))}

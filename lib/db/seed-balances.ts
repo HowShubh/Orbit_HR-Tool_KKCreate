@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/database.types'
+import { DEFAULT_LEAVE_TYPES } from '@/lib/leave-types'
 
 export const DEFAULT_LEAVE_ALLOCATION = 18
 export const DEFAULT_WFH_ALLOCATION = 36
@@ -63,47 +64,48 @@ export async function seedDefaultBalances(
   fyStartYear: number,
   joinedAt: string | Date
 ): Promise<void> {
-  const leaveAllocated = proratedAllocation(
-    DEFAULT_LEAVE_ALLOCATION,
-    joinedAt,
-    fyStartYear
-  )
-  const wfhAllocated = proratedAllocation(
-    DEFAULT_WFH_ALLOCATION,
-    joinedAt,
-    fyStartYear
-  )
+  const [{ data: leaveTypes, error }, { data: eligibility }] = await Promise.all([
+    adminClient
+      .from('leave_types')
+      .select('key, category, annual_quota, eligibility_mode, is_active')
+      .eq('is_active', true),
+    adminClient
+      .from('user_leave_type_eligibility')
+      .select('leave_type_key')
+      .eq('user_id', userId),
+  ])
 
-  const rows = [
-    {
-      user_id: userId,
-      leave_year: fyStartYear,
-      type: 'leave' as const,
-      allocated: leaveAllocated,
-      used: 0,
-    },
-    {
-      user_id: userId,
-      leave_year: fyStartYear,
-      type: 'wfh' as const,
-      allocated: wfhAllocated,
-      used: 0,
-    },
-    {
-      user_id: userId,
-      leave_year: COMPOFF_YEAR,
-      type: 'compoff_leave' as const,
-      allocated: 0,
-      used: 0,
-    },
-    {
-      user_id: userId,
-      leave_year: COMPOFF_YEAR,
-      type: 'compoff_wfh' as const,
-      allocated: 0,
-      used: 0,
-    },
-  ]
+  const eligibleKeys = new Set((eligibility ?? []).map((row) => row.leave_type_key))
+  const policies =
+    error || !leaveTypes || leaveTypes.length === 0
+      ? DEFAULT_LEAVE_TYPES
+      : leaveTypes
+
+  const rows = policies
+    .filter(
+      (policy) =>
+        policy.eligibility_mode === 'all' ||
+        eligibleKeys.has(policy.key)
+    )
+    .map((policy) => {
+      const isCompoff = policy.category === 'compoff_leave' || policy.category === 'compoff_wfh'
+      const annualQuota =
+        policy.key === 'leave'
+          ? DEFAULT_LEAVE_ALLOCATION
+          : policy.key === 'wfh'
+            ? DEFAULT_WFH_ALLOCATION
+            : Number(policy.annual_quota ?? 0)
+
+      return {
+        user_id: userId,
+        leave_year: isCompoff ? COMPOFF_YEAR : fyStartYear,
+        type: policy.key,
+        allocated: isCompoff
+          ? Number(policy.annual_quota ?? 0)
+          : proratedAllocation(annualQuota, joinedAt, fyStartYear),
+        used: 0,
+      }
+    })
 
   await adminClient
     .from('leave_balances')

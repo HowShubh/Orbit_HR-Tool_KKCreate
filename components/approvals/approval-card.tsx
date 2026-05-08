@@ -20,9 +20,13 @@ import { ApprovalCardExpanded } from './approval-card-expanded'
 import type { LeaveRequestWithDays } from './leave-request-types'
 
 function summaryText(req: LeaveRequestWithDays): string {
-  const parts: string[] = []
-  if (req.summary.leave_days > 0) parts.push(`${formatDays(req.summary.leave_days)} Leave`)
-  if (req.summary.wfh_days > 0) parts.push(`${formatDays(req.summary.wfh_days)} WFH`)
+  const totals = new Map<string, number>()
+  for (const day of req.days) {
+    totals.set(day.type_name, (totals.get(day.type_name) ?? 0) + day.days_deducted)
+  }
+  const parts = Array.from(totals.entries()).map(
+    ([label, days]) => `${formatDays(days)} ${label}`
+  )
   const range =
     req.summary.start_date === req.summary.end_date
       ? format(parseISO(req.summary.start_date), 'MMM d, yyyy')

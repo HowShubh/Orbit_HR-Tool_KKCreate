@@ -13,7 +13,7 @@ import {
 const BalanceSchema = z.object({
   user_id: z.string().uuid(),
   leave_year: z.number().int(),
-  type: z.enum(['wfh', 'leave', 'compoff_wfh', 'compoff_leave']),
+  type: z.string().trim().min(1),
   allocated: z.number(),
   used: z.number().optional(),
 })

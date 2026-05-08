@@ -1,12 +1,15 @@
 import type { Tables } from '@/lib/supabase/database.types'
+import type { LeaveTypeCategory } from '@/lib/leave-types'
 
-export type LeaveDayType = 'wfh' | 'leave' | 'compoff_wfh' | 'compoff_leave'
+export type LeaveDayType = string
 export type LeaveRequestStatus = Tables<'leave_requests'>['status']
 
 export type LeaveRequestDay = {
   leave_id: string
   date: string                  // YYYY-MM-DD
   type: LeaveDayType
+  type_name: string
+  type_category: LeaveTypeCategory
   days_deducted: number
   half_day_position: 'first_half' | 'second_half' | null
 }
@@ -47,6 +50,8 @@ export type RosterCell = {
   user_full_name: string
   date: string                  // YYYY-MM-DD
   type: RosterCellType
+  type_name?: string
+  type_category?: LeaveTypeCategory
   half_day_position: 'first_half' | 'second_half' | null
 }
 

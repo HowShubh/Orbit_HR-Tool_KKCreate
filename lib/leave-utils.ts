@@ -1,5 +1,5 @@
 import { addDays, eachDayOfInterval, formatISO, isSameDay, parseISO } from "date-fns";
-import { Leave, LeaveType } from "./types";
+import { Leave } from "./types";
 import { holidays } from "./mock-data";
 
 const holidayDates = new Set(holidays.map((h) => h.date));
@@ -34,21 +34,21 @@ export function computeDaysDeducted(opts: {
   return total;
 }
 
-export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+export const LEAVE_TYPE_LABELS: Record<string, string> = {
   wfh: "WFH",
   leave: "Leave",
   compoff_wfh: "Comp-off WFH",
   compoff_leave: "Comp-off Leave",
 };
 
-export const LEAVE_TYPE_DOT: Record<LeaveType, string> = {
+export const LEAVE_TYPE_DOT: Record<string, string> = {
   wfh: "bg-leave-wfh",
   leave: "bg-leave-leave",
   compoff_wfh: "bg-leave-compwfh",
   compoff_leave: "bg-leave-compleave",
 };
 
-export const LEAVE_TYPE_PILL: Record<LeaveType, string> = {
+export const LEAVE_TYPE_PILL: Record<string, string> = {
   wfh: "bg-blue-50 text-blue-700 ring-blue-100",
   leave: "bg-orange-50 text-orange-700 ring-orange-100",
   compoff_wfh: "bg-cyan-50 text-cyan-700 ring-cyan-100",

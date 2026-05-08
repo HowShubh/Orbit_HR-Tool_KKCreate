@@ -16,6 +16,7 @@ import { deleteLeave, requestLeaveDeletion } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { AppUser } from '@/lib/auth/get-current-user'
+import type { LeaveTypePolicy } from '@/lib/leave-types'
 import type { Tables } from '@/lib/supabase/database.types'
 
 type LeavesTab = 'leaves' | 'compoff'
@@ -50,7 +51,7 @@ const LEAVE_STATUS_VARIANT: Record<string, 'success' | 'warning' | 'danger' | 'm
   deleted: 'muted',
 }
 
-function TypePill({ type }: { type: string }) {
+function TypePill({ type, label }: { type: string; label?: string }) {
   return (
     <span
       className={cn(
@@ -58,7 +59,7 @@ function TypePill({ type }: { type: string }) {
         LEAVE_TYPE_PILL[type] ?? 'bg-muted text-muted-foreground ring-border'
       )}
     >
-      {LEAVE_TYPE_LABELS[type] ?? type}
+      {label ?? LEAVE_TYPE_LABELS[type] ?? type}
     </span>
   )
 }
@@ -82,9 +83,10 @@ interface Props {
   compoff: Tables<'compoff_grants'>[]
   balances: Tables<'leave_balances'>[]
   compoffBalances: Tables<'leave_balances'>[]
+  leaveTypes: LeaveTypePolicy[]
 }
 
-export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoffBalances }: Props) {
+export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoffBalances, leaveTypes }: Props) {
   const router = useRouter()
   const { pushToast } = useStore()
   const [tab, setTab] = useState<LeavesTab>('leaves')
@@ -92,12 +94,15 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
   const [isPending, startTransition] = useTransition()
 
   const allBalances = [...balances, ...compoffBalances]
-  const balanceSummary = (['leave', 'wfh', 'compoff_leave', 'compoff_wfh'] as const).map((type) => {
-    const bal = allBalances.find((b) => b.type === type)
+  const visibleBalanceTypes = leaveTypes.filter(
+    (type) => type.is_active && allBalances.some((balance) => balance.type === type.key)
+  )
+  const balanceSummary = visibleBalanceTypes.map((type) => {
+    const bal = allBalances.find((b) => b.type === type.key)
     const allocated = bal?.allocated ?? 0
     const used = bal?.used ?? 0
     const remaining = Math.max(0, allocated - used)
-    return { type, label: LEAVE_TYPE_LABELS[type], allocated, used, remaining }
+    return { type: type.key, label: type.name, allocated, used, remaining }
   })
 
   const filteredLeaves = useMemo(() => {
@@ -151,7 +156,10 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
     const headers = ['Date', 'Type', 'Days', 'Status', 'Reason']
     const body = leaves.map((l) => [
       rangeLabel(l.start_date, l.end_date),
-      LEAVE_TYPE_LABELS[l.type] ?? l.type,
+      leaveTypes.find((type) => type.key === (l.requested_type ?? l.type))?.name ??
+        LEAVE_TYPE_LABELS[l.requested_type ?? l.type] ??
+        l.requested_type ??
+        l.type,
       l.days_deducted.toString(),
       LEAVE_STATUS_LABEL[l.status] ?? l.status,
       l.reason ?? '',
@@ -283,7 +291,10 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
                               )}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3">
-                              <TypePill type={leave.type} />
+                              <TypePill
+                                type={leave.requested_type ?? leave.type}
+                                label={leaveTypes.find((type) => type.key === (leave.requested_type ?? leave.type))?.name}
+                              />
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 tabular-nums">
                               {formatDays(leave.days_deducted)}
