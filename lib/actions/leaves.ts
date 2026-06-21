@@ -165,19 +165,6 @@ function addOneDayIso(date: string) {
   return next.toISOString().slice(0, 10)
 }
 
-function expandRequestedRange(input: z.infer<typeof CreateLeaveSchema>) {
-  const days: Array<{ date: string; type: string; days_deducted: number }> = []
-  let cursor = input.start_date
-  while (cursor <= input.end_date) {
-    let daysDeducted = 1
-    if (cursor === input.start_date && input.half_day_start) daysDeducted = 0.5
-    if (cursor === input.end_date && input.half_day_end) daysDeducted = 0.5
-    days.push({ date: cursor, type: input.type, days_deducted: daysDeducted })
-    cursor = addOneDayIso(cursor)
-  }
-  return days
-}
-
 async function ensureMonthlyQuota(
   adminClient: ReturnType<typeof createAdminClient>,
   userId: string,
@@ -269,53 +256,6 @@ async function ensureNoOverlap(
       `This leave overlaps an existing ${first.requested_type ?? first.type} from ${first.start_date} to ${first.end_date}. Contact HR if you need this resolved.`
     )
   }
-}
-
-async function getLeaveReviewers(
-  adminClient: ReturnType<typeof createAdminClient>,
-  user: LeaveReviewerUser
-) {
-  const reviewerIds = new Set<string>()
-
-  const { data: primaryMembership } = await adminClient
-    .from('team_members')
-    .select('team_id')
-    .eq('user_id', user.id)
-    .is('left_at', null)
-    .order('is_primary', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (primaryMembership?.team_id) {
-    const { data: team } = await adminClient
-      .from('teams')
-      .select('team_lead_id')
-      .eq('id', primaryMembership.team_id)
-      .maybeSingle()
-
-    if (team?.team_lead_id && team.team_lead_id !== user.id) {
-      reviewerIds.add(team.team_lead_id)
-    }
-  }
-
-  if (reviewerIds.size === 0 && user.manager_id && user.manager_id !== user.id) {
-    reviewerIds.add(user.manager_id)
-  }
-
-  if (reviewerIds.size > 0) return Array.from(reviewerIds)
-
-  const fallbackRoles: Array<'hr' | 'founder'> =
-    user.role === 'team_lead' ? ['founder'] : ['hr', 'founder']
-  const { data: fallbackUsers } = await adminClient
-    .from('users')
-    .select('id')
-    .in('role', fallbackRoles)
-    .eq('status', 'active')
-    .order('full_name', { ascending: true })
-
-  for (const reviewer of fallbackUsers ?? []) reviewerIds.add(reviewer.id)
-  reviewerIds.delete(user.id)
-  return Array.from(reviewerIds)
 }
 
 async function getLeaveUser(
@@ -490,79 +430,6 @@ async function bumpUsed(
       used: delta,
     })
   }
-}
-
-export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
-  const user = await requireUser()
-  const parsed = CreateLeaveSchema.parse(input)
-  const targetUserId = user.id
-
-  if (parsed.start_date > parsed.end_date) {
-    throw new ActionError('End date must be on or after start date.')
-  }
-
-  // Self-create: must be a future leave (today or later)
-  const today = todayIST()
-  if (parsed.start_date < today) {
-    throw new ActionError('Leaves must start today or later. HR can backdate leaves on your behalf.')
-  }
-
-  const adminClient = createAdminClient()
-  const policies = await getLeaveTypePolicies(adminClient)
-  const days = calcDays(parsed)
-  const policy = getPolicyOrThrow(policies, parsed.type)
-
-  if (!policy.is_active || !isEligibleForPolicy(policy, user.id)) {
-    throw new ActionError(`${leaveTypeLabel(parsed.type, policies)} is not available for your profile.`)
-  }
-
-  await ensureNoOverlap(adminClient, targetUserId, parsed.start_date, parsed.end_date)
-  await ensureMonthlyQuota(adminClient, targetUserId, expandRequestedRange(parsed), policies)
-  await ensureBalance(adminClient, targetUserId, parsed.type, days, policies)
-  const reviewers = await getLeaveReviewers(adminClient, user)
-  if (reviewers.length === 0) {
-    throw new ActionError('No leave approver is available. Contact HR or your founder.')
-  }
-
-  const { data: leave, error } = await adminClient
-    .from('leaves')
-    .insert({
-      user_id: targetUserId,
-      type: parsed.type,
-      requested_type: parsed.type,
-      start_date: parsed.start_date,
-      end_date: parsed.end_date,
-      half_day_start: parsed.half_day_start ?? false,
-      half_day_end: parsed.half_day_end ?? false,
-      half_day_position: parsed.half_day_position ?? null,
-      reason: parsed.reason ?? null,
-      days_deducted: days,
-      status: 'pending',
-      created_by: user.id,
-    })
-    .select()
-    .single()
-
-  if (error || !leave) throw new ActionError(error?.message ?? 'Create leave failed')
-
-  await Promise.all(
-    reviewers.map((reviewerId) =>
-      notifyUser({
-        user_id: reviewerId,
-        type: 'leave_requested',
-        title: 'Leave approval needed',
-        body: `${user.full_name} requested ${leaveTypeLabel(parsed.type, policies)} from ${parsed.start_date} to ${parsed.end_date}.`,
-        link_url: '/',
-        related_entity_type: 'leave',
-        related_entity_id: leave.id,
-      })
-    )
-  )
-
-  await writeAudit(user.id, 'leave.request', 'leave', leave.id, { after: leave })
-
-  revalidatePath('/', 'layout')
-  return leave
 }
 
 export async function getMyLeavePlannerData() {
@@ -1313,7 +1180,18 @@ export async function requestLeaveDeletion(leaveId: string) {
     throw new ActionError('Only approved leaves need deletion approval.')
   }
 
-  const reviewers = await getLeaveReviewers(adminClient, user)
+  // Deletion is approved by the same person who approves leaves — the manager
+  // (HR/Founders as the fallback when there's no manager, incl. founders' own).
+  const routing = await resolveLeaveApprovalRouting(adminClient, user)
+  let reviewers = routing.approverIds
+  if (reviewers.length === 0) {
+    const { data: fallback } = await adminClient
+      .from('users')
+      .select('id')
+      .in('role', ['hr', 'founder'] as unknown as ('hr' | 'founder')[])
+      .eq('status', 'active')
+    reviewers = (fallback ?? []).map((u) => u.id).filter((id) => id !== user.id)
+  }
   if (reviewers.length === 0) {
     throw new ActionError('No leave deletion approver is available. Contact HR or your founder.')
   }

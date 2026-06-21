@@ -6,6 +6,25 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-22 — Dead-code sweep + wipe-script fix + .gitignore
+
+- **Dead code removed** (`lib/actions/leaves.ts`): legacy `createMyLeave` (no UI
+  used it — the planner uses `createMyLeavePlan`), its only-consumer helper
+  `expandRequestedRange`, and `getLeaveReviewers` (the old primary-team-lead
+  routing). `requestLeaveDeletion` now uses the manager-primary
+  `resolveLeaveApprovalRouting` (HR/Founder fallback) for its notification, so
+  deletion approvals route to the same approver as everything else.
+- **Wipe script fix** (`db/scripts/wipe-except-founder.sql`): it deleted `leaves`
+  but not `leave_requests`, whose `user_id`/`created_by` FKs have no
+  `ON DELETE CASCADE` — so `DELETE FROM auth.users` would fail on any non-founder
+  with a leave request. Added `DELETE FROM public.leave_requests`. Also re-seeds
+  the founder's leave/WFH balance from the **configured** leave-type quotas
+  instead of hardcoded 18/36.
+- **.gitignore**: added `.claude/` (local Claude Code tooling config / personal
+  settings — shouldn't be in the repo).
+
+---
+
 ## 2026-06-22 — Permissions tab: scope display + enforcement finding
 
 - **#1 scope display:** capability chips in `permissions-client.tsx` (By-User and

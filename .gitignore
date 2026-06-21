@@ -31,3 +31,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
+
+# local Claude Code tooling config (launch.json, settings.local.json)
+.claude/

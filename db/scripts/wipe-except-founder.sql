@@ -18,10 +18,13 @@ BEGIN
     RAISE EXCEPTION 'No auth.users row found for %. Aborting.', keep_email;
   END IF;
 
-  -- 1. Wipe every dependent data table (no user FK left dangling)
+  -- 1. Wipe every dependent data table (no user FK left dangling).
+  --    leave_requests.user_id/created_by have no ON DELETE CASCADE, so it MUST
+  --    be cleared here or the auth.users delete below fails with an FK violation.
   DELETE FROM public.audit_log;
   DELETE FROM public.notifications;
   DELETE FROM public.leaves;
+  DELETE FROM public.leave_requests;
   DELETE FROM public.leave_balances;
   DELETE FROM public.compoff_grants;
   DELETE FROM public.team_members;
@@ -46,13 +49,20 @@ BEGIN
   -- 5. Delete from auth.users — public.users cascades automatically
   DELETE FROM auth.users WHERE id <> keep_id;
 
-  -- 6. Re-seed founder's leave balances for FY 2026-27 (idempotent)
+  -- 6. Re-seed founder's allocatable balances for FY 2026-27 from the CONFIGURED
+  --    leave-type quotas (so it matches what HR set, not a hardcoded 18/36).
+  --    Comp-off banks start at 0 (they're earned, not allocated). Idempotent.
+  INSERT INTO public.leave_balances (user_id, leave_year, type, allocated, used)
+  SELECT keep_id, 2026, lt.key, lt.annual_quota, 0
+  FROM public.leave_types lt
+  WHERE lt.key IN ('leave', 'wfh')
+  ON CONFLICT (user_id, leave_year, type)
+  DO UPDATE SET allocated = EXCLUDED.allocated, used = 0;
+
   INSERT INTO public.leave_balances (user_id, leave_year, type, allocated, used)
   VALUES
-    (keep_id, 2026, 'leave',          18, 0),
-    (keep_id, 2026, 'wfh',            36, 0),
-    (keep_id, 0,    'compoff_leave',   0, 0),
-    (keep_id, 0,    'compoff_wfh',     0, 0)
+    (keep_id, 0, 'compoff_leave', 0, 0),
+    (keep_id, 0, 'compoff_wfh',   0, 0)
   ON CONFLICT (user_id, leave_year, type)
   DO UPDATE SET allocated = EXCLUDED.allocated, used = 0;
 
