@@ -42,6 +42,12 @@ BEGIN
 
   -- 4. Clear manager_id chains and bootstrap-by references
   UPDATE public.users SET manager_id = NULL;
+
+  -- 4b. Guarantee the kept account is a clean, active FOUNDER (top of the org).
+  UPDATE public.users
+     SET role = 'founder', status = 'active', manager_id = NULL, exited_at = NULL
+   WHERE id = keep_id;
+
   UPDATE public.system_state
      SET bootstrapped_by = keep_id
    WHERE bootstrapped_by IS DISTINCT FROM keep_id;
