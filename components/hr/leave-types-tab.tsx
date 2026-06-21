@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Save, Info } from 'lucide-react'
+import { Plus, Save, Info, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { createLeaveType, updateLeaveType } from '@/lib/actions/leave-types'
+import { createLeaveType, updateLeaveType, deleteLeaveType } from '@/lib/actions/leave-types'
 import { slugifyLeaveTypeKey, type LeaveTypePolicy } from '@/lib/leave-types'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
@@ -85,6 +85,24 @@ export function LeaveTypesTab({
     editingPolicy ? formFromPolicy(editingPolicy) : BLANK_FORM
   )
   const [keyTouched, setKeyTouched] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  function handleDelete() {
+    if (!editingPolicy) return
+    startTransition(async () => {
+      try {
+        await deleteLeaveType(editingPolicy.key)
+        pushToast({ title: 'Leave type deleted', variant: 'success' })
+        setConfirmDelete(false)
+        startNew()
+        router.refresh()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to delete leave type'
+        pushToast({ title: "Can't delete", body: message, variant: 'error' })
+        setConfirmDelete(false)
+      }
+    })
+  }
 
   const activeUsers = users
     .filter((user) => user.status === 'active')
@@ -94,12 +112,14 @@ export function LeaveTypesTab({
     setEditingKey(policy.key)
     setForm(formFromPolicy(policy))
     setKeyTouched(true)
+    setConfirmDelete(false)
   }
 
   function startNew() {
     setEditingKey(null)
     setForm(BLANK_FORM)
     setKeyTouched(false)
+    setConfirmDelete(false)
   }
 
   function setName(name: string) {
@@ -347,10 +367,45 @@ export function LeaveTypesTab({
             </div>
           )}
 
-          <Button onClick={save} disabled={isPending}>
-            <Save className="h-4 w-4" />
-            {isPending ? 'Saving...' : 'Save leave type'}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={save} disabled={isPending}>
+              <Save className="h-4 w-4" />
+              {isPending ? 'Saving...' : 'Save leave type'}
+            </Button>
+            {editingPolicy && !editingPolicy.is_system && !confirmDelete && (
+              <Button
+                variant="outline"
+                disabled={isPending}
+                onClick={() => setConfirmDelete(true)}
+                className="text-destructive hover:bg-destructive/10 hover:border-destructive/50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+            )}
+          </div>
+
+          {editingPolicy && confirmDelete && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900">
+              <span>
+                Delete <strong>{editingPolicy.name}</strong>? This can&rsquo;t be undone. (Allowed
+                only if no leaves use it — otherwise deactivate it instead.)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" disabled={isPending} onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={isPending}
+                  onClick={handleDelete}
+                  className="bg-rose-600 hover:bg-rose-700"
+                >
+                  {isPending ? 'Deleting…' : 'Yes, delete'}
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

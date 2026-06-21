@@ -14,6 +14,7 @@ import {
   SelectItem,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { PersonDetail } from '@/components/people/person-detail'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { LeaveWithUser } from '@/lib/queries/leaves'
 
@@ -58,6 +59,7 @@ export function TeamClient({
   upcomingByTeam,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(initialTeamId)
+  const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null)
 
   if (!initialTeamId || myTeams.length === 0) {
     return (
@@ -76,6 +78,14 @@ export function TeamClient({
 
   const team = myTeams.find((t) => t.id === selectedId) ?? myTeams[0]
   const members = membersByTeam[team.id] ?? []
+
+  // A lead can view detail for members of teams THEY lead; HR/Founders for anyone.
+  const canViewDetail =
+    currentUser.role === 'hr' ||
+    currentUser.role === 'founder' ||
+    leadByTeam[team.id]?.id === currentUser.id
+  // Auto-clear the expanded member when switching to a team they're not in.
+  const expandedId = members.some((m) => m.id === expandedMemberId) ? expandedMemberId : null
   const lead = leadByTeam[team.id]
   const upcoming = upcomingByTeam[team.id] ?? []
 
@@ -156,7 +166,15 @@ export function TeamClient({
               const isLead = lead?.id === m.id
               const isMe = m.id === currentUser.id
               return (
-                <Card key={m.id} className={cn(isMe && 'ring-2 ring-violet-500')}>
+                <Card
+                  key={m.id}
+                  onClick={canViewDetail ? () => setExpandedMemberId((prev) => (prev === m.id ? null : m.id)) : undefined}
+                  className={cn(
+                    isMe && 'ring-2 ring-violet-500',
+                    canViewDetail && 'cursor-pointer hover:bg-muted/30 transition-colors',
+                    expandedId === m.id && 'ring-2 ring-primary'
+                  )}
+                >
                   <CardContent className="p-4 flex items-center gap-3">
                     <Avatar name={m.full_name} size="md" />
                     <div className="min-w-0 flex-1">
@@ -180,6 +198,19 @@ export function TeamClient({
               )
             })}
           </div>
+
+          {canViewDetail && expandedId && (
+            <Card className="mt-3 border-primary/30">
+              <CardContent className="p-5">
+                <PersonDetail userId={expandedId} />
+              </CardContent>
+            </Card>
+          )}
+          {canViewDetail && (
+            <p className="mt-2 text-[11.5px] text-muted-foreground">
+              Tip: click a member to see their full profile and leave history.
+            </p>
+          )}
         </div>
 
         {/* Upcoming leaves */}

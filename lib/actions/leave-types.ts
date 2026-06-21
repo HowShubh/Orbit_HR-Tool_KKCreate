@@ -224,3 +224,46 @@ export async function updateLeaveType(input: z.infer<typeof UpdateLeaveTypeSchem
   revalidatePath('/', 'layout')
   return data
 }
+
+/**
+ * Delete a custom leave type. Blocked for system types and for any type that
+ * already has leave entries (deleting would lose history — deactivate instead).
+ * Unused balance rows + eligibility for the type are cleaned up first.
+ */
+export async function deleteLeaveType(key: string) {
+  const actor = await requireCapability('edit_balance')
+  const adminClient = createAdminClient()
+
+  const { data: type } = await adminClient
+    .from('leave_types')
+    .select('*')
+    .eq('key', key)
+    .maybeSingle()
+
+  if (!type) throw new ActionError('Leave type not found')
+  if (type.is_system) {
+    throw new ActionError('Built-in leave types cannot be deleted. You can deactivate them instead.')
+  }
+
+  // Block if any leave entries reference this type (as taken or as requested).
+  const { count: leaveCount } = await adminClient
+    .from('leaves')
+    .select('id', { count: 'exact', head: true })
+    .or(`type.eq.${key},requested_type.eq.${key}`)
+
+  if (leaveCount && leaveCount > 0) {
+    throw new ActionError(
+      `“${type.name}” is used by ${leaveCount} leave ${leaveCount === 1 ? 'entry' : 'entries'} and can’t be deleted without losing that history. Deactivate it instead to hide it from new requests.`
+    )
+  }
+
+  // Safe to remove: clear its (unused) balance rows, then the type itself.
+  // user_leave_type_eligibility cascades on the leave_types delete.
+  await adminClient.from('leave_balances').delete().eq('type', key)
+
+  const { error } = await adminClient.from('leave_types').delete().eq('key', key)
+  if (error) throw new ActionError(error.message)
+
+  await writeAudit(actor.id, 'leave_type.delete', 'leave_type', key, { before: type })
+  revalidatePath('/', 'layout')
+}

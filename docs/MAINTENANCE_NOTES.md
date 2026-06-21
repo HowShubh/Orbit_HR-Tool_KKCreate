@@ -6,6 +6,41 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-22 — Delete leave type
+
+Added `deleteLeaveType(key)` (`lib/actions/leave-types.ts`): refuses **system**
+types and any type already referenced by leave entries (would lose history —
+deactivate instead); otherwise clears the type's unused balance rows (eligibility
+cascades) and deletes it. UI: a **Delete** button + inline confirm in the Leave
+Types editor (`leave-types-tab.tsx`), shown only for non-system types.
+
+---
+
+## 2026-06-22 — Per-person detail view (leave history) for HR + team leads
+
+A consolidated "everything about one person's time off" view, reachable two ways.
+- **Data:** `lib/actions/person-detail.ts → getUserLeaveProfile(userId)` ('use server')
+  returns profile + manager + teams + balances + ALL leave rows (enriched with
+  type_name/category) + earned comp-off grants. Authorized via
+  `requireCapability('view_leaves', userId)` — HR/Founders see anyone, a team lead
+  sees members of teams they lead, a person sees themselves. Reconciles comp-off
+  expiry first. (Types live in `lib/person-detail-types.ts` — must NOT be exported
+  from the 'use server' file or the build rejects non-async exports.)
+- **Shared UI:** `components/people/person-detail.tsx` — profile facts, balances,
+  earned comp-off (with expiry), and a filterable leave/WFH history (type +
+  status filters). Fetches on mount.
+- **HR Console → Users:** click a name → `person-detail-drawer.tsx` (right
+  slide-over built on radix Dialog).
+- **Team section:** click a member card → inline detail panel below the grid.
+  Gated client-side to HR/Founder or the lead of the selected team (matches the
+  server authz, avoids a forbidden error).
+- Build verified (the 'use server' + client-component split compiles).
+- Fix: the balances grid initially showed duplicate cards (same type across FY
+  2026 + FY 2027). `getUserLeaveProfile` now filters balances to the current FY +
+  comp-off year (`[currentFiscalYearStart(), 0]`), matching the rest of the app.
+
+---
+
 ## 2026-06-22 — Dead-code sweep + wipe-script fix + .gitignore
 
 - **Dead code removed** (`lib/actions/leaves.ts`): legacy `createMyLeave` (no UI

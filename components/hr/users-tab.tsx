@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { UserFormDialog } from './user-form-dialog'
 import { UsersCsvImport } from './users-csv-import'
+import { PersonDetailDrawer } from '@/components/people/person-detail-drawer'
 import { deactivateUser, reactivateUser } from '@/lib/actions/users'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
@@ -26,6 +27,7 @@ export function UsersTab({ users, teams }: Props) {
   const [editingUser, setEditingUser] = useState<UserWithMembership | undefined>()
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')
   const [csvImportOpen, setCsvImportOpen] = useState(false)
+  const [detailUserId, setDetailUserId] = useState<string | null>(null)
 
   const filtered = users.filter((u) => {
     if (!search.trim()) return true
@@ -125,7 +127,14 @@ export function UsersTab({ users, teams }: Props) {
                         <div className="flex items-center gap-2.5">
                           <Avatar name={u.full_name} size="sm" />
                           <div className="min-w-0">
-                            <div className="text-[13px] font-medium truncate">{u.full_name}</div>
+                            <button
+                              type="button"
+                              onClick={() => setDetailUserId(u.id)}
+                              className="text-[13px] font-medium truncate text-left hover:text-primary hover:underline"
+                              title="View profile & leave history"
+                            >
+                              {u.full_name}
+                            </button>
                             <div className="text-[11px] text-muted-foreground truncate">{u.email}</div>
                             {u.designation && (
                               <div className="text-[11px] text-muted-foreground/70 truncate">{u.designation}</div>
@@ -213,6 +222,8 @@ export function UsersTab({ users, teams }: Props) {
         users={users}
         teams={teams}
       />
+
+      <PersonDetailDrawer userId={detailUserId} onClose={() => setDetailUserId(null)} />
     </>
   )
 }
