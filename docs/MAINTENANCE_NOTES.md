@@ -6,6 +6,17 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-22 — Leave planner UX: inline invalid-day feedback + simpler WFH cell
+
+`leave-form-dialog.tsx`: picking an invalid day (past / Sunday / holiday / WFH on
+your own WFH day / overlaps an existing request) used to fire a global toast at
+the screen's bottom-right, which felt "silent." Now an inline `notice` shows in
+the dialog's right panel and auto-dismisses after ~4.5s, with messages that
+explain *why* (improved `validateDate` copy). The "Your WFH day" calendar cell is
+now just the home icon (aria-label), no text.
+
+---
+
 ## 2026-06-22 — Delete leave type
 
 Added `deleteLeaveType(key)` (`lib/actions/leave-types.ts`): refuses **system**

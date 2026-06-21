@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   addDays,
@@ -164,6 +164,19 @@ export function LeaveFormDialog({ trigger }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [isPending, startTransition] = useTransition()
+  // Inline feedback shown in the right panel (auto-dismisses) when a day can't be picked.
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showNotice(message: string) {
+    setNotice(message)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => setNotice(null), 4500)
+  }
+
+  useEffect(() => () => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+  }, [])
 
   useEffect(() => {
     if (!open || data || loading) return
@@ -190,6 +203,7 @@ export function LeaveFormDialog({ trigger }: Props) {
     setReason('')
     setMode('leave')
     setCursor(new Date())
+    setNotice(null)
   }
 
   function handleOpenChange(value: boolean) {
@@ -247,15 +261,17 @@ export function LeaveFormDialog({ trigger }: Props) {
 
   function validateDate(date: Date, type: PlanType) {
     const iso = format(date, 'yyyy-MM-dd')
-    if (iso < todayIso()) return `${iso} is in the past.`
-    if (dayCode(date) === 'SUN') return `${iso} is Sunday!`
-    if (holidayByDate.has(iso)) return `${iso} is a Holiday!`
+    const nice = format(date, 'EEE, MMM d')
+    if (iso < todayIso()) return `${nice} is in the past. You can only apply for today or later.`
+    if (dayCode(date) === 'SUN') return `${nice} is a Sunday, not a working day.`
+    const holiday = holidayByDate.get(iso)
+    if (holiday) return `${nice} is a holiday (${holiday}).`
     if (isWfhCategory(policyCategory(data, type)) && !wfoDays.has(dayCode(date))) {
-      return `${iso} is a WFH day for YOU!`
+      return `You already work from home on ${format(date, 'EEEE')}s. WFH requests are only for your office days.`
     }
     const ownOverlap = leavesOn(iso).find((leave) => leave.user_id === data?.currentUserId)
     if (ownOverlap) {
-      return `${iso} already has your ${ownOverlap.type_name ?? labelFor(data, ownOverlap.type)} request.`
+      return `You already have a ${ownOverlap.type_name ?? labelFor(data, ownOverlap.type)} request on ${nice}.`
     }
     return null
   }
@@ -271,10 +287,11 @@ export function LeaveFormDialog({ trigger }: Props) {
 
     const error = validateDate(date, mode)
     if (error) {
-      pushToast({ title: 'Cannot select date', body: error, variant: 'error' })
+      showNotice(error)
       return
     }
 
+    setNotice(null)
     setSelectedDays((prev) => [
       ...prev.filter((item) => item.date !== iso),
       { date: iso, type: mode },
@@ -500,10 +517,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                             </div>
                           )}
                           {isOwnWfhDay && (
-                            <div className="flex items-center gap-1 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-blue-100">
-                              <Home className="h-3 w-3" />
-                              Your WFH day
-                            </div>
+                            <Home className="h-3.5 w-3.5 text-blue-500" aria-label="Your WFH day" />
                           )}
                           {teamAway.length > 0 && (
                             <div className="truncate rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100">
@@ -528,6 +542,15 @@ export function LeaveFormDialog({ trigger }: Props) {
             </div>
 
             <aside className="space-y-4">
+              {notice && (
+                <div
+                  role="status"
+                  className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900"
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{notice}</span>
+                </div>
+              )}
               <div className="rounded-xl border p-4">
                 <div className="text-sm font-semibold">Balances</div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
