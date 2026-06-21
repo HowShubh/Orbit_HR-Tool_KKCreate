@@ -10,6 +10,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useCapabilities } from '@/hooks/use-capabilities'
 import { revokeCapability } from '@/lib/actions/capabilities'
+import { PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
 import { useStore } from '@/lib/store'
 import { GrantCapabilityDialog } from './grant-capability-dialog'
 import { ApplyBundleDialog } from './apply-bundle-dialog'
@@ -34,6 +35,34 @@ function sourceVariant(source: string): 'muted' | 'info' | 'warning' | 'success'
   if (source === 'manual') return 'info'
   if (source === 'bundle') return 'warning'
   return 'muted'
+}
+
+/** Human-readable scope of a grant, e.g. "all", "teams: Finance", "users: Asha". */
+function scopeLabel(
+  uc: Pick<Tables<'user_capabilities'>, 'scope_type' | 'scope_team_ids' | 'scope_user_ids'>,
+  teams: TeamWithMembers[],
+  users: UserWithMembership[]
+): string | null {
+  switch (uc.scope_type) {
+    case 'all':
+      return 'all'
+    case 'self':
+      return 'self'
+    case 'teams': {
+      const names = (uc.scope_team_ids ?? []).map(
+        (id) => teams.find((t) => t.id === id)?.name ?? '?'
+      )
+      return names.length ? `teams: ${names.join(', ')}` : 'teams'
+    }
+    case 'users': {
+      const names = (uc.scope_user_ids ?? []).map(
+        (id) => users.find((u) => u.id === id)?.full_name ?? '?'
+      )
+      return names.length ? `users: ${names.join(', ')}` : 'users'
+    }
+    default:
+      return null
+  }
 }
 
 export function PermissionsClient({
@@ -124,16 +153,28 @@ export function PermissionsClient({
             />
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBundleDialogOpen(true)}>
+            <Button variant="outline" disabled={PERMISSIONS_READ_ONLY} onClick={() => setBundleDialogOpen(true)}>
               <Package className="h-4 w-4" />
               Apply Bundle
             </Button>
-            <Button onClick={() => openGrantForUser(undefined)}>
+            <Button disabled={PERMISSIONS_READ_ONLY} onClick={() => openGrantForUser(undefined)}>
               <Shield className="h-4 w-4" />
               Grant Capability
             </Button>
           </div>
         </div>
+
+        {PERMISSIONS_READ_ONLY && (
+          <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
+            <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              <strong className="text-foreground">Read-only.</strong> Access is managed by
+              role — to change what someone can do, update their role in{' '}
+              <strong>HR Console → Users</strong>. This view shows who has which capabilities,
+              their source (role / bundle / manual), and scope.
+            </span>
+          </div>
+        )}
 
         <Tabs defaultValue="by-user">
           <TabsList>
@@ -163,20 +204,25 @@ export function PermissionsClient({
 
                             {grants.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5">
-                                {grants.map((uc) => (
+                                {grants.map((uc) => {
+                                  const scope = scopeLabel(uc, teams, users)
+                                  return (
                                   <div
                                     key={uc.id}
                                     className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
                                     title={uc.source === 'role' ? 'Derived from role — cannot revoke directly' : uc.source === 'bundle' ? `From bundle — cannot revoke directly` : uc.note ?? ''}
                                   >
                                     <span className="font-mono">{uc.capability_key}</span>
+                                    {scope && (
+                                      <span className="text-[10px] text-muted-foreground">· {scope}</span>
+                                    )}
                                     <Badge variant={sourceVariant(uc.source)} className="text-[9px] px-1 py-0">
                                       {uc.source}
                                     </Badge>
                                     {uc.source === 'manual' && (
                                       <button
                                         onClick={() => handleRevoke(uc.id)}
-                                        disabled={isPending}
+                                        disabled={isPending || PERMISSIONS_READ_ONLY}
                                         className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
                                         title="Revoke"
                                       >
@@ -184,7 +230,8 @@ export function PermissionsClient({
                                       </button>
                                     )}
                                   </div>
-                                ))}
+                                  )
+                                })}
                               </div>
                             ) : (
                               <span className="text-xs text-muted-foreground">No custom capabilities</span>
@@ -194,6 +241,7 @@ export function PermissionsClient({
                           <Button
                             variant="outline"
                             size="sm"
+                            disabled={PERMISSIONS_READ_ONLY}
                             onClick={() => openGrantForUser(user.id)}
                             className="shrink-0"
                           >
@@ -234,19 +282,24 @@ export function PermissionsClient({
 
                             {grants.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5">
-                                {grants.map((uc) => (
+                                {grants.map((uc) => {
+                                  const scope = scopeLabel(uc, teams, users)
+                                  return (
                                   <div
                                     key={uc.id}
                                     className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
                                   >
                                     <span>{uc.user_full_name}</span>
+                                    {scope && (
+                                      <span className="text-[10px] text-muted-foreground">· {scope}</span>
+                                    )}
                                     <Badge variant={sourceVariant(uc.source)} className="text-[9px] px-1 py-0">
                                       {uc.source}
                                     </Badge>
                                     {uc.source === 'manual' && (
                                       <button
                                         onClick={() => handleRevoke(uc.id)}
-                                        disabled={isPending}
+                                        disabled={isPending || PERMISSIONS_READ_ONLY}
                                         className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
                                         title="Revoke"
                                       >
@@ -254,7 +307,8 @@ export function PermissionsClient({
                                       </button>
                                     )}
                                   </div>
-                                ))}
+                                  )
+                                })}
                               </div>
                             ) : (
                               <span className="text-xs text-muted-foreground">No grants</span>

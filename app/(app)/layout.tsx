@@ -5,6 +5,7 @@ import {
   getCurrentUserTeamContext,
 } from '@/lib/auth/get-current-user'
 import { listMyNotifications } from '@/lib/queries/notifications'
+import { countCompoffPendingForApprover } from '@/lib/queries/compoff'
 import { AppShell } from '@/components/layout/app-shell'
 
 export default async function AppLayout({
@@ -35,9 +36,10 @@ export default async function AppLayout({
     redirect('/login?error=account_exited')
   }
 
-  const [{ ledTeamIds, membersByTeam }, notifications] = await Promise.all([
+  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount] = await Promise.all([
     getCurrentUserTeamContext(user.id),
     listMyNotifications(user.id, 20),
+    countCompoffPendingForApprover(user.id),
   ])
 
   return (
@@ -46,6 +48,7 @@ export default async function AppLayout({
       ledTeamIds={ledTeamIds}
       membersByTeam={membersByTeam}
       notifications={notifications}
+      pendingCompoffCount={pendingCompoffCount}
     >
       {children}
     </AppShell>

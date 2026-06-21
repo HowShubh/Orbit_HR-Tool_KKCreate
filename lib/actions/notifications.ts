@@ -17,6 +17,17 @@ export async function notifyUser(input: {
   related_entity_id?: string
 }): Promise<void> {
   const adminClient = createAdminClient()
+
+  // Respect the recipient's "mute notifications" preference — skip in-app
+  // notifications entirely for muted users. (They can still see pending items
+  // on the dashboard / approval queue; muting only silences these pings.)
+  const { data: recipient } = await adminClient
+    .from('users')
+    .select('notifications_muted')
+    .eq('id', input.user_id)
+    .single()
+  if (recipient?.notifications_muted) return
+
   await adminClient.from('notifications').insert({
     user_id: input.user_id,
     type: input.type,

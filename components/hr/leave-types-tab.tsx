@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Save } from 'lucide-react'
+import { Plus, Save, Info } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -174,6 +174,15 @@ export function LeaveTypesTab({
               <Plus className="h-4 w-4" />
               New type
             </Button>
+          </div>
+          <div className="flex items-start gap-2 border-b bg-blue-50/60 px-4 py-3 text-[12px] text-blue-900">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Quota is the <strong>default for new joiners</strong> (pro-rated by join
+              date) and the annual reset. It does <strong>not</strong> change the
+              balances of people who already have one — to adjust someone&rsquo;s current
+              balance, edit it in the <strong>Balances</strong> tab.
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -13,6 +13,7 @@ interface AppShellProps {
   ledTeamIds: string[]
   membersByTeam: Record<string, string[]>
   notifications: Tables<'notifications'>[]
+  pendingCompoffCount: number
   children: ReactNode
 }
 
@@ -21,6 +22,7 @@ export function AppShell({
   ledTeamIds,
   membersByTeam,
   notifications,
+  pendingCompoffCount,
   children,
 }: AppShellProps) {
   return (
@@ -33,7 +35,7 @@ export function AppShell({
       >
         <RefreshOnFocus />
         <div className="min-h-screen bg-background flex">
-          <Sidebar />
+          <Sidebar pendingCompoffCount={pendingCompoffCount} />
           <main className="flex-1 min-w-0 pb-20 lg:pb-0">{children}</main>
           <BottomNav />
         </div>

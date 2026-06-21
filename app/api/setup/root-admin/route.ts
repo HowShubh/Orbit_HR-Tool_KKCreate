@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { seedDefaultBalances } from '@/lib/db/seed-balances'
-
-const CURRENT_LEAVE_YEAR = 2026
+import { todayIST, currentFiscalYearStart } from '@/lib/date'
 
 export async function POST(request: Request) {
   const adminClient = createAdminClient()
@@ -88,7 +87,7 @@ export async function POST(request: Request) {
     email: userEmail,
     full_name,
     role: 'founder',
-    joined_at: new Date().toISOString().split('T')[0],
+    joined_at: todayIST(),
   })
 
   if (userError) {
@@ -112,8 +111,8 @@ export async function POST(request: Request) {
   await seedDefaultBalances(
     adminClient,
     userId,
-    CURRENT_LEAVE_YEAR,
-    new Date().toISOString().split('T')[0]
+    currentFiscalYearStart(),
+    todayIST()
   )
 
   // Advance bootstrap state

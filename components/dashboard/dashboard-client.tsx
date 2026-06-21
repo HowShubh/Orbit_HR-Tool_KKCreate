@@ -32,8 +32,11 @@ import { ApprovalQueueClient } from '@/components/approvals/approval-queue-clien
 import { decideCompoff } from '@/lib/actions/compoff'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { currentFiscalYearStart, formatFiscalYear } from '@/lib/date'
 import type { AppUser } from '@/lib/auth/get-current-user'
 import type { DashboardData } from '@/lib/queries/dashboard'
+
+const FISCAL_YEAR_LABEL = formatFiscalYear(currentFiscalYearStart())
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
   wfh: 'WFH',
@@ -155,7 +158,7 @@ export function DashboardClient({ currentUser, data }: Props) {
         {/* Action bar */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="text-[13px] text-muted-foreground">
-            <span className="font-semibold text-foreground">{today}</span> · FY 2026–27
+            <span className="font-semibold text-foreground">{today}</span> · FY {FISCAL_YEAR_LABEL}
           </div>
           <div className="flex items-center gap-2">
             <CompoffRequestDialog
@@ -244,7 +247,7 @@ function EmployeeDashboard({
       <div className="px-5 lg:px-8 py-5 space-y-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="text-[13px] text-muted-foreground">
-            <span className="font-semibold text-foreground">{todayLabel}</span> · FY 2026–27
+            <span className="font-semibold text-foreground">{todayLabel}</span> · FY {FISCAL_YEAR_LABEL}
           </div>
           <Link href="/team" className="text-[12px] text-muted-foreground hover:text-foreground flex items-center gap-1">
             My team <ChevronRight className="h-3 w-3" />

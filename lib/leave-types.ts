@@ -1,11 +1,18 @@
 import type { Tables } from '@/lib/supabase/database.types'
+import { currentFiscalYearStart } from '@/lib/date'
 
 export type LeaveTypeCategory = Tables<'leave_types'>['category']
 export type LeaveTypePolicy = Tables<'leave_types'> & {
   eligible_user_ids?: string[]
 }
 
-export const CURRENT_LEAVE_YEAR = 2026
+/**
+ * Current fiscal-year start (e.g. 2026 = FY 2026-2027). Derived from today's IST
+ * date — never hardcode the year. Prefer calling `currentFiscalYearStart()`
+ * directly in request handlers; this constant is a convenience for modules that
+ * just need "the current FY".
+ */
+export const CURRENT_LEAVE_YEAR = currentFiscalYearStart()
 export const COMPOFF_YEAR = 0
 
 export const DEFAULT_LEAVE_TYPES: LeaveTypePolicy[] = [

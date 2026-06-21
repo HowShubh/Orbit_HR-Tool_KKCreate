@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { runAnnualReset } from '@/lib/actions/annual-reset'
 import { useStore } from '@/lib/store'
+import { formatFiscalYear } from '@/lib/date'
 
 interface Props {
   leaveYear: number
@@ -32,7 +33,7 @@ export function AnnualResetTab({ leaveYear }: Props) {
         const result = await runAnnualReset(targetYear)
         pushToast({
           title: 'Annual reset complete',
-          body: `Reset balances for ${result.resetCount} users in FY ${targetYear}`,
+          body: `Reset balances for ${result.resetCount} users in FY ${formatFiscalYear(targetYear)}`,
           variant: 'success',
         })
         setConfirmOpen(false)
@@ -55,9 +56,9 @@ export function AnnualResetTab({ leaveYear }: Props) {
                 Annual reset window
               </div>
               <div className="text-[12.5px] text-amber-900/80">
-                Run once per year to create fresh leave and WFH balances for all active users.
-                Defaults to 18 days leave and 36 days WFH. Compoff bank is unaffected.
-                An error is thrown if the year&apos;s reset has already been run.
+                Run once per year to create fresh leave and WFH balances for all active users,
+                using each type&apos;s configured annual quota (set in Leave Types). Compoff bank
+                is unaffected. An error is thrown if the year&apos;s reset has already been run.
               </div>
             </div>
           </div>
@@ -69,11 +70,11 @@ export function AnnualResetTab({ leaveYear }: Props) {
                   Target Year
                 </div>
                 <div className="text-[20px] font-semibold tracking-tight">
-                  FY {targetYear}
+                  FY {formatFiscalYear(targetYear)}
                 </div>
                 <div className="text-[12.5px] text-muted-foreground mt-1">
-                  Will set 18 leave days and 36 WFH days for all active users.
-                  You can adjust individual balances afterwards.
+                  Creates fresh balances from each type&apos;s configured quota for all active
+                  users. You can adjust individual balances afterwards.
                 </div>
               </div>
               <div className="space-y-2">
@@ -95,7 +96,7 @@ export function AnnualResetTab({ leaveYear }: Props) {
               disabled={isPending || !targetYear}
             >
               <CalendarClock className="h-4 w-4" />
-              Run Annual Reset for FY {targetYear}
+              Run Annual Reset for FY {formatFiscalYear(targetYear)}
             </Button>
           </div>
         </CardContent>
@@ -108,7 +109,7 @@ export function AnnualResetTab({ leaveYear }: Props) {
           </DialogHeader>
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              This will create leave and WFH balances for <strong>FY {targetYear}</strong> for
+              This will create leave and WFH balances for <strong>FY {formatFiscalYear(targetYear)}</strong> for
               all active users. This action cannot be undone.
             </p>
             <p className="text-sm text-muted-foreground">
@@ -118,7 +119,7 @@ export function AnnualResetTab({ leaveYear }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
             <Button disabled={isPending} onClick={handleReset}>
-              {isPending ? 'Running…' : `Yes, run reset for FY ${targetYear}`}
+              {isPending ? 'Running…' : `Yes, run reset for FY ${formatFiscalYear(targetYear)}`}
             </Button>
           </DialogFooter>
         </DialogContent>

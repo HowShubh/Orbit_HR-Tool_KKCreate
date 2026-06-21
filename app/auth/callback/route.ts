@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST } from '@/lib/date'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
         authUser.user_metadata?.name ??
         authUser.email!.split('@')[0],
       role: 'founder',
-      joined_at: new Date().toISOString().split('T')[0],
+      joined_at: todayIST(),
     })
 
     if (createError) {

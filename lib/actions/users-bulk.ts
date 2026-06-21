@@ -3,9 +3,8 @@
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { seedDefaultBalances } from '@/lib/db/seed-balances'
+import { todayIST, currentFiscalYearStart } from '@/lib/date'
 import { requireCapability, writeAudit, revalidateHR } from './_helpers'
-
-const CURRENT_LEAVE_YEAR = 2026
 
 const OptionalStringSchema = z.string().trim().optional().default('')
 const OptionalEmailSchema = z
@@ -135,7 +134,7 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
       role: data.role,
       manager_id: null,
       designation: data.designation || null,
-      joined_at: new Date().toISOString().split('T')[0],
+      joined_at: todayIST(),
     })
 
     if (insertError) {
@@ -153,8 +152,8 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
     await seedDefaultBalances(
       adminClient,
       authData.user.id,
-      CURRENT_LEAVE_YEAR,
-      new Date().toISOString().split('T')[0]
+      currentFiscalYearStart(),
+      todayIST()
     )
 
     createdUsers.push({

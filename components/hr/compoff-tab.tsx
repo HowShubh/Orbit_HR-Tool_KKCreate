@@ -1,6 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { format, parseISO } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,14 +37,32 @@ function StatCard({ label, value, tone }: { label: string; value: number; tone: 
 }
 
 export function CompoffTab({ grants, users }: Props) {
-  const { pushToast } = useStore()
+  const { pushToast, currentUser } = useStore()
   const [isPending, startTransition] = useTransition()
+  const [confirm, setConfirm] = useState<{ id: string; decision: 'approved' | 'rejected' } | null>(null)
 
   const pending = grants.filter((g) => g.status === 'pending')
   const approved = grants.filter((g) => g.status === 'approved')
   const rejected = grants.filter((g) => g.status === 'rejected')
 
+  const isPrivileged = currentUser.role === 'hr' || currentUser.role === 'founder'
+
+  // The grant's manager_id is the normal approver. HR/Founder acting on someone
+  // else's grant is an override → confirm first (matches the leave flow).
+  function requestDecide(
+    grant: Tables<'compoff_grants'>,
+    decision: 'approved' | 'rejected'
+  ) {
+    const isOverride = isPrivileged && grant.manager_id !== currentUser.id
+    if (isOverride) {
+      setConfirm({ id: grant.id, decision })
+      return
+    }
+    handleDecide(grant.id, decision)
+  }
+
   function handleDecide(grantId: string, decision: 'approved' | 'rejected') {
+    setConfirm(null)
     startTransition(async () => {
       try {
         await decideCompoff(grantId, decision)
@@ -107,18 +125,47 @@ export function CompoffTab({ grants, users }: Props) {
                         variant="outline"
                         size="sm"
                         disabled={isPending}
-                        onClick={() => handleDecide(g.id, 'rejected')}
+                        onClick={() => requestDecide(g, 'rejected')}
                       >
                         Reject
                       </Button>
                       <Button
                         size="sm"
                         disabled={isPending}
-                        onClick={() => handleDecide(g.id, 'approved')}
+                        onClick={() => requestDecide(g, 'approved')}
                       >
                         Approve
                       </Button>
                     </div>
+
+                    {confirm?.id === g.id && (
+                      <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900 ring-1 ring-amber-200">
+                        <span>
+                          This is normally <strong>{manager?.full_name ?? 'the manager'}</strong>
+                          &rsquo;s comp-off to decide. Override and{' '}
+                          {confirm.decision === 'approved' ? 'approve' : 'reject'} it?
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => setConfirm(null)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => handleDecide(g.id, confirm.decision)}
+                          >
+                            {isPending
+                              ? 'Working…'
+                              : `Yes, override & ${confirm.decision === 'approved' ? 'approve' : 'reject'}`}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

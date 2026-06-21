@@ -32,6 +32,8 @@ export type LeaveRequestWithDays = {
   user_full_name: string
   user_team_id: string | null
   user_team_name: string | null
+  user_manager_id: string | null    // the applicant's manager (the normal approver)
+  user_manager_name: string | null
   status: LeaveRequestStatus
   reason: string | null
   created_at: string

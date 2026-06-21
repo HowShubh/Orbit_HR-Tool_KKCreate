@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth/get-current-user'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listLeavesInRange } from '@/lib/queries/leaves'
+import { todayIST, istDatePlusDays } from '@/lib/date'
 import { TeamClient } from '@/components/team/team-client'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { LeaveWithUser } from '@/lib/queries/leaves'
@@ -64,8 +65,8 @@ export default async function TeamPage() {
     leadByTeam[t.id] = t.team_lead_id ? userById.get(t.team_lead_id) ?? null : null
   }
 
-  const today = new Date().toISOString().split('T')[0]
-  const inThirty = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+  const today = todayIST()
+  const inThirty = istDatePlusDays(30)
   const upcomingByTeam: Record<string, LeaveWithUser[]> = {}
 
   for (const teamId of myTeamIds) {

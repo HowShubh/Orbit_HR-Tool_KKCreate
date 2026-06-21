@@ -6,18 +6,18 @@ import { listBalancesForYear, listCompoffBalances } from '@/lib/queries/balances
 import { listCompoffGrants } from '@/lib/queries/compoff'
 import { listLeaveRequestHistory, listPendingApprovalsForReviewer } from '@/lib/queries/leave-requests'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
+import { currentFiscalYearStart } from '@/lib/date'
 import { HRConsoleClient } from '@/components/hr/hr-console-client'
-
-const CURRENT_LEAVE_YEAR = 2026
 
 export default async function HRConsolePage() {
   const me = await requireUser()
+  const currentLeaveYear = currentFiscalYearStart()
   const [users, teams, holidays, balances, compoffBalances, grants, leaveTypes, pendingRequests, history] =
     await Promise.all([
       listUsers(),
       listTeams(),
       listHolidays(),
-      listBalancesForYear(CURRENT_LEAVE_YEAR),
+      listBalancesForYear(currentLeaveYear),
       listCompoffBalances(),
       listCompoffGrants(),
       listLeaveTypes(),
@@ -34,7 +34,7 @@ export default async function HRConsolePage() {
       compoffBalances={compoffBalances}
       grants={grants}
       leaveTypes={leaveTypes}
-      leaveYear={CURRENT_LEAVE_YEAR}
+      leaveYear={currentLeaveYear}
       pendingRequests={pendingRequests}
       history={history}
     />

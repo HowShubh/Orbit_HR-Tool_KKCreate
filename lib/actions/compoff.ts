@@ -5,6 +5,7 @@ import { ActionError } from './errors'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST } from '@/lib/date'
 import {
   requireCapability,
   requireUser,
@@ -83,12 +84,41 @@ export async function requestCompoff(input: z.infer<typeof RequestCompoffSchema>
   const parsed = RequestCompoffSchema.parse(input)
 
   // Cannot request compoff for a future date
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayIST()
   if (parsed.work_date > today) {
     throw new ActionError('Compoff can only be requested for work you already did, not future dates.')
   }
 
   const adminClient = createAdminClient()
+
+  // Founders auto-approve their own comp-off. The `handle_compoff_approved`
+  // trigger credits the balance on insert when status is already 'approved'.
+  if (user.role === 'founder') {
+    const { data: grant, error } = await adminClient
+      .from('compoff_grants')
+      .insert({
+        user_id: user.id,
+        type: parsed.type,
+        amount: parsed.amount,
+        work_date: parsed.work_date,
+        reason: parsed.reason,
+        manager_id: user.id,
+        status: 'approved',
+        decided_by: user.id,
+        decided_at: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (error || !grant) throw new ActionError(error?.message ?? 'Request failed')
+
+    await writeAudit(user.id, 'compoff.request', 'compoff_grant', grant.id, {
+      after: grant,
+      autoApproved: true,
+    })
+    revalidatePath('/', 'layout')
+    return grant
+  }
 
   // Determine approver: user's manager, falling back to HR
   let approverId: string | null = user.manager_id

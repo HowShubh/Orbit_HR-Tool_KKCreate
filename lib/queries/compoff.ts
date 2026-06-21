@@ -30,3 +30,14 @@ export async function listCompoffPendingForApprover(approverId: string): Promise
     .order('created_at', { ascending: false })
   return data ?? []
 }
+
+/** Count of pending comp-off grants awaiting this approver's decision. */
+export async function countCompoffPendingForApprover(approverId: string): Promise<number> {
+  const adminClient = createAdminClient()
+  const { count } = await adminClient
+    .from('compoff_grants')
+    .select('id', { count: 'exact', head: true })
+    .eq('manager_id', approverId)
+    .eq('status', 'pending')
+  return count ?? 0
+}

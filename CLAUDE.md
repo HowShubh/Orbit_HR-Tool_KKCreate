@@ -91,7 +91,7 @@ Most domain folders pair a server-fetching `page.tsx` with a client `*-client.ts
 
 ### 8. Toasts + global UI state
 
-`lib/store.tsx` exports `useStore()` with `pushToast({ title, body?, variant: 'success' | 'info' | 'error' })`. Use this — there's no other toast system. Realtime notifications also flow through the store via `notifications` table changes.
+`lib/store.tsx` exports `useStore()` with `pushToast({ title, body?, variant: 'success' | 'info' | 'error' })`. Use this — there's no other toast system. Notifications are seeded from the server (`listMyNotifications` → layout → `StoreProvider`) and updated **live** via a Supabase Realtime subscription in `StoreProvider` (postgres_changes on `notifications`, filtered to the current user; RLS-scoped). This requires the table in the `supabase_realtime` publication — see `db/migrations/016_realtime_notifications.sql`. Notification creation (`notifyUser` in `lib/actions/notifications.ts`) respects each recipient's `notifications_muted` preference.
 
 ## Conventions
 

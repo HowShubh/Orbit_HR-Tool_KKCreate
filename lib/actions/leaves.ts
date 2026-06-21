@@ -5,12 +5,18 @@ import { ActionError } from './errors'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST, istMonthStart, istMonthEnd } from '@/lib/date'
 import {
   requireCapability,
   requireUser,
   writeAudit,
 } from './_helpers'
 import { notifyUser } from './notifications'
+import { reconcileCompoffExpiry } from '@/lib/compoff-expiry'
+import {
+  resolveLeaveApprovalRouting,
+  downstreamAudienceForUser,
+} from '@/lib/approvers'
 import type { Tables } from '@/lib/supabase/database.types'
 import {
   COMPOFF_YEAR,
@@ -48,6 +54,8 @@ const CreateLeavePlanSchema = z.object({
       z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         type: DayPlanTypeSchema,
+        half_day: z.boolean().optional(),
+        half_day_position: z.enum(['first_half', 'second_half']).nullable().optional(),
       })
     )
     .min(1, 'Select at least one working day.')
@@ -329,35 +337,17 @@ async function requireLeaveApprover(
   targetUserId: string
 ) {
   const actor = await requireUser()
-  if (actor.role === 'founder' || actor.role === 'hr') return actor
 
-  if (actor.role === 'team_lead') {
-    const { data: ledTeams } = await adminClient
-      .from('teams')
-      .select('id')
-      .eq('team_lead_id', actor.id)
-    const ledTeamIds = (ledTeams ?? []).map((team) => team.id)
-
-    if (ledTeamIds.length > 0) {
-      const { data: member } = await adminClient
-        .from('team_members')
-        .select('id')
-        .eq('user_id', targetUserId)
-        .in('team_id', ledTeamIds)
-        .is('left_at', null)
-        .limit(1)
-
-      if (member && member.length > 0) return actor
-    }
-  }
-
+  // The manager is the approver.
   const { data: targetUser } = await adminClient
     .from('users')
     .select('manager_id')
     .eq('id', targetUserId)
     .maybeSingle()
-
   if (targetUser?.manager_id === actor.id) return actor
+
+  // HR / Founders may override the manager (UI shows a confirm prompt).
+  if (actor.role === 'founder' || actor.role === 'hr') return actor
 
   throw new ActionError('You do not have permission to approve this leave request.', 'forbidden')
 }
@@ -407,7 +397,12 @@ async function getBalanceRemaining(
 }
 
 function buildPlanRows(
-  days: Array<{ date: string; type: z.infer<typeof DayPlanTypeSchema> }>,
+  days: Array<{
+    date: string
+    type: z.infer<typeof DayPlanTypeSchema>
+    half_day?: boolean
+    half_day_position?: 'first_half' | 'second_half' | null
+  }>,
   remaining: Map<string, number>,
   policies: LeaveTypePolicy[]
 ) {
@@ -417,6 +412,8 @@ function buildPlanRows(
     type: string
     requested_type: string
     days_deducted: number
+    half_day: boolean
+    half_day_position: 'first_half' | 'second_half' | null
   }> = []
 
   for (const day of days) {
@@ -425,8 +422,16 @@ function buildPlanRows(
       throw new ActionError(`${leaveTypeLabel(day.type, policies)} cannot be requested from the planner.`)
     }
 
-    available.set(day.type, (available.get(day.type) ?? 0) - 1)
-    rows.push({ ...day, type: day.type, requested_type: day.type, days_deducted: 1 })
+    const deducted = day.half_day ? 0.5 : 1
+    available.set(day.type, (available.get(day.type) ?? 0) - deducted)
+    rows.push({
+      date: day.date,
+      type: day.type,
+      requested_type: day.type,
+      days_deducted: deducted,
+      half_day: Boolean(day.half_day),
+      half_day_position: day.half_day ? day.half_day_position ?? 'first_half' : null,
+    })
   }
 
   for (const [type, balance] of available.entries()) {
@@ -497,7 +502,7 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
   }
 
   // Self-create: must be a future leave (today or later)
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayIST()
   if (parsed.start_date < today) {
     throw new ActionError('Leaves must start today or later. HR can backdate leaves on your behalf.')
   }
@@ -563,13 +568,11 @@ export async function createMyLeave(input: z.infer<typeof CreateLeaveSchema>) {
 export async function getMyLeavePlannerData() {
   const user = await requireUser()
   const adminClient = createAdminClient()
-  const today = new Date()
-  const startDate = new Date(today.getFullYear(), today.getMonth(), 1)
-    .toISOString()
-    .split('T')[0]
-  const endDate = new Date(today.getFullYear(), today.getMonth() + 4, 0)
-    .toISOString()
-    .split('T')[0]
+  // Debit any expired comp-off before reading balances, so the planner shows and
+  // enforces the post-expiry comp-off balance.
+  await reconcileCompoffExpiry(adminClient, user.id)
+  const startDate = istMonthStart(0)
+  const endDate = istMonthEnd(3)
   const allLeaveTypes = await getLeaveTypePolicies(adminClient)
   const eligibleLeaveTypes = allLeaveTypes.filter(
     (policy) =>
@@ -643,12 +646,22 @@ export async function getMyLeavePlannerData() {
   const userById = new Map((usersRes.data ?? []).map((teamUser) => [teamUser.id, teamUser]))
   const primaryTeam = (teamsRes.data ?? []).find((team) => team.id === primaryTeamId) ?? null
 
+  // Days the user already has awaiting approval (not yet deducted from balance),
+  // by type — so the planner can show "X pending" and reserve it client-side too.
+  const pending: Record<string, number> = {}
+  for (const leave of leavesRes.data ?? []) {
+    if (leave.user_id !== user.id || leave.status !== 'pending') continue
+    const type = leave.requested_type ?? leave.type
+    pending[type] = (pending[type] ?? 0) + Number(leave.days_deducted)
+  }
+
   return {
     currentUserId: user.id,
     primaryTeam,
     teamMembers: (usersRes.data ?? []).sort((a, b) => a.full_name.localeCompare(b.full_name)),
     holidays: holidaysRes.data ?? [],
     balances: balancesRes.data ?? [],
+    pending,
     leaveTypes: eligibleLeaveTypes,
     allLeaveTypes,
     leaves: (leavesRes.data ?? []).map((leave) => ({
@@ -660,12 +673,98 @@ export async function getMyLeavePlannerData() {
   }
 }
 
+/**
+ * Pending requests don't deduct balance until approved, so without this a user
+ * could stack multiple pending requests that each individually fit but together
+ * exceed their balance. This counts existing **pending** days (status 'pending',
+ * not yet deducted) on top of this request and blocks if the combination would
+ * exceed the available balance — with a message telling them to cancel a pending
+ * request first. (active/delete_requested are already reflected in `used`.)
+ */
+async function ensurePendingAwareBalance(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+  sortedDays: Array<{ type: string; half_day?: boolean }>,
+  policies: LeaveTypePolicy[]
+) {
+  const newByType = new Map<string, number>()
+  for (const day of sortedDays) {
+    newByType.set(day.type, (newByType.get(day.type) ?? 0) + (day.half_day ? 0.5 : 1))
+  }
+
+  const [{ data: balances }, { data: pendingLeaves }] = await Promise.all([
+    adminClient
+      .from('leave_balances')
+      .select('type, allocated, used')
+      .eq('user_id', userId)
+      .in('leave_year', [CURRENT_LEAVE_YEAR, COMPOFF_YEAR]),
+    adminClient
+      .from('leaves')
+      .select('type, requested_type, days_deducted')
+      .eq('user_id', userId)
+      .eq('status', 'pending'),
+  ])
+
+  const balByType = new Map(
+    (balances ?? []).map((b) => [b.type, Number(b.allocated) - Number(b.used)])
+  )
+  const pendingByType = new Map<string, number>()
+  for (const leave of pendingLeaves ?? []) {
+    const type = leave.requested_type ?? leave.type
+    pendingByType.set(type, (pendingByType.get(type) ?? 0) + Number(leave.days_deducted))
+  }
+
+  for (const [type, requested] of newByType.entries()) {
+    const remaining = balByType.get(type) ?? 0
+    const pending = pendingByType.get(type) ?? 0
+    if (requested + pending > remaining + 1e-9) {
+      const label = leaveTypeLabel(type, policies)
+      if (pending > 0) {
+        throw new ActionError(
+          `You already have ${fmtDays(pending)} day(s) of ${label} awaiting approval. ` +
+            `This request adds ${fmtDays(requested)} day(s), which would exceed your ` +
+            `${fmtDays(remaining)} day(s) of available ${label}. Cancel a pending ${label} ` +
+            `request before applying, or shorten this one.`
+        )
+      }
+      throw new ActionError(
+        `Insufficient ${label} balance: you have ${fmtDays(remaining)} day(s) available but this request needs ${fmtDays(requested)} day(s).`
+      )
+    }
+  }
+}
+
+/** Tell everyone under `applicant` (reports + led-team members) that they'll be away. */
+async function notifyLeaveDownstream(
+  adminClient: ReturnType<typeof createAdminClient>,
+  applicant: { id: string; full_name: string },
+  summary: string,
+  startDate: string,
+  endDate: string
+) {
+  const audience = await downstreamAudienceForUser(adminClient, applicant.id)
+  const range = startDate === endDate ? startDate : `${startDate} – ${endDate}`
+  await Promise.all(
+    audience.map((recipientId) =>
+      notifyUser({
+        user_id: recipientId,
+        type: 'team_member_away',
+        title: `${applicant.full_name} will be away`,
+        body: `${applicant.full_name}: ${summary} (${range}).`,
+        link_url: '/calendar',
+        related_entity_type: 'user',
+        related_entity_id: applicant.id,
+      })
+    )
+  )
+}
+
 export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSchema>) {
   const user = await requireUser()
   const parsed = CreateLeavePlanSchema.parse(input)
   const adminClient = createAdminClient()
   const policies = await getLeaveTypePolicies(adminClient)
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayIST()
 
   const sortedDays = Array.from(
     new Map(parsed.days.map((day) => [day.date, day])).values()
@@ -748,27 +847,44 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     }
   }
 
+  // Debit expired comp-off before the balance check so a plan can't spend it.
+  await reconcileCompoffExpiry(adminClient, user.id)
+
   await ensureMonthlyQuota(
     adminClient,
     user.id,
-    sortedDays.map((day) => ({ ...day, days_deducted: 1 })),
+    sortedDays.map((day) => ({ ...day, days_deducted: day.half_day ? 0.5 : 1 })),
     policies
   )
 
+  // Block if this request plus already-pending requests would exceed the balance.
+  await ensurePendingAwareBalance(adminClient, user.id, sortedDays, policies)
+
   const balances = await getBalanceRemaining(adminClient, user.id)
   const planRows = buildPlanRows(sortedDays, balances, policies)
-  const reviewers = await getLeaveReviewers(adminClient, user)
-  if (reviewers.length === 0) {
+
+  // Who approves? Founders auto-approve; everyone else routes to their manager
+  // (HR/Founders as a safety net if no manager). Team leads are FYI-only.
+  const routing = await resolveLeaveApprovalRouting(adminClient, user)
+  if (!routing.autoApprove && routing.approverIds.length === 0) {
     throw new ActionError('No leave approver is available. Contact HR or your founder.')
   }
+
+  const summary = summarizePlanRows(planRows, policies)
+  const decidedAt = new Date().toISOString()
+  const status = routing.autoApprove ? ('active' as const) : ('pending' as const)
+  const decisionFields = routing.autoApprove
+    ? { decided_by: user.id, decided_at: decidedAt }
+    : {}
 
   const { data: request, error: requestError } = await adminClient
     .from('leave_requests')
     .insert({
       user_id: user.id,
-      status: 'pending',
+      status,
       reason: parsed.reason ?? null,
       created_by: user.id,
+      ...decisionFields,
     })
     .select()
     .single()
@@ -788,9 +904,12 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
         start_date: row.date,
         end_date: row.date,
         days_deducted: row.days_deducted,
-        status: 'pending' as const,
+        half_day_start: row.half_day,
+        half_day_position: row.half_day_position,
+        status,
         created_by: user.id,
         reason: parsed.reason ?? null,
+        ...decisionFields,
       }))
     )
     .select()
@@ -799,23 +918,55 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     throw new ActionError(leavesError?.message ?? 'Create leave request days failed')
   }
 
-  const summary = summarizePlanRows(planRows, policies)
-  await Promise.all(
-    reviewers.map((reviewerId) =>
-      notifyUser({
-        user_id: reviewerId,
-        type: 'leave_requested',
-        title: 'Leave approval needed',
-        body: `${user.full_name} requested ${summary} across ${planRows.length} day(s).`,
-        link_url: '/',
-        related_entity_type: 'leave_request',
-        related_entity_id: request.id,
-      })
-    )
-  )
+  if (routing.autoApprove) {
+    // Deduct balance immediately and tell everyone under this person.
+    const totals = new Map<string, number>()
+    for (const row of planRows) {
+      totals.set(row.type, (totals.get(row.type) ?? 0) + row.days_deducted)
+    }
+    for (const [type, days] of totals.entries()) {
+      await bumpUsed(adminClient, user.id, type, days, policies)
+    }
+    await notifyLeaveDownstream(adminClient, user, summary, startDate, endDate)
+  } else {
+    // Look up the approver's name so the FYI reads "pending with <name>".
+    const { data: approverRows } = await adminClient
+      .from('users')
+      .select('full_name')
+      .in('id', routing.approverIds)
+    const approverLabel =
+      routing.approverIds.length === 1 && approverRows?.[0]
+        ? approverRows[0].full_name
+        : 'HR'
+
+    await Promise.all([
+      ...routing.approverIds.map((approverId) =>
+        notifyUser({
+          user_id: approverId,
+          type: 'leave_requested',
+          title: 'Leave approval needed',
+          body: `${user.full_name} requested ${summary} across ${planRows.length} day(s).`,
+          link_url: '/',
+          related_entity_type: 'leave_request',
+          related_entity_id: request.id,
+        })
+      ),
+      ...routing.fyiLeadIds.map((leadId) =>
+        notifyUser({
+          user_id: leadId,
+          type: 'leave_fyi',
+          title: 'Team member applied for leave',
+          body: `${user.full_name} requested ${summary} across ${planRows.length} day(s) — pending with ${approverLabel}.`,
+          link_url: '/',
+          related_entity_type: 'leave_request',
+          related_entity_id: request.id,
+        })
+      ),
+    ])
+  }
 
   await writeAudit(user.id, 'leave_request.create', 'leave_request', request.id, {
-    after: { request, leaves },
+    after: { request, leaves, autoApproved: routing.autoApprove },
   })
 
   revalidatePath('/', 'layout')
@@ -971,6 +1122,19 @@ async function approveLeaveRequestById(
     related_entity_type: 'leave_request',
     related_entity_id: requestId,
   })
+
+  // Now that it's confirmed, tell everyone under the applicant they'll be away.
+  const applicant = await getLeaveUser(adminClient, firstLeave.user_id)
+  const downstreamSummary = Array.from(totals.entries())
+    .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
+    .join(', ')
+  await notifyLeaveDownstream(
+    adminClient,
+    applicant,
+    downstreamSummary,
+    requestLeaves[0].start_date,
+    requestLeaves[requestLeaves.length - 1].end_date
+  )
 
   revalidatePath('/', 'layout')
   return updatedLeaves

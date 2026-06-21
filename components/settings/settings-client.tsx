@@ -153,7 +153,7 @@ export function SettingsClient({ user }: Props) {
               <div>
                 <div className="text-sm font-medium">Mute all notifications</div>
                 <div className="text-xs text-muted-foreground">
-                  Disable email and in-app notifications
+                  Stop receiving in-app notifications
                 </div>
               </div>
               <Switch

@@ -4,15 +4,16 @@ import { listUsers } from '@/lib/queries/users'
 import { listTeams } from '@/lib/queries/teams'
 import { listHolidays } from '@/lib/queries/holidays'
 import { listLeavesInRange } from '@/lib/queries/leaves'
+import { istMonthStart, istMonthEnd } from '@/lib/date'
 import { CalendarClient } from '@/components/calendar/calendar-client'
 
 export default async function CalendarPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const today = new Date()
-  const start = new Date(today.getFullYear(), today.getMonth() - 2, 1).toISOString().split('T')[0]
-  const end = new Date(today.getFullYear(), today.getMonth() + 3, 0).toISOString().split('T')[0]
+  // 2 months back through 3 months ahead, resolved against the IST calendar.
+  const start = istMonthStart(-2)
+  const end = istMonthEnd(2)
 
   const [users, teams, holidays, leaves] = await Promise.all([
     listUsers(),

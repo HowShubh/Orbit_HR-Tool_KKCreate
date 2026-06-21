@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST, istDatePlusDays } from '@/lib/date'
 import {
   DEFAULT_LEAVE_TYPES,
   leaveTypeCategory,
@@ -85,7 +86,7 @@ export async function listLeavesInRange(
 
 /** Active leaves covering today across the org. */
 export async function listLeavesToday(): Promise<LeaveWithUser[]> {
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayIST()
   return listLeavesInRange(today, today)
 }
 
@@ -94,11 +95,7 @@ export async function listUpcomingLeaves(
   daysAhead: number,
   userIds?: string[]
 ): Promise<LeaveWithUser[]> {
-  const today = new Date()
-  const future = new Date(today.getTime() + daysAhead * 86400000)
-  const todayStr = today.toISOString().split('T')[0]
-  const futureStr = future.toISOString().split('T')[0]
-  return listLeavesInRange(todayStr, futureStr, { userIds })
+  return listLeavesInRange(todayIST(), istDatePlusDays(daysAhead), { userIds })
 }
 
 export async function listPendingLeaves(userIds?: string[]): Promise<LeaveWithUser[]> {

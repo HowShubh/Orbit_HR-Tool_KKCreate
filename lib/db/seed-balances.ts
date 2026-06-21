@@ -2,8 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/database.types'
 import { DEFAULT_LEAVE_TYPES } from '@/lib/leave-types'
 
-export const DEFAULT_LEAVE_ALLOCATION = 18
-export const DEFAULT_WFH_ALLOCATION = 36
 const COMPOFF_YEAR = 0
 
 type AdminClient = SupabaseClient<Database>
@@ -89,19 +87,18 @@ export async function seedDefaultBalances(
     )
     .map((policy) => {
       const isCompoff = policy.category === 'compoff_leave' || policy.category === 'compoff_wfh'
-      const annualQuota =
-        policy.key === 'leave'
-          ? DEFAULT_LEAVE_ALLOCATION
-          : policy.key === 'wfh'
-            ? DEFAULT_WFH_ALLOCATION
-            : Number(policy.annual_quota ?? 0)
+      // Use the leave type's configured annual quota (set in HR Console → Leave
+      // Types) as the default for every type, including the built-in Leave/WFH.
+      // (Previously Leave/WFH were hardcoded to 18/36, so quota edits were ignored.)
+      const annualQuota = Number(policy.annual_quota ?? 0)
 
       return {
         user_id: userId,
         leave_year: isCompoff ? COMPOFF_YEAR : fyStartYear,
         type: policy.key,
+        // Compoff is earned, not allocated — it starts at 0 and isn't pro-rated.
         allocated: isCompoff
-          ? Number(policy.annual_quota ?? 0)
+          ? annualQuota
           : proratedAllocation(annualQuota, joinedAt, fyStartYear),
         used: 0,
       }

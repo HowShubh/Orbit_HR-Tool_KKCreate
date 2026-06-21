@@ -4,15 +4,18 @@ import { listLeavesForUser } from '@/lib/queries/leaves'
 import { listCompoffForUser } from '@/lib/queries/compoff'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { currentFiscalYearStart } from '@/lib/date'
+import { reconcileCompoffExpiry } from '@/lib/compoff-expiry'
 import { MyLeavesClient } from '@/components/leaves/my-leaves-client'
-
-const CURRENT_LEAVE_YEAR = 2026
 
 export default async function MyLeavesPage() {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
   const adminClient = createAdminClient()
+  const CURRENT_LEAVE_YEAR = currentFiscalYearStart()
+  // Reflect comp-off expiry in the displayed balances.
+  await reconcileCompoffExpiry(adminClient, user.id)
   const [leaves, compoff, balancesRes, compoffBalRes, leaveTypes] = await Promise.all([
     listLeavesForUser(user.id, 'all'),
     listCompoffForUser(user.id),

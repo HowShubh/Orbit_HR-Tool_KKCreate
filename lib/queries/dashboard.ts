@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST, istDatePlusDays, istWeekRange, istMonthDay, istYearMonth, currentFiscalYearStart } from '@/lib/date'
 import type { Tables } from '@/lib/supabase/database.types'
 import {
   listLeavesToday,
@@ -54,8 +55,6 @@ export interface DashboardData {
   workAnniversariesToday: WorkAnniversary[]
 }
 
-const CURRENT_LEAVE_YEAR = 2026
-
 export async function getDashboardData(
   currentUserId: string,
   currentUserRole: 'employee' | 'team_lead' | 'hr' | 'founder',
@@ -63,6 +62,7 @@ export async function getDashboardData(
   membersByTeam: Record<string, string[]>
 ): Promise<DashboardData> {
   const adminClient = createAdminClient()
+  const CURRENT_LEAVE_YEAR = currentFiscalYearStart()
   let primaryTeamId: string | null = null
   let employeeTeams: DashboardTeam[] = []
   let teamMemberIds: string[] = []
@@ -122,11 +122,8 @@ export async function getDashboardData(
         .sort((a, b) => a.full_name.localeCompare(b.full_name)),
     }))
 
-    const today = new Date()
-    const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(
-      today.getDate()
-    ).padStart(2, '0')}`
-    const currentYear = today.getFullYear()
+    const todayMonthDay = istMonthDay()
+    const currentYear = istYearMonth().year
     workAnniversariesToday = Array.from(userById.values())
       .filter((user) => user.joined_at.slice(5, 10) === todayMonthDay)
       .map((user) => ({
@@ -164,17 +161,10 @@ export async function getDashboardData(
     ).filter((id) => id !== currentUserId)
   }
 
-  // Run as much as we can in parallel
-  const now = new Date()
-  const todayDate = now.toISOString().split('T')[0]
-  const futureDate = new Date(now.getTime() + 30 * 86400000).toISOString().split('T')[0]
-  const weekDay = now.getDay() === 0 ? 7 : now.getDay()
-  const weekStart = new Date(now)
-  weekStart.setDate(now.getDate() - weekDay + 1)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekStart.getDate() + 6)
-  const weekStartDate = weekStart.toISOString().split('T')[0]
-  const weekEndDate = weekEnd.toISOString().split('T')[0]
+  // Run as much as we can in parallel. All "today"/range math resolves in IST.
+  const todayDate = todayIST()
+  const futureDate = istDatePlusDays(30)
+  const { weekStart: weekStartDate, weekEnd: weekEndDate } = istWeekRange()
 
   const [
     leavesToday,

@@ -33,10 +33,10 @@ const NAV = [
   { href: "/permissions", label: "Permissions",  icon: UserCog,         cap: "manageCapabilities" as const },
 ] as const;
 
-export function Sidebar() {
+export function Sidebar({ pendingCompoffCount = 0 }: { pendingCompoffCount?: number }) {
   const pathname = usePathname();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
-  const { currentUser, compoffGrants } = useStore();
+  const { currentUser } = useStore();
   const { can } = useCapabilities();
 
   useEffect(() => {
@@ -64,9 +64,6 @@ export function Sidebar() {
     return false
   });
 
-  const pendingCompoffCount = compoffGrants.filter(
-    (g) => g.status === "pending" && g.manager_id === currentUser.id
-  ).length;
 
   return (
     <aside className="hidden lg:flex h-screen sticky top-0 w-[252px] flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">

@@ -55,9 +55,12 @@ interface Props {
 
 type PlannerData = Awaited<ReturnType<typeof getMyLeavePlannerData>>
 type PlanType = string
+type HalfPosition = 'first_half' | 'second_half'
 type SelectedDay = {
   date: string
   type: PlanType
+  half_day?: boolean
+  half_day_position?: HalfPosition
 }
 
 const DAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const
@@ -130,17 +133,19 @@ function pillFor(data: PlannerData | null, type: string) {
 function buildAllocation(data: PlannerData | null, selectedDays: SelectedDay[]) {
   const available = new Map<string, number>()
   for (const balance of data?.balances ?? []) {
-    available.set(balance.type, Number(balance.allocated ?? 0) - Number(balance.used ?? 0))
+    // Reserve already-pending days so they can't be re-spent by a new request.
+    const pending = data?.pending?.[balance.type] ?? 0
+    available.set(balance.type, Number(balance.allocated ?? 0) - Number(balance.used ?? 0) - pending)
   }
 
   const used = new Map<string, number>()
-  const deduct = (type: string) => {
-    available.set(type, (available.get(type) ?? 0) - 1)
-    used.set(type, (used.get(type) ?? 0) + 1)
+  const deduct = (type: string, amount: number) => {
+    available.set(type, (available.get(type) ?? 0) - amount)
+    used.set(type, (used.get(type) ?? 0) + amount)
   }
 
   for (const day of selectedDays.sort((a, b) => a.date.localeCompare(b.date))) {
-    deduct(day.type)
+    deduct(day.type, day.half_day ? 0.5 : 1)
   }
 
   const shortages = Array.from(available.entries()).filter(([, remaining]) => remaining < 0)
@@ -276,6 +281,26 @@ export function LeaveFormDialog({ trigger }: Props) {
     ])
   }
 
+  function toggleHalfDay(date: string) {
+    setSelectedDays((prev) =>
+      prev.map((item) =>
+        item.date === date
+          ? {
+              ...item,
+              half_day: !item.half_day,
+              half_day_position: !item.half_day ? item.half_day_position ?? 'first_half' : undefined,
+            }
+          : item
+      )
+    )
+  }
+
+  function setHalfPosition(date: string, position: HalfPosition) {
+    setSelectedDays((prev) =>
+      prev.map((item) => (item.date === date ? { ...item, half_day_position: position } : item))
+    )
+  }
+
   function selectedDayWarnings() {
     return selectedDays
       .map((day) => {
@@ -304,7 +329,12 @@ export function LeaveFormDialog({ trigger }: Props) {
           days: selectedDays
             .slice()
             .sort((a, b) => a.date.localeCompare(b.date))
-            .map((day) => ({ date: day.date, type: day.type })),
+            .map((day) => ({
+              date: day.date,
+              type: day.type,
+              half_day: day.half_day ?? false,
+              half_day_position: day.half_day ? day.half_day_position ?? 'first_half' : null,
+            })),
           reason: reason.trim() || null,
         })
         pushToast({
@@ -504,6 +534,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                   {balanceTypes.map((type) => {
                     const balance = balanceFor(data, type.key)
                     const used = allocation.used.get(type.key) ?? 0
+                    const pending = data?.pending?.[type.key] ?? 0
                     const remainingAfterRequest = allocation.available.get(type.key) ?? balance.remaining
                     return (
                       <div key={type.key} className="rounded-lg border p-3">
@@ -516,6 +547,11 @@ export function LeaveFormDialog({ trigger }: Props) {
                         <div className="text-[10px] text-muted-foreground">
                           {used > 0 ? `-${formatDays(used)} in this request` : `of ${formatDays(balance.allocated)}`}
                         </div>
+                        {pending > 0 && (
+                          <div className="text-[10px] font-medium text-amber-600">
+                            {formatDays(pending)} pending approval
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -542,18 +578,56 @@ export function LeaveFormDialog({ trigger }: Props) {
                       .slice()
                       .sort((a, b) => a.date.localeCompare(b.date))
                       .map((day) => (
-                        <div key={day.date} className="flex items-center justify-between gap-2 rounded-lg border p-2">
-                          <div>
-                            <div className="text-xs font-medium">
-                              {format(parseISO(day.date), 'EEE, MMM d')}
+                        <div key={day.date} className="rounded-lg border p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-medium">
+                                {format(parseISO(day.date), 'EEE, MMM d')}
+                                {day.half_day && (
+                                  <span className="ml-1 text-[10px] font-semibold text-primary">· ½ day</span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">
+                                {data.primaryTeam?.name ?? 'No primary team'}
+                              </div>
                             </div>
-                            <div className="text-[11px] text-muted-foreground">
-                              {data.primaryTeam?.name ?? 'No primary team'}
-                            </div>
+                            <span className={cn('rounded px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset', pillFor(data, day.type))}>
+                              {labelFor(data, day.type)}
+                            </span>
                           </div>
-                          <span className={cn('rounded px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset', pillFor(data, day.type))}>
-                            {labelFor(data, day.type)}
-                          </span>
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleHalfDay(day.date)}
+                              className={cn(
+                                'rounded-md border px-2 py-0.5 text-[10px] font-semibold transition-colors',
+                                day.half_day
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              )}
+                            >
+                              Half day
+                            </button>
+                            {day.half_day && (
+                              <div className="flex rounded-md border p-0.5">
+                                {(['first_half', 'second_half'] as const).map((pos) => (
+                                  <button
+                                    key={pos}
+                                    type="button"
+                                    onClick={() => setHalfPosition(day.date, pos)}
+                                    className={cn(
+                                      'rounded px-2 py-0.5 text-[10px] font-medium transition-colors',
+                                      (day.half_day_position ?? 'first_half') === pos
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                  >
+                                    {pos === 'first_half' ? '1st half' : '2nd half'}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))
                   )}

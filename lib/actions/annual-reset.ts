@@ -87,7 +87,8 @@ export async function runAnnualReset(leaveYear: number) {
     triggered_by: actor.id,
   })
 
-  await writeAudit(actor.id, 'annual_reset.run', 'leave_year_reset', String(leaveYear), {
+  // entity_id must be a UUID — use the actor's id and record the year in the diff.
+  await writeAudit(actor.id, 'annual_reset.run', 'leave_year_reset', actor.id, {
     after: { leave_year: leaveYear, users: users.length },
   })
   await revalidateHR()

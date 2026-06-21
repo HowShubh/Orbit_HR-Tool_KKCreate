@@ -14,6 +14,7 @@ import {
   leaveTypeLabel,
   type LeaveTypePolicy,
 } from '@/lib/leave-types'
+import { managedUserIds } from '@/lib/approvers'
 
 const ACTIVE_STATUSES = ['active', 'pending', 'delete_requested'] as const
 
@@ -31,33 +32,12 @@ export async function listPendingApprovalsForReviewer(
   const adminClient = createAdminClient()
   const policies = await loadLeaveTypePolicies(adminClient)
 
-  // Step A: figure out which user_ids are visible to this reviewer
+  // Step A: figure out which user_ids are visible to this reviewer.
+  // Manager-only model: a team reviewer approves ONLY the people they manage
+  // (manager_id = them). Team leads who aren't a person's manager are FYI-only.
   let visibleUserIds: string[] | null = null   // null = all users (HR scope)
   if (scope === 'team') {
-    const { data: ledTeams } = await adminClient
-      .from('teams')
-      .select('id')
-      .eq('team_lead_id', reviewerUserId)
-    const teamIds = (ledTeams ?? []).map((t) => t.id)
-
-    const { data: members } = teamIds.length
-      ? await adminClient
-          .from('team_members')
-          .select('user_id')
-          .in('team_id', teamIds)
-          .is('left_at', null)
-      : { data: [] as { user_id: string }[] }
-
-    const { data: directReports } = await adminClient
-      .from('users')
-      .select('id')
-      .eq('manager_id', reviewerUserId)
-
-    const ids = new Set<string>()
-    for (const m of members ?? []) ids.add(m.user_id)
-    for (const u of directReports ?? []) ids.add(u.id)
-    ids.delete(reviewerUserId) // never approve own
-    visibleUserIds = Array.from(ids)
+    visibleUserIds = await managedUserIds(adminClient, reviewerUserId)
     if (visibleUserIds.length === 0) return []
   }
 
@@ -91,13 +71,22 @@ export async function listPendingApprovalsForReviewer(
       }> }
   const requestById = new Map((requests ?? []).map((r) => [r.id, r]))
 
-  // Step D: applicant info (name + primary team)
+  // Step D: applicant info (name + primary team + manager, for the override prompt)
   const applicantIds = Array.from(new Set(leaves.map((l) => l.user_id)))
   const { data: users } = await adminClient
     .from('users')
-    .select('id, full_name')
+    .select('id, full_name, manager_id')
     .in('id', applicantIds)
   const userNameById = new Map((users ?? []).map((u) => [u.id, u.full_name]))
+  const managerIdByUser = new Map((users ?? []).map((u) => [u.id, u.manager_id]))
+
+  const managerIds = Array.from(
+    new Set((users ?? []).map((u) => u.manager_id).filter((id): id is string => Boolean(id)))
+  )
+  const { data: managers } = managerIds.length
+    ? await adminClient.from('users').select('id, full_name').in('id', managerIds)
+    : { data: [] as { id: string; full_name: string }[] }
+  const managerNameById = new Map((managers ?? []).map((m) => [m.id, m.full_name]))
 
   const { data: primaryMemberships } = await adminClient
     .from('team_members')
@@ -184,6 +173,11 @@ export async function listPendingApprovalsForReviewer(
       user_full_name: userNameById.get(first.user_id) ?? 'Unknown',
       user_team_id: team?.id ?? null,
       user_team_name: team?.name ?? null,
+      user_manager_id: managerIdByUser.get(first.user_id) ?? null,
+      user_manager_name: (() => {
+        const mid = managerIdByUser.get(first.user_id)
+        return mid ? managerNameById.get(mid) ?? null : null
+      })(),
       status: (parent?.status ?? first.status) as LeaveRequestWithDays['status'],
       reason: parent?.reason ?? first.reason ?? null,
       created_at: parent?.created_at ?? first.created_at,
@@ -290,30 +284,10 @@ export async function listLeaveRequestHistory(
   const statuses = options?.statuses ?? (['active', 'rejected', 'deleted'] as const)
   const limit = options?.limit ?? 100
 
-  // Resolve visible user_ids the same way as the pending query
+  // Resolve visible user_ids the same way as the pending query (manager-only).
   let visibleUserIds: string[] | null = null
   if (scope === 'team') {
-    const { data: ledTeams } = await adminClient
-      .from('teams')
-      .select('id')
-      .eq('team_lead_id', reviewerUserId)
-    const teamIds = (ledTeams ?? []).map((t) => t.id)
-    const { data: members } = teamIds.length
-      ? await adminClient
-          .from('team_members')
-          .select('user_id')
-          .in('team_id', teamIds)
-          .is('left_at', null)
-      : { data: [] as { user_id: string }[] }
-    const { data: directReports } = await adminClient
-      .from('users')
-      .select('id')
-      .eq('manager_id', reviewerUserId)
-    const ids = new Set<string>()
-    for (const m of members ?? []) ids.add(m.user_id)
-    for (const u of directReports ?? []) ids.add(u.id)
-    ids.delete(reviewerUserId)
-    visibleUserIds = Array.from(ids)
+    visibleUserIds = await managedUserIds(adminClient, reviewerUserId)
     if (visibleUserIds.length === 0) return []
   }
 
@@ -388,6 +362,8 @@ export async function listLeaveRequestHistory(
       user_full_name: userNameById.get(first.user_id) ?? 'Unknown',
       user_team_id: null,
       user_team_name: null,
+      user_manager_id: null,
+      user_manager_name: null,
       status: (parent?.status ?? first.status) as LeaveRequestWithDays['status'],
       reason: parent?.reason ?? first.reason ?? null,
       created_at: parent?.created_at ?? first.created_at,

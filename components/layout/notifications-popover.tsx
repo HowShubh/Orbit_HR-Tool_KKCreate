@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow, parseISO } from "date-fns";
 
 export function NotificationsPopover() {
-  const { notifications, markNotificationsRead } = useStore();
+  const { notifications, markNotificationsRead, markOneRead } = useStore();
   const unread = notifications.filter((n) => !n.read_at).length;
 
   return (
@@ -77,11 +77,21 @@ export function NotificationsPopover() {
                       )}
                     >
                       {n.link_url ? (
-                        <Link href={n.link_url} className="block">
+                        <Link
+                          href={n.link_url}
+                          className="block"
+                          onClick={() => markOneRead(n.id)}
+                        >
                           {content}
                         </Link>
                       ) : (
-                        content
+                        <button
+                          type="button"
+                          className="block w-full text-left"
+                          onClick={() => markOneRead(n.id)}
+                        >
+                          {content}
+                        </button>
                       )}
                     </li>
                   )

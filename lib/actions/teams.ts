@@ -4,6 +4,7 @@ import { ActionError } from './errors'
 
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { todayIST } from '@/lib/date'
 import {
   requireCapability,
   revalidateHR,
@@ -189,7 +190,7 @@ export async function removeTeamMember(membershipId: string) {
 
   const { error } = await adminClient
     .from('team_members')
-    .update({ left_at: new Date().toISOString().split('T')[0] })
+    .update({ left_at: todayIST() })
     .eq('id', membershipId)
 
   if (error) throw new ActionError(error.message)

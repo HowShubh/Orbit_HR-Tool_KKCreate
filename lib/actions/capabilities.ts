@@ -6,6 +6,10 @@ import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireCapability, writeAudit } from './_helpers'
+import { PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
+
+const READ_ONLY_MESSAGE =
+  'Permission management is read-only. Access is managed by roles — change a user’s role in HR Console → Users.'
 
 const GrantSchema = z.object({
   user_id: z.string().uuid(),
@@ -17,6 +21,7 @@ const GrantSchema = z.object({
 })
 
 export async function grantCapability(input: z.infer<typeof GrantSchema>) {
+  if (PERMISSIONS_READ_ONLY) throw new ActionError(READ_ONLY_MESSAGE)
   const actor = await requireCapability('manage_capabilities')
   const parsed = GrantSchema.parse(input)
 
@@ -46,6 +51,7 @@ export async function grantCapability(input: z.infer<typeof GrantSchema>) {
 }
 
 export async function revokeCapability(id: string) {
+  if (PERMISSIONS_READ_ONLY) throw new ActionError(READ_ONLY_MESSAGE)
   const actor = await requireCapability('manage_capabilities')
   const adminClient = createAdminClient()
 
@@ -68,6 +74,7 @@ export async function revokeCapability(id: string) {
 }
 
 export async function applyBundleToUser(input: { user_id: string; bundle_key: string }) {
+  if (PERMISSIONS_READ_ONLY) throw new ActionError(READ_ONLY_MESSAGE)
   const actor = await requireCapability('manage_capabilities')
   const adminClient = createAdminClient()
 

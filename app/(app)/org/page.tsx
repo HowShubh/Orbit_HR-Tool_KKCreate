@@ -10,5 +10,12 @@ export default async function OrgPage() {
 
   const [tree, teams] = await Promise.all([getOrgTree(), listTeams()])
 
-  return <OrgClient currentUserId={user.id} tree={tree} teams={teams} />
+  return (
+    <OrgClient
+      currentUserId={user.id}
+      roots={tree.roots}
+      orphans={tree.orphans}
+      teams={teams}
+    />
+  )
 }

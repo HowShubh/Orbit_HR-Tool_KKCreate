@@ -5,13 +5,12 @@ import { ActionError } from './errors'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { seedDefaultBalances } from '@/lib/db/seed-balances'
+import { todayIST, currentFiscalYearStart } from '@/lib/date'
 import {
   requireCapability,
   revalidateHR,
   writeAudit,
 } from './_helpers'
-
-const CURRENT_LEAVE_YEAR = 2026
 
 const RoleSchema = z.enum(['employee', 'team_lead', 'hr', 'founder'])
 
@@ -62,7 +61,7 @@ export async function createUser(input: z.infer<typeof CreateUserSchema>) {
       role: parsed.role,
       manager_id: parsed.manager_id ?? null,
       designation: parsed.designation ?? null,
-      joined_at: parsed.joined_at ?? new Date().toISOString().split('T')[0],
+      joined_at: parsed.joined_at ?? todayIST(),
     })
     .select()
     .single()
@@ -81,7 +80,7 @@ export async function createUser(input: z.infer<typeof CreateUserSchema>) {
   await seedDefaultBalances(
     adminClient,
     userRow.id,
-    CURRENT_LEAVE_YEAR,
+    currentFiscalYearStart(),
     userRow.joined_at
   )
 
@@ -168,7 +167,7 @@ export async function deactivateUser(userId: string) {
     .from('users')
     .update({
       status: 'exited',
-      exited_at: new Date().toISOString().split('T')[0],
+      exited_at: todayIST(),
     })
     .eq('id', userId)
     .select()

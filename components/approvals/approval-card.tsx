@@ -49,12 +49,28 @@ export function ApprovalCard({
   onDecided: (id: string) => void
 }) {
   const router = useRouter()
-  const { pushToast } = useStore()
+  const { pushToast, currentUser } = useStore()
   const [expanded, setExpanded] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [confirmOverride, setConfirmOverride] = useState<'approve' | 'reject' | null>(null)
   const isDeleteRequest = request.status === 'delete_requested'
 
+  // The manager is the normal approver. If the viewer is an HR/Founder acting on
+  // someone whose manager isn't them, it's an override — prompt before deciding.
+  const isManager = request.user_manager_id === currentUser.id
+  const isPrivileged = currentUser.role === 'hr' || currentUser.role === 'founder'
+  const isOverride = isPrivileged && !isManager && request.user_manager_id != null
+
+  function requestDecision(decision: 'approve' | 'reject') {
+    if (isOverride) {
+      setConfirmOverride(decision)
+      return
+    }
+    decide(decision)
+  }
+
   function decide(decision: 'approve' | 'reject') {
+    setConfirmOverride(null)
     startTransition(async () => {
       try {
         if (decision === 'approve' && isDeleteRequest) {
@@ -124,12 +140,12 @@ export function ApprovalCard({
             variant="outline"
             size="sm"
             disabled={isPending}
-            onClick={() => decide('reject')}
+            onClick={() => requestDecision('reject')}
             className="border-rose-200 text-rose-700 hover:bg-rose-50"
           >
             Reject
           </Button>
-          <Button size="sm" disabled={isPending} onClick={() => decide('approve')}>
+          <Button size="sm" disabled={isPending} onClick={() => requestDecision('approve')}>
             {isDeleteRequest ? 'Approve Delete' : 'Approve'}
           </Button>
           <button
@@ -147,6 +163,39 @@ export function ApprovalCard({
           </button>
         </div>
       </div>
+      {confirmOverride && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900">
+          <span>
+            This is normally <strong>{request.user_manager_name}</strong>&rsquo;s request to
+            decide. You have permission to override and{' '}
+            {confirmOverride === 'approve' ? 'approve' : 'reject'} it. Continue?
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isPending}
+              onClick={() => setConfirmOverride(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isPending}
+              onClick={() => decide(confirmOverride)}
+              className={
+                confirmOverride === 'reject'
+                  ? 'bg-rose-600 hover:bg-rose-700'
+                  : undefined
+              }
+            >
+              {isPending
+                ? 'Working…'
+                : `Yes, override & ${confirmOverride === 'approve' ? 'approve' : 'reject'}`}
+            </Button>
+          </div>
+        </div>
+      )}
       {expanded && <ApprovalCardExpanded request={request} />}
     </div>
   )

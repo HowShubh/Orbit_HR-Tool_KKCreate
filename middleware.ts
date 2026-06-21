@@ -37,7 +37,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/setup') ||
     pathname.startsWith('/auth/') ||
-    pathname.startsWith('/api/setup/')
+    pathname.startsWith('/api/setup/') ||
+    pathname.startsWith('/api/cron/')
 
   // Unauthenticated user trying to reach a protected route
   if (!session && !isPublic) {
