@@ -90,7 +90,7 @@ export function MobileNav({
         </nav>
 
         <div className="mt-3 rounded-xl bg-sidebar-accent/60 p-3 flex items-center gap-3">
-          <Avatar name={currentUser.full_name} size="md" />
+          <Avatar name={currentUser.full_name} src={currentUser.photo_url} size="md" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-[13px] font-semibold text-white">
               {currentUser.full_name}

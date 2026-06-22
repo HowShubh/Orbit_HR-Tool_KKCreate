@@ -22,13 +22,36 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createTeam, updateTeam } from '@/lib/actions/teams'
+import { updateTeamPhoto } from '@/lib/actions/avatars'
+import { PhotoUpload } from '@/components/ui/photo-upload'
 import { useStore } from '@/lib/store'
-import { cn } from '@/lib/utils'
+import { cn, teamInitials } from '@/lib/utils'
 import type { TeamWithMembers } from '@/lib/queries/teams'
 import type { UserWithMembership } from '@/lib/queries/users'
 
 const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
 type Day = (typeof DAYS)[number]
+
+type DayState = 'office' | 'wfh' | 'off'
+const DAY_STATES: { value: DayState; label: string; active: string }[] = [
+  { value: 'office', label: 'Office', active: 'bg-primary text-primary-foreground border-primary' },
+  { value: 'wfh', label: 'WFH', active: 'bg-blue-500 text-white border-blue-500' },
+  { value: 'off', label: 'Off', active: 'bg-slate-400 text-white border-slate-400' },
+]
+
+const DEFAULT_SCHEDULE: Record<Day, DayState> = {
+  MON: 'office', TUE: 'office', WED: 'office', THU: 'office', FRI: 'office',
+  SAT: 'wfh', SUN: 'off',
+}
+
+function scheduleFromTeam(wfo?: string | null, off?: string | null): Record<Day, DayState> {
+  const officeSet = new Set((wfo ?? '').split(',').map((d) => d.trim().toUpperCase()))
+  const offSet = new Set((off ?? '').split(',').map((d) => d.trim().toUpperCase()))
+  return DAYS.reduce((acc, day) => {
+    acc[day] = officeSet.has(day) ? 'office' : offSet.has(day) ? 'off' : 'wfh'
+    return acc
+  }, {} as Record<Day, DayState>)
+}
 
 const Schema = z.object({
   name: z.string().min(1, 'Name required'),
@@ -48,7 +71,7 @@ interface Props {
 export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props) {
   const { pushToast } = useStore()
   const [isPending, startTransition] = useTransition()
-  const [selectedDays, setSelectedDays] = useState<Day[]>([])
+  const [schedule, setSchedule] = useState<Record<Day, DayState>>(DEFAULT_SCHEDULE)
 
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(Schema),
@@ -64,24 +87,20 @@ export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props)
         name: team.name,
         team_lead_id: team.team_lead_id ?? '',
       })
-      const days = team.wfo_pattern
-        ? team.wfo_pattern.split(',').filter((d): d is Day => DAYS.includes(d as Day))
-        : []
-      setSelectedDays(days)
+      setSchedule(scheduleFromTeam(team.wfo_pattern, team.off_days))
     } else {
       reset({ name: '', team_lead_id: '' })
-      setSelectedDays(['MON', 'TUE', 'WED', 'THU', 'FRI'])
+      setSchedule(DEFAULT_SCHEDULE)
     }
   }, [open, team, mode, reset])
 
-  function toggleDay(day: Day) {
-    setSelectedDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
-    )
+  function setDayState(day: Day, state: DayState) {
+    setSchedule((prev) => ({ ...prev, [day]: state }))
   }
 
   function onSubmit(data: FormValues) {
-    const wfo_pattern = selectedDays.join(',')
+    const wfo_pattern = DAYS.filter((d) => schedule[d] === 'office').join(',')
+    const off_days = DAYS.filter((d) => schedule[d] === 'off').join(',')
 
     startTransition(async () => {
       try {
@@ -89,6 +108,7 @@ export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props)
           await createTeam({
             name: data.name,
             wfo_pattern,
+            off_days,
             team_lead_id: data.team_lead_id || null,
           })
           pushToast({ title: 'Team created', variant: 'success' })
@@ -97,6 +117,7 @@ export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props)
             id: team.id,
             name: data.name,
             wfo_pattern,
+            off_days,
             team_lead_id: data.team_lead_id || null,
           })
           pushToast({ title: 'Team updated', variant: 'success' })
@@ -116,6 +137,18 @@ export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props)
           <DialogTitle>{mode === 'create' ? 'Add Team' : 'Edit Team'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {mode === 'edit' && team && (
+            <div className="flex flex-col items-center gap-2">
+              <PhotoUpload
+                name={team.name}
+                src={team.photo_url}
+                size="xl"
+                fallbackText={teamInitials(team.name)}
+                onUpload={(fd) => updateTeamPhoto(team.id, fd)}
+              />
+              <p className="text-[11px] text-muted-foreground">Team photo</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="name">Team Name</Label>
             <Input id="name" {...register('name')} />
@@ -123,22 +156,32 @@ export function TeamFormDialog({ open, onOpenChange, mode, team, users }: Props)
           </div>
 
           <div className="space-y-1.5">
-            <Label>WFO Days</Label>
-            <div className="flex flex-wrap gap-2">
+            <Label>Weekly schedule</Label>
+            <p className="text-xs text-muted-foreground">
+              Set each day to Office, work-from-home, or a weekly off. Off days can&apos;t have leave or WFH applied.
+            </p>
+            <div className="space-y-1">
               {DAYS.map((day) => (
-                <button
-                  key={day}
-                  type="button"
-                  onClick={() => toggleDay(day)}
-                  className={cn(
-                    'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
-                    selectedDays.includes(day)
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-background text-muted-foreground border-border hover:border-primary/50'
-                  )}
-                >
-                  {day}
-                </button>
+                <div key={day} className="flex items-center justify-between gap-2">
+                  <span className="w-9 text-xs font-semibold text-muted-foreground">{day}</span>
+                  <div className="flex gap-1">
+                    {DAY_STATES.map((state) => (
+                      <button
+                        key={state.value}
+                        type="button"
+                        onClick={() => setDayState(day, state.value)}
+                        className={cn(
+                          'rounded-md border px-3 py-1 text-xs font-semibold transition-colors',
+                          schedule[day] === state.value
+                            ? state.active
+                            : 'border-border bg-background text-muted-foreground hover:border-primary/50'
+                        )}
+                      >
+                        {state.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

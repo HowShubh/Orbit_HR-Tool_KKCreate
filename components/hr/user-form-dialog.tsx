@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createUser, updateUser } from '@/lib/actions/users'
+import { updateUserPhoto } from '@/lib/actions/avatars'
+import { PhotoUpload } from '@/components/ui/photo-upload'
 import { useStore } from '@/lib/store'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { TeamWithMembers } from '@/lib/queries/teams'
@@ -43,6 +45,7 @@ const EditSchema = z.object({
   role: z.enum(['employee', 'team_lead', 'hr', 'founder']),
   manager_id: z.string().optional(),
   designation: z.string().optional(),
+  primary_team_id: z.string().optional(),
 })
 
 type CreateValues = z.infer<typeof CreateSchema>
@@ -83,6 +86,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
       role: (user?.role as EditValues['role']) ?? 'employee',
       manager_id: user?.manager_id ?? '',
       designation: user?.designation ?? '',
+      primary_team_id: user?.memberships.find((m) => m.is_primary)?.team_id ?? '',
     },
   })
 
@@ -94,6 +98,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
         role: user.role as EditValues['role'],
         manager_id: user.manager_id ?? '',
         designation: user.designation ?? '',
+        primary_team_id: user.memberships.find((m) => m.is_primary)?.team_id ?? '',
       })
     }
     if (mode === 'create') {
@@ -135,6 +140,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           role: data.role,
           manager_id: data.manager_id || null,
           designation: data.designation || null,
+          primary_team_id: data.primary_team_id || null,
         })
         pushToast({ title: 'User updated', variant: 'success' })
         onOpenChange(false)
@@ -252,6 +258,17 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           <DialogTitle>Edit User</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(handleEdit)} className="space-y-4">
+          {user && (
+            <div className="flex flex-col items-center gap-2">
+              <PhotoUpload
+                name={user.full_name}
+                src={user.photo_url}
+                size="xl"
+                onUpload={(fd) => updateUserPhoto(user.id, fd)}
+              />
+              <p className="text-[11px] text-muted-foreground">Profile photo</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="full_name">Full Name</Label>
             <Input id="full_name" {...register('full_name')} />
@@ -296,6 +313,24 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
                     <SelectItem value="__none__">No manager</SelectItem>
                     {otherUsers.map((u) => (
                       <SelectItem key={u.id} value={u.id}>{u.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Primary Team</Label>
+            <Controller
+              name="primary_team_id"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value || '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? '' : v)}>
+                  <SelectTrigger><SelectValue placeholder="No team" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No team</SelectItem>
+                    {teams.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

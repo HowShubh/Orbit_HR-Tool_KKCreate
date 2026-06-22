@@ -33,6 +33,8 @@ const UpdateUserSchema = z.object({
   manager_id: z.string().uuid().nullable().optional(),
   designation: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  // null clears the primary team; undefined leaves it untouched.
+  primary_team_id: z.string().uuid().nullable().optional(),
 })
 
 export async function createUser(input: z.infer<typeof CreateUserSchema>) {
@@ -130,7 +132,8 @@ export async function updateUser(input: z.infer<typeof UpdateUserSchema>) {
 
   if (!before) throw new ActionError('User not found')
 
-  const { id, ...updates } = parsed
+  // primary_team_id is not a column on `users` — it maps to a team_members row.
+  const { id, primary_team_id, ...updates } = parsed
   const { data: after, error } = await adminClient
     .from('users')
     .update(updates)
@@ -139,6 +142,45 @@ export async function updateUser(input: z.infer<typeof UpdateUserSchema>) {
     .single()
 
   if (error || !after) throw new ActionError(error?.message ?? 'Update failed')
+
+  // Reconcile the primary team membership when a value was supplied.
+  if (primary_team_id !== undefined) {
+    const { data: active } = await adminClient
+      .from('team_members')
+      .select('id, team_id, is_primary')
+      .eq('user_id', id)
+      .is('left_at', null)
+
+    const currentPrimary = (active ?? []).find((m) => m.is_primary)?.team_id ?? null
+
+    if (currentPrimary !== primary_team_id) {
+      // Remove the existing primary membership (the app only manages one
+      // primary team per user — no secondary-membership UI exists).
+      await adminClient
+        .from('team_members')
+        .delete()
+        .eq('user_id', id)
+        .eq('is_primary', true)
+        .is('left_at', null)
+
+      if (primary_team_id) {
+        const existing = (active ?? []).find((m) => m.team_id === primary_team_id)
+        if (existing) {
+          // Already on the team — just mark it primary.
+          await adminClient
+            .from('team_members')
+            .update({ is_primary: true })
+            .eq('id', existing.id)
+        } else {
+          await adminClient.from('team_members').insert({
+            user_id: id,
+            team_id: primary_team_id,
+            is_primary: true,
+          })
+        }
+      }
+    }
+  }
 
   if (parsed.email && parsed.email !== before.email) {
     await adminClient.auth.admin.updateUserById(id, { email: parsed.email })

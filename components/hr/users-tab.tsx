@@ -125,7 +125,7 @@ export function UsersTab({ users, teams }: Props) {
                     <tr key={u.id} className="border-t hover:bg-muted/30">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <Avatar name={u.full_name} size="sm" />
+                          <Avatar name={u.full_name} src={u.photo_url} size="sm" />
                           <div className="min-w-0">
                             <button
                               type="button"

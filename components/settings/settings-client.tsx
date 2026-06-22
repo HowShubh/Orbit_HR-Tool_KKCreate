@@ -76,7 +76,7 @@ export function SettingsClient({ user }: Props) {
         <Card>
           <CardContent className="p-5 space-y-4">
             <div className="flex items-center gap-3 mb-3">
-              <Avatar name={user.full_name} size="md" />
+              <Avatar name={user.full_name} src={user.photo_url} size="md" />
               <div>
                 <div className="font-semibold text-[15px]">{user.full_name}</div>
                 <div className="text-sm text-muted-foreground">{user.email}</div>

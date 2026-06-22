@@ -13,7 +13,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select'
-import { cn } from '@/lib/utils'
+import { cn, teamInitials } from '@/lib/utils'
 import { PersonDetail } from '@/components/people/person-detail'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { LeaveWithUser } from '@/lib/queries/leaves'
@@ -89,9 +89,10 @@ export function TeamClient({
   const lead = leadByTeam[team.id]
   const upcoming = upcomingByTeam[team.id] ?? []
 
-  const wfoDays = team.wfo_pattern
-    ? team.wfo_pattern.split(',').map((s) => s.trim().toUpperCase())
-    : []
+  const officeDays = (team.wfo_pattern ?? '').split(',').map((s) => s.trim().toUpperCase())
+  const offDays = (team.off_days ?? '').split(',').map((s) => s.trim().toUpperCase())
+  const dayState = (d: string): 'office' | 'wfh' | 'off' =>
+    officeDays.includes(d) ? 'office' : offDays.includes(d) ? 'off' : 'wfh'
 
   return (
     <>
@@ -120,37 +121,47 @@ export function TeamClient({
         <Card>
           <CardContent className="p-5 space-y-3">
             <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <div className="text-[18px] font-bold tracking-tight">{team.name}</div>
-                <div className="text-[12.5px] text-muted-foreground mt-0.5">
-                  {members.length} {members.length === 1 ? 'member' : 'members'}
-                  {lead && ` · Led by ${lead.full_name}`}
+              <div className="flex items-center gap-3">
+                <Avatar name={team.name} src={team.photo_url} size="lg" fallbackText={teamInitials(team.name)} />
+                <div>
+                  <div className="text-[18px] font-bold tracking-tight">{team.name}</div>
+                  <div className="text-[12.5px] text-muted-foreground mt-0.5">
+                    {members.length} {members.length === 1 ? 'member' : 'members'}
+                    {lead && ` · Led by ${lead.full_name}`}
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* WFO pattern */}
+            {/* Weekly schedule */}
             <div>
               <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">
-                Office days
+                Weekly schedule
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {DAYS.map((d) => {
-                  const inOffice = wfoDays.includes(d)
+                  const state = dayState(d)
+                  const styles =
+                    state === 'office'
+                      ? 'bg-violet-100 text-violet-800 ring-violet-200'
+                      : state === 'wfh'
+                        ? 'bg-blue-100 text-blue-800 ring-blue-200'
+                        : 'bg-muted text-muted-foreground ring-border'
                   return (
                     <span
                       key={d}
-                      className={cn(
-                        'rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset',
-                        inOffice
-                          ? 'bg-violet-100 text-violet-800 ring-violet-200'
-                          : 'bg-muted text-muted-foreground ring-border'
-                      )}
+                      className={cn('rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset', styles)}
+                      title={state === 'office' ? 'Office' : state === 'wfh' ? 'Work from home' : 'Weekly off'}
                     >
                       {d}
                     </span>
                   )
                 })}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-3 text-[10.5px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-400" />Office</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-400" />WFH</span>
+                <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-400" />Off</span>
               </div>
             </div>
           </CardContent>
@@ -176,7 +187,7 @@ export function TeamClient({
                   )}
                 >
                   <CardContent className="p-4 flex items-center gap-3">
-                    <Avatar name={m.full_name} size="md" />
+                    <Avatar name={m.full_name} src={m.photo_url} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-semibold truncate">
                         {m.full_name} {isLead && <span className="text-violet-600 text-[11px] ml-1">★ Lead</span>}

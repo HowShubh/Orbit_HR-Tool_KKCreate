@@ -103,6 +103,16 @@ function parseWfoPattern(pattern?: string | null) {
   )
 }
 
+// Off days from the team's `off_days`; falls back to Sunday-only when a user
+// has no team configured.
+function parseOffDays(pattern?: string | null) {
+  const codes = (pattern ?? '')
+    .split(',')
+    .map((day) => day.trim().toUpperCase())
+    .filter(Boolean)
+  return new Set(codes.length ? codes : ['SUN'])
+}
+
 function formatDays(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
@@ -216,6 +226,11 @@ export function LeaveFormDialog({ trigger }: Props) {
     [data?.primaryTeam?.wfo_pattern]
   )
 
+  const offDays = useMemo(
+    () => parseOffDays(data?.primaryTeam?.off_days),
+    [data?.primaryTeam?.off_days]
+  )
+
   const holidayByDate = useMemo(() => {
     const map = new Map<string, string>()
     for (const holiday of data?.holidays ?? []) map.set(holiday.date, holiday.name)
@@ -263,7 +278,7 @@ export function LeaveFormDialog({ trigger }: Props) {
     const iso = format(date, 'yyyy-MM-dd')
     const nice = format(date, 'EEE, MMM d')
     if (iso < todayIso()) return `${nice} is in the past. You can only apply for today or later.`
-    if (dayCode(date) === 'SUN') return `${nice} is a Sunday, not a working day.`
+    if (offDays.has(dayCode(date))) return `${nice} is a weekly off for your team, not a working day.`
     const holiday = holidayByDate.get(iso)
     if (holiday) return `${nice} is a holiday (${holiday}).`
     if (isWfhCategory(policyCategory(data, type)) && !wfoDays.has(dayCode(date))) {
@@ -392,7 +407,7 @@ export function LeaveFormDialog({ trigger }: Props) {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
+      <DialogContent className="max-h-[92vh] max-w-6xl overflow-x-hidden overflow-y-auto p-3 sm:p-6">
         <DialogHeader>
           <DialogTitle>Apply Leave / WFH</DialogTitle>
         </DialogHeader>
@@ -404,8 +419,8 @@ export function LeaveFormDialog({ trigger }: Props) {
           </div>
         ) : (
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 space-y-4">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
@@ -415,7 +430,7 @@ export function LeaveFormDialog({ trigger }: Props) {
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <div className="w-36 text-center text-sm font-semibold">
+                  <div className="flex-1 text-center text-sm font-semibold sm:w-36 sm:flex-none">
                     {format(cursor, 'MMMM yyyy')}
                   </div>
                   <Button
@@ -431,14 +446,14 @@ export function LeaveFormDialog({ trigger }: Props) {
                   </Button>
                 </div>
 
-                <div className="flex rounded-lg border bg-background p-1">
+                <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border bg-background p-1 sm:w-auto">
                   {data.leaveTypes.map((item) => (
                     <button
                       key={item.key}
                       type="button"
                       onClick={() => setMode(item.key)}
                       className={cn(
-                        'rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
+                        'shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
                         mode === item.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
                       )}
                     >
@@ -471,9 +486,9 @@ export function LeaveFormDialog({ trigger }: Props) {
                     const iso = format(day, 'yyyy-MM-dd')
                     const inMonth = isSameMonth(day, cursor)
                     const isToday = isSameDay(day, new Date())
-                    const isSundayDay = dayCode(day) === 'SUN'
+                    const isOffDay = offDays.has(dayCode(day))
                     const holiday = holidayByDate.get(iso)
-                    const isOwnWfhDay = !isSundayDay && !holiday && !wfoDays.has(dayCode(day))
+                    const isOwnWfhDay = !isOffDay && !holiday && !wfoDays.has(dayCode(day))
                     const selectedType = selectedByDate.get(iso)
                     const teamLeaves = leavesOn(iso).filter((leave) => leave.user_id !== data.currentUserId)
                     const teamAway = teamLeaves.filter((leave) =>
@@ -487,33 +502,45 @@ export function LeaveFormDialog({ trigger }: Props) {
                         type="button"
                         onClick={() => toggleDay(day)}
                         className={cn(
-                          'min-h-[112px] border-r border-b p-2 text-left text-xs transition-colors hover:bg-muted/40',
+                          'min-h-[60px] border-r border-b p-1 text-left text-xs transition-colors hover:bg-muted/40 sm:min-h-[112px] sm:p-2',
                           !inMonth && 'bg-muted/10 opacity-45',
-                          isSundayDay && 'bg-muted/40',
+                          isOffDay && 'bg-muted/40',
                           isToday && 'ring-2 ring-primary ring-inset',
                           selectedCategory && CATEGORY_BG[selectedCategory]
                         )}
                       >
                         <div className="flex items-start justify-between gap-1">
-                          <span className={cn('font-semibold', isToday && 'text-primary')}>
+                          <span className={cn('text-[13px] font-semibold sm:text-xs', isToday && 'text-primary')}>
                             {format(day, 'd')}
                           </span>
+                          {/* Full pill on >= sm */}
                           {selectedType && (
-                            <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset', pillFor(data, selectedType))}>
+                            <span className={cn('hidden rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset sm:inline-block', pillFor(data, selectedType))}>
                               {labelFor(data, selectedType)}
                             </span>
                           )}
                         </div>
 
-                        <div className="mt-1 space-y-1">
+                        {/* Compact dot indicators on mobile */}
+                        <div className="mt-1 flex flex-wrap items-center gap-1 sm:hidden">
+                          {selectedType && (
+                            <span className={cn('h-2 w-2 rounded-full ring-1 ring-inset', pillFor(data, selectedType))} aria-label={labelFor(data, selectedType)} />
+                          )}
+                          {holiday && <span className="h-2 w-2 rounded-full bg-rose-400" aria-label="Holiday" />}
+                          {isOwnWfhDay && <Home className="h-3 w-3 text-blue-400" aria-label="Your WFH day" />}
+                          {teamAway.length > 0 && <span className="h-2 w-2 rounded-full bg-amber-400" aria-label="Team away" />}
+                        </div>
+
+                        {/* Rich markers on >= sm */}
+                        <div className="mt-1 hidden space-y-1 sm:block">
                           {holiday && (
                             <div className="truncate rounded bg-rose-50 px-1 py-0.5 text-[10px] font-medium text-rose-700 ring-1 ring-rose-100">
                               {holiday}
                             </div>
                           )}
-                          {isSundayDay && (
+                          {isOffDay && (
                             <div className="rounded bg-slate-100 px-1 py-0.5 text-[10px] font-medium text-slate-600">
-                              Sunday
+                              Weekly off
                             </div>
                           )}
                           {isOwnWfhDay && (
@@ -541,7 +568,7 @@ export function LeaveFormDialog({ trigger }: Props) {
               </div>
             </div>
 
-            <aside className="space-y-4">
+            <aside className="min-w-0 space-y-4">
               {notice && (
                 <div
                   role="status"

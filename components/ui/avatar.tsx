@@ -6,8 +6,10 @@ import { cn, initials, avatarGradient } from "@/lib/utils";
 export interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   name: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
-  src?: string;
+  src?: string | null;
   ring?: boolean;
+  /** Override the generated initials (e.g. team initials like "SF"). */
+  fallbackText?: string;
 }
 
 const sizeMap = {
@@ -18,11 +20,11 @@ const sizeMap = {
   xl: "h-14 w-14 text-base",
 };
 
-export function Avatar({ name, size = "md", src, ring, className, ...props }: AvatarProps) {
+export function Avatar({ name, size = "md", src, ring, fallbackText, className, ...props }: AvatarProps) {
   return (
     <div
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white bg-gradient-to-br shadow-sm",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white bg-gradient-to-br shadow-sm",
         avatarGradient(name),
         sizeMap[size],
         ring && "ring-2 ring-white",
@@ -34,7 +36,7 @@ export function Avatar({ name, size = "md", src, ring, className, ...props }: Av
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt={name} className="h-full w-full rounded-full object-cover" />
       ) : (
-        <span>{initials(name)}</span>
+        <span>{fallbackText ?? initials(name)}</span>
       )}
     </div>
   );

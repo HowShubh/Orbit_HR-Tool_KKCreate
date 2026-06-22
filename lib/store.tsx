@@ -95,6 +95,7 @@ export function StoreProvider({
       primary_team_id: '',
       team_ids: [],
       notifications_muted: realUser.notifications_muted ?? undefined,
+      photo_url: realUser.photo_url ?? null,
     }
   }, [realUser]);
 

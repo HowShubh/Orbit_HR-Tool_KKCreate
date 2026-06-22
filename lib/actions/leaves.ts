@@ -74,8 +74,15 @@ function dayCode(date: string) {
   return DAY_CODES[dateFromIso(date).getDay()]
 }
 
-function isSunday(date: string) {
-  return dayCode(date) === 'SUN'
+// Off days come from the team's `off_days` (CSV of day codes). When a user has
+// no team, fall back to the historical default of Sunday-only off.
+function isOffDayForPattern(date: string, offPattern?: string | null) {
+  const codes = (offPattern ?? '')
+    .split(',')
+    .map((day) => day.trim().toUpperCase())
+    .filter(Boolean)
+  const set = new Set(codes.length ? codes : ['SUN'])
+  return set.has(dayCode(date))
 }
 
 function parseWfoPattern(pattern?: string | null) {
@@ -465,8 +472,8 @@ export async function getMyLeavePlannerData() {
     balancesRes,
   ] = await Promise.all([
     teamIds.length > 0
-      ? adminClient.from('teams').select('id, name, wfo_pattern, team_lead_id').in('id', teamIds)
-      : Promise.resolve({ data: [] as Pick<Tables<'teams'>, 'id' | 'name' | 'wfo_pattern' | 'team_lead_id'>[] }),
+      ? adminClient.from('teams').select('id, name, wfo_pattern, off_days, team_lead_id').in('id', teamIds)
+      : Promise.resolve({ data: [] as Pick<Tables<'teams'>, 'id' | 'name' | 'wfo_pattern' | 'off_days' | 'team_lead_id'>[] }),
     primaryTeamId
       ? adminClient
           .from('team_members')
@@ -669,21 +676,23 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
 
   const holidayByDate = new Map((holidays ?? []).map((holiday) => [holiday.date, holiday.name]))
   let wfoPattern: string | null = null
+  let offPattern: string | null = null
   if (primaryMembership?.team_id) {
     const { data: team } = await adminClient
       .from('teams')
-      .select('wfo_pattern')
+      .select('wfo_pattern, off_days')
       .eq('id', primaryMembership.team_id)
       .maybeSingle()
     wfoPattern = team?.wfo_pattern ?? null
+    offPattern = team?.off_days ?? null
   }
 
   for (const day of sortedDays) {
     if (day.date < today) {
       throw new ActionError(`${day.date} is in the past.`)
     }
-    if (isSunday(day.date)) {
-      throw new ActionError(`${day.date} is Sunday!`)
+    if (isOffDayForPattern(day.date, offPattern)) {
+      throw new ActionError(`${day.date} is a non-working day for your team.`)
     }
     if (holidayByDate.has(day.date)) {
       throw new ActionError(`${day.date} is a Holiday!`)

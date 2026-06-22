@@ -91,7 +91,7 @@ export function PersonDetail({ userId }: { userId: string }) {
     <div className="space-y-5">
       {/* Identity */}
       <div className="flex items-start gap-3">
-        <Avatar name={user.full_name} size="lg" />
+        <Avatar name={user.full_name} src={user.photo_url} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="text-[16px] font-semibold tracking-tight">{user.full_name}</div>
           <div className="text-[12.5px] text-muted-foreground">{user.designation || '—'}</div>

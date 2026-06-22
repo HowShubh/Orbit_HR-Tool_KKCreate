@@ -6,6 +6,38 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-23 — Per-team weekly schedule (Office/WFH/Off) + profile photos
+
+**Requires migration `017_team_schedule_and_avatars.sql` to be applied in
+Supabase before deploying** — the code now selects `teams.off_days` /
+`teams.photo_url` and uploads to a storage bucket that the migration creates.
+
+- **Team schedule.** Was: `teams.wfo_pattern` (office days only) + Sunday
+  hard-coded as "off" everywhere. Now: each team also has `off_days` (CSV of day
+  codes, default `'SUN'` to preserve old behaviour). A weekday is Office (in
+  `wfo_pattern`), Off (in `off_days`), else WFH. No more global Sunday-off
+  assumption — a team can work Sundays or take Saturdays off.
+  - `leaves.ts`: `isSunday()` removed; `isOffDayForPattern()` added. Both
+    `createMyLeavePlan` validation and `getMyLeavePlannerData` read `off_days`.
+  - `leave-form-dialog.tsx`: calendar reflects the team's real off/WFH days
+    (`parseOffDays`, `offDays`), replacing the hardcoded `isSundayDay`. **This
+    reflection was an explicit requirement — keep it working.**
+  - Team form: WFO multiselect replaced with a per-day Office/WFH/Off picker.
+    `team-client` + `teams-tab` render the full schedule.
+- **Profile photos.** `users.photo_url` (existed, unused) is now uploadable;
+  `teams.photo_url` added. Public storage bucket `avatars`. All writes go through
+  `lib/actions/avatars.ts` (service-role): `updateMyPhoto` (self),
+  `updateUserPhoto`/`updateTeamPhoto` (manage_users), `removeMyPhoto`.
+  **Replacing a photo deletes the previous file** (path parsed from the public
+  URL). Reusable `components/ui/photo-upload.tsx`; team initials default via
+  `teamInitials()` (e.g. "Short-form …" → "SF"). `src={photo_url}` wired into
+  current-user avatars (topbar/sidebar/mobile-nav/settings/profile), HR users
+  list, edit-user dialog, person-detail, team cards/header, org tree. Remaining
+  initials-only spots (dashboard rosters, calendar, approval cards) just need
+  `photo_url` added to their queries when wanted.
+
+---
+
 ## 2026-06-22 — Balances year dropdown data-aware + Annual Reset danger zone
 
 - Balances tab dropdown was computed (current FY ± a few), so it offered future

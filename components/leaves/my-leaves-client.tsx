@@ -211,14 +211,14 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
             </TabsList>
           </Tabs>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative flex-1 min-w-[150px] sm:flex-none">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search…"
-                className="h-9 w-48 rounded-lg border border-border bg-card pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="h-9 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:w-48"
               />
             </div>
             <Button variant="outline" size="sm" onClick={downloadCsv}>

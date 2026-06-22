@@ -19,6 +19,7 @@ export interface User {
   primary_team_id: string;
   team_ids: string[];
   notifications_muted?: boolean;
+  photo_url?: string | null;
 }
 
 export interface Team {

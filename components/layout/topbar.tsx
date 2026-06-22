@@ -60,7 +60,7 @@ export function Topbar({ title, subtitle }: { title?: string; subtitle?: string 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2 rounded-full hover:bg-muted pl-1 pr-2 py-1 transition-colors">
-              <Avatar name={currentUser.full_name} size="sm" />
+              <Avatar name={currentUser.full_name} src={currentUser.photo_url} size="sm" />
               <ChevronDown className="h-3.5 w-3.5 opacity-60 hidden sm:block" />
             </button>
           </DropdownMenuTrigger>

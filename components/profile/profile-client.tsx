@@ -6,7 +6,7 @@ import { format, parseISO } from 'date-fns'
 import { BadgeCheck, CalendarDays } from 'lucide-react'
 import { Topbar } from '@/components/layout/topbar'
 import { Card, CardContent } from '@/components/ui/card'
-import { Avatar } from '@/components/ui/avatar'
+import { PhotoUpload } from '@/components/ui/photo-upload'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useStore } from '@/lib/store'
 import { updateMyProfile } from '@/lib/actions/profile'
+import { updateMyPhoto, removeMyPhoto } from '@/lib/actions/avatars'
 import type { AppUser } from '@/lib/auth/get-current-user'
 import type { ProfileTeam } from '@/lib/queries/users'
 
@@ -58,9 +59,13 @@ export function ProfileClient({ user, teams, managerName, directReports }: Props
         <div className="lg:col-span-1">
           <Card>
             <CardContent className="p-6 text-center">
-              <div className="relative inline-block">
-                <Avatar name={user.full_name} size="xl" />
-              </div>
+              <PhotoUpload
+                name={user.full_name}
+                src={user.photo_url}
+                size="xl"
+                onUpload={updateMyPhoto}
+                onRemove={removeMyPhoto}
+              />
               <div className="mt-4 text-[16px] font-semibold tracking-tight">
                 {user.full_name}
               </div>

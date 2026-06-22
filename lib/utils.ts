@@ -15,6 +15,22 @@ export function initials(name: string) {
     .toUpperCase();
 }
 
+const TEAM_STOPWORDS = new Set(["and", "of", "the", "&", "for", "to"]);
+
+// Initials for a team name: split on spaces, hyphens, slashes and plus signs,
+// skip connector words, take the first two letters. e.g. "Short-form KKC+Learn"
+// -> "SF", "HR and Operations" -> "HO".
+export function teamInitials(name: string) {
+  const letters = name
+    .split(/[\s\-+/]+/)
+    .filter((p) => p && !TEAM_STOPWORDS.has(p.toLowerCase()))
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return letters || name.slice(0, 2).toUpperCase();
+}
+
 const AVATAR_GRADIENTS = [
   "from-violet-400 to-fuchsia-500",
   "from-amber-400 to-orange-500",

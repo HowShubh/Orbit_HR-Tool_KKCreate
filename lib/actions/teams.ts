@@ -18,6 +18,7 @@ const WfoSchema = z
 const CreateTeamSchema = z.object({
   name: z.string().min(1),
   wfo_pattern: WfoSchema,
+  off_days: WfoSchema,
   team_lead_id: z.string().uuid().nullable().optional(),
 })
 
@@ -25,6 +26,7 @@ const UpdateTeamSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).optional(),
   wfo_pattern: WfoSchema.optional(),
+  off_days: WfoSchema.optional(),
   team_lead_id: z.string().uuid().nullable().optional(),
 })
 
@@ -38,6 +40,7 @@ export async function createTeam(input: z.infer<typeof CreateTeamSchema>) {
     .insert({
       name: parsed.name,
       wfo_pattern: parsed.wfo_pattern,
+      off_days: parsed.off_days,
       team_lead_id: parsed.team_lead_id ?? null,
     })
     .select()

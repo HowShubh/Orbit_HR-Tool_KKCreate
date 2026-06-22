@@ -331,6 +331,8 @@ export type Database = {
           id: string
           name: string
           wfo_pattern: string
+          off_days: string
+          photo_url: string | null
           team_lead_id: string | null
           created_at: string
           updated_at: string
@@ -339,6 +341,8 @@ export type Database = {
           id?: string
           name: string
           wfo_pattern: string
+          off_days?: string
+          photo_url?: string | null
           team_lead_id?: string | null
           created_at?: string
           updated_at?: string

@@ -141,7 +141,7 @@ function OrgNodeView({
         )}
       >
         <div className="relative inline-block">
-          <Avatar name={node.user.full_name} size="md" />
+          <Avatar name={node.user.full_name} src={node.user.photo_url} size="md" />
           {isTop && (
             <Crown className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-400" />
           )}

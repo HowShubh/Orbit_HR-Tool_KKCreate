@@ -5,6 +5,8 @@ import { Plus, Edit2, Trash2, Users } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Avatar } from '@/components/ui/avatar'
+import { teamInitials } from '@/lib/utils'
 import { TeamFormDialog } from './team-form-dialog'
 import { TeamMembersDialog } from './team-members-dialog'
 import { deleteTeam } from '@/lib/actions/teams'
@@ -92,7 +94,7 @@ export function TeamsTab({ teams, users }: Props) {
               <thead>
                 <tr className="text-left text-muted-foreground bg-muted/40">
                   <th className="font-medium px-4 py-3">Name</th>
-                  <th className="font-medium px-4 py-3">WFO Pattern</th>
+                  <th className="font-medium px-4 py-3">Schedule</th>
                   <th className="font-medium px-4 py-3">Team Lead</th>
                   <th className="font-medium px-4 py-3">Members</th>
                   <th className="font-medium px-4 py-3 text-right">Actions</th>
@@ -100,25 +102,38 @@ export function TeamsTab({ teams, users }: Props) {
               </thead>
               <tbody>
                 {teams.map((team) => {
-                  const days = team.wfo_pattern
-                    ? team.wfo_pattern.split(',').filter(Boolean)
-                    : []
+                  const officeDays = (team.wfo_pattern ?? '').split(',').filter(Boolean)
+                  const offDays = (team.off_days ?? '').split(',').filter(Boolean)
 
                   return (
                     <tr key={team.id} className="border-t hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{team.name}</td>
+                      <td className="px-4 py-3 font-medium">
+                        <div className="flex items-center gap-2.5">
+                          <Avatar name={team.name} src={team.photo_url} size="sm" fallbackText={teamInitials(team.name)} />
+                          <span>{team.name}</span>
+                        </div>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
-                          {days.length > 0 ? (
-                            days.map((d) => (
-                              <span
-                                key={d}
-                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-muted text-muted-foreground"
-                              >
-                                {DAY_DISPLAY[d] ?? d}
-                              </span>
-                            ))
-                          ) : (
+                          {officeDays.map((d) => (
+                            <span
+                              key={`o-${d}`}
+                              title="Office"
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-800"
+                            >
+                              {DAY_DISPLAY[d] ?? d}
+                            </span>
+                          ))}
+                          {offDays.map((d) => (
+                            <span
+                              key={`x-${d}`}
+                              title="Weekly off"
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-muted text-muted-foreground"
+                            >
+                              {DAY_DISPLAY[d] ?? d}
+                            </span>
+                          ))}
+                          {officeDays.length === 0 && offDays.length === 0 && (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </div>
