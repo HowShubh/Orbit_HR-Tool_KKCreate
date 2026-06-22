@@ -26,6 +26,7 @@ interface Props {
   grants: Tables<'compoff_grants'>[]
   leaveTypes: LeaveTypePolicy[]
   leaveYear: number
+  availableYears: number[]
   pendingRequests: LeaveRequestWithDays[]
   history: LeaveRequestWithDays[]
 }
@@ -87,6 +88,7 @@ export function HRConsoleClient(props: Props) {
               compoffBalances={props.compoffBalances}
               leaveTypes={props.leaveTypes}
               leaveYear={props.leaveYear}
+              availableYears={props.availableYears}
             />
           </TabsContent>
           <TabsContent value="leave-types">
@@ -96,7 +98,7 @@ export function HRConsoleClient(props: Props) {
             <CompoffTab grants={props.grants} users={props.users} />
           </TabsContent>
           <TabsContent value="reset">
-            <AnnualResetTab leaveYear={props.leaveYear} />
+            <AnnualResetTab leaveYear={props.leaveYear} availableYears={props.availableYears} />
           </TabsContent>
         </Tabs>
       </div>

@@ -6,6 +6,20 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-22 — Balances year dropdown data-aware + Annual Reset danger zone
+
+- Balances tab dropdown was computed (current FY ± a few), so it offered future
+  years like "2027-2028" that had no data. Now it lists only years that actually
+  have balance rows (`listBalanceYears`) plus the current FY. `availableYears`
+  threaded hr/page → HRConsoleClient → BalancesTab + AnnualResetTab.
+- Annual Reset tab: added a **Danger Zone** — `deleteFiscalYearData(year)`
+  (`lib/actions/annual-reset.ts`) deletes a fiscal year's leave/WFH balances + its
+  `leave_year_resets` record to undo an accidental reset. Refuses the CURRENT FY
+  (live data) and never touches comp-off (year 0). Year picker is limited to
+  data-bearing years except the current one; confirm step required.
+
+---
+
 ## 2026-06-22 — Dashboard approvals: manager-only scope + show for any role
 
 Two gaps from the manager-primary rework (anyone can be a manager regardless of role):

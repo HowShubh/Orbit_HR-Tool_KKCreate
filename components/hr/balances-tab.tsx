@@ -23,6 +23,7 @@ interface Props {
   compoffBalances: Tables<'leave_balances'>[]
   leaveTypes: LeaveTypePolicy[]
   leaveYear: number
+  availableYears: number[]
 }
 
 type BalanceType = string
@@ -33,7 +34,7 @@ interface EditState {
   value: string
 }
 
-export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leaveYear }: Props) {
+export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leaveYear, availableYears }: Props) {
   const { pushToast } = useStore()
   const [isPending, startTransition] = useTransition()
   const [editing, setEditing] = useState<EditState | null>(null)
@@ -42,13 +43,12 @@ export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leav
   const [bal, setBal] = useState<Tables<'leave_balances'>[]>(balances)
   const [confirmApply, setConfirmApply] = useState(false)
 
-  // Year options: current FY ± a couple of years (FY start years).
+  // Only show years that actually have balance data, plus the current FY and the
+  // year currently selected — so a stray/deleted year doesn't linger in the list.
   const yearOptions = useMemo(() => {
-    const cur = currentFiscalYearStart()
-    const set = new Set<number>([leaveYear, year])
-    for (let y = cur + 1; y >= cur - 3; y--) set.add(y)
+    const set = new Set<number>([currentFiscalYearStart(), leaveYear, year, ...availableYears])
     return Array.from(set).sort((a, b) => b - a)
-  }, [leaveYear, year])
+  }, [leaveYear, year, availableYears])
 
   const allBalances = [...bal, ...compoffBalances]
 
