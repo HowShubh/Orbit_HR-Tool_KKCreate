@@ -6,6 +6,21 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-22 — Dashboard approvals: manager-only scope + show for any role
+
+Two gaps from the manager-primary rework (anyone can be a manager regardless of role):
+- `lib/queries/dashboard.ts`: the dashboard approval queue used the org-wide `'hr'`
+  scope for HR/Founders, so founders saw EVERYONE's pending requests. Now it always
+  uses `'team'` (people you manage) for everyone. Org-wide override stays in the HR
+  Console (which still passes `'hr'`).
+- `components/dashboard/dashboard-client.tsx`: the Employee dashboard variant never
+  rendered the approval card, so a manager whose role is `employee` had nothing to
+  approve. Added the Leave Approvals + comp-off approval cards to the employee
+  dashboard (shown whenever there are pending approvals). Approval auth is by
+  `manager_id`, not role, so approving works.
+
+---
+
 ## 2026-06-22 — Leave planner UX: inline invalid-day feedback + simpler WFH cell
 
 `leave-form-dialog.tsx`: picking an invalid day (past / Sunday / holiday / WFH on

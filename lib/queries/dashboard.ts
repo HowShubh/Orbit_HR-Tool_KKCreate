@@ -217,8 +217,9 @@ export async function getDashboardData(
     listLeaveTypes(),
   ])
 
-  const approvalScope: 'hr' | 'team' = isOrgWide ? 'hr' : 'team'
-  const pendingApprovalRequests = await listPendingApprovalsForReviewer(currentUserId, approvalScope)
+  // The dashboard approval queue is for the people YOU manage only — for everyone,
+  // founders included. Founders/HR do org-wide overrides from the HR Console, not here.
+  const pendingApprovalRequests = await listPendingApprovalsForReviewer(currentUserId, 'team')
   const compoffRequesterIds = Array.from(
     new Set((approvalsRes.data ?? []).map((grant) => grant.user_id))
   )

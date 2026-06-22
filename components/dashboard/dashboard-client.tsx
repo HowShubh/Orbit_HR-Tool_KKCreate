@@ -254,6 +254,22 @@ function EmployeeDashboard({
           </Link>
         </div>
 
+        {/* Approvals — shown to anyone who manages someone (regardless of role). */}
+        {data.pendingApprovalRequests.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader>
+              <CardTitle className="text-amber-900">Leave Approvals</CardTitle>
+              <Badge variant="warning">{data.pendingApprovalRequests.length}</Badge>
+            </CardHeader>
+            <CardContent>
+              <ApprovalQueueClient initialRequests={data.pendingApprovalRequests} />
+            </CardContent>
+          </Card>
+        )}
+        {data.pendingApprovalsForMe.length > 0 && (
+          <PendingApprovalsCard approvals={data.pendingApprovalsForMe} />
+        )}
+
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
           <div className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
