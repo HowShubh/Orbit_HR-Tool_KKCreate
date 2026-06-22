@@ -1357,8 +1357,11 @@ export async function deleteLeave(leaveId: string) {
   const isHR = user.role === 'hr' || user.role === 'founder'
   const policies = await getLeaveTypePolicies(adminClient)
 
+  // Employees / team leads must route an approved leave's deletion for approval.
+  // HR & founders approve their own actions, so they delete directly below.
   if (isOwner && leave.status === 'active' && !isHR) {
-    return requestLeaveDeletion(leaveId)
+    await requestLeaveDeletion(leaveId)
+    return { status: 'delete_requested' as const }
   }
 
   if (!isHR && !(isOwner && leave.status === 'pending')) {
@@ -1398,4 +1401,5 @@ export async function deleteLeave(leaveId: string) {
   }
 
   revalidatePath('/', 'layout')
+  return { status: 'deleted' as const }
 }

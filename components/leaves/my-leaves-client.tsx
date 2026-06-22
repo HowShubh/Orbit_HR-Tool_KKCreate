@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
 import { LeaveFormDialog } from '@/components/leave/leave-form-dialog'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
-import { deleteLeave, requestLeaveDeletion } from '@/lib/actions/leaves'
+import { deleteLeave } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { AppUser } from '@/lib/auth/get-current-user'
@@ -131,19 +131,22 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
 
   function handleDelete(leave: Tables<'leaves'>) {
     const isApproved = leave.status === 'active'
-    const message = isApproved
-      ? 'Request deletion for this approved leave? It will stay approved until HR or your manager approves the deletion.'
-      : 'Delete this pending leave request?'
+    // HR & founders approve their own actions, so their approved leaves are
+    // removed immediately rather than routed for deletion approval.
+    const selfApproves = currentUser.role === 'hr' || currentUser.role === 'founder'
+    const message = !isApproved
+      ? 'Delete this pending leave request?'
+      : selfApproves
+        ? 'Remove this approved leave? It will be deleted and the balance restored.'
+        : 'Request deletion for this approved leave? It will stay approved until HR or your manager approves the deletion.'
     if (!window.confirm(message)) return
     startTransition(async () => {
       try {
-        if (isApproved) {
-          await requestLeaveDeletion(leave.id)
-          pushToast({ title: 'Deletion request sent', variant: 'success' })
-        } else {
-          await deleteLeave(leave.id)
-          pushToast({ title: 'Leave request deleted', variant: 'success' })
-        }
+        const result = await deleteLeave(leave.id)
+        pushToast({
+          title: result?.status === 'delete_requested' ? 'Deletion request sent' : 'Leave removed',
+          variant: 'success',
+        })
         router.refresh()
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to update leave'
@@ -316,7 +319,10 @@ export function MyLeavesClient({ currentUser, leaves, compoff, balances, compoff
                                   onClick={() => handleDelete(leave)}
                                   className="text-rose-600 border-rose-200 hover:bg-rose-50"
                                 >
-                                  {leave.status === 'active' ? 'Request Delete' : 'Delete'}
+                                  {leave.status === 'active' &&
+                                  !(currentUser.role === 'hr' || currentUser.role === 'founder')
+                                    ? 'Request Delete'
+                                    : 'Delete'}
                                 </Button>
                               )}
                             </td>
