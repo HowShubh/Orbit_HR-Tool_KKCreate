@@ -2,23 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, ClipboardList, LayoutDashboard, Network, UserCog } from "lucide-react";
-import { useStore } from "@/lib/store";
+import { CalendarDays, ClipboardList, LayoutDashboard, Network, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function BottomNav() {
   const pathname = usePathname();
-  const { currentUser } = useStore();
-  const hrLink = currentUser.role === "hr" || currentUser.role === "founder";
 
+  // HR Console & Audit Log are intentionally not here — they're desktop-only.
   const items = [
     { href: "/", label: "Home", icon: LayoutDashboard },
     { href: "/leaves", label: "Leaves", icon: ClipboardList },
     { href: "/calendar", label: "Calendar", icon: CalendarDays },
     { href: "/org", label: "Org", icon: Network },
-    hrLink
-      ? { href: "/hr", label: "HR", icon: UserCog }
-      : { href: "/profile", label: "Me", icon: UserCog },
+    { href: "/profile", label: "Me", icon: UserRound },
   ];
 
   return (

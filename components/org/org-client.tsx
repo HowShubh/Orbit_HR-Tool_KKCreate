@@ -1,6 +1,7 @@
 'use client'
 
-import { Crown, Users, AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { Crown, Users, AlertTriangle, ChevronRight } from 'lucide-react'
 import { Topbar } from '@/components/layout/topbar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Avatar } from '@/components/ui/avatar'
@@ -28,6 +29,16 @@ function countNodes(nodes: OrgNode[]): number {
 
 export function OrgClient({ currentUserId, roots, orphans, teams }: Props) {
   const total = countNodes(roots) + countNodes(orphans)
+  // Mobile list: which subtrees are collapsed (default: all expanded).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  function toggle(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   if (total === 0) {
     return (
@@ -51,7 +62,46 @@ export function OrgClient({ currentUserId, roots, orphans, teams }: Props) {
         subtitle={`${total} ${total === 1 ? 'person' : 'people'} across ${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`}
       />
 
-      <div className="overflow-x-auto px-5 lg:px-8 py-8">
+      {/* Phone: indented, collapsible list (the node-tree doesn't fit at 375px) */}
+      <div className="sm:hidden px-4 py-4 space-y-4">
+        <div className="overflow-hidden rounded-xl border bg-card">
+          {roots.map((root) => (
+            <OrgListRow
+              key={root.user.id}
+              node={root}
+              depth={0}
+              currentUserId={currentUserId}
+              collapsed={collapsed}
+              toggle={toggle}
+              isRoot
+            />
+          ))}
+        </div>
+        {orphans.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="flex items-center gap-2 text-amber-900">
+              <AlertTriangle className="h-4 w-4" />
+              <span className="text-[13px] font-semibold">Needs a manager ({orphans.length})</span>
+            </div>
+            <div className="mt-2 overflow-hidden rounded-lg border bg-card">
+              {orphans.map((o) => (
+                <OrgListRow
+                  key={o.user.id}
+                  node={o}
+                  depth={0}
+                  currentUserId={currentUserId}
+                  collapsed={collapsed}
+                  toggle={toggle}
+                  isRoot
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tablet / desktop: visual node-tree */}
+      <div className="hidden sm:block overflow-x-auto px-5 lg:px-8 py-8">
         <div className="flex flex-col items-center gap-6 min-w-fit">
           {roots.map((root) => (
             <OrgNodeView key={root.user.id} node={root} currentUserId={currentUserId} isRoot />
@@ -60,7 +110,7 @@ export function OrgClient({ currentUserId, roots, orphans, teams }: Props) {
       </div>
 
       {orphans.length > 0 && (
-        <div className="px-5 lg:px-8 pb-10">
+        <div className="hidden sm:block px-5 lg:px-8 pb-10">
           <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
             <div className="flex items-center gap-2 text-amber-900">
               <AlertTriangle className="h-4 w-4" />
@@ -82,6 +132,94 @@ export function OrgClient({ currentUserId, roots, orphans, teams }: Props) {
           </div>
         </div>
       )}
+    </>
+  )
+}
+
+function OrgListRow({
+  node,
+  depth,
+  currentUserId,
+  collapsed,
+  toggle,
+  isRoot,
+}: {
+  node: OrgNode
+  depth: number
+  currentUserId: string
+  collapsed: Set<string>
+  toggle: (id: string) => void
+  isRoot?: boolean
+}) {
+  const isMe = node.user.id === currentUserId
+  const isTop = isRoot || node.user.manager_id === null
+  const hasReports = node.reports.length > 0
+  const isOpen = hasReports && !collapsed.has(node.user.id)
+
+  return (
+    <>
+      <div
+        className={cn('flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0', isMe && 'bg-violet-50')}
+        style={{ paddingLeft: 12 + depth * 18 }}
+      >
+        {hasReports ? (
+          <button
+            type="button"
+            onClick={() => toggle(node.user.id)}
+            aria-label={isOpen ? 'Collapse' : 'Expand'}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted"
+          >
+            <ChevronRight className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-90')} />
+          </button>
+        ) : (
+          <span className="inline-block w-6 shrink-0" />
+        )}
+
+        <div className="relative shrink-0">
+          <Avatar name={node.user.full_name} src={node.user.photo_url} size="sm" />
+          {isTop && (
+            <Crown className="absolute -top-1 -right-1 h-3 w-3 text-amber-500 fill-amber-400" />
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[13px] font-semibold">{node.user.full_name}</span>
+            {isMe && <span className="text-[11px] text-muted-foreground">(You)</span>}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-medium capitalize',
+                ROLE_COLOR[node.user.role] ?? 'bg-slate-100 text-slate-700'
+              )}
+            >
+              {node.user.role.replace('_', ' ')}
+            </span>
+            <span className="truncate text-[11px] text-muted-foreground">
+              {node.user.designation || '—'}
+            </span>
+          </div>
+        </div>
+
+        {hasReports && (
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+            {node.reports.length}
+          </span>
+        )}
+      </div>
+
+      {isOpen &&
+        node.reports.map((r) => (
+          <OrgListRow
+            key={r.user.id}
+            node={r}
+            depth={depth + 1}
+            currentUserId={currentUserId}
+            collapsed={collapsed}
+            toggle={toggle}
+          />
+        ))}
     </>
   )
 }

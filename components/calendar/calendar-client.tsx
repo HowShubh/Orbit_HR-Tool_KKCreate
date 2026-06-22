@@ -54,6 +54,22 @@ function leavePillClass(leave: LeaveWithUser) {
       : 'bg-orange-100 text-orange-800')
 }
 
+const TYPE_DOT: Record<string, string> = {
+  wfh: 'bg-blue-400',
+  leave: 'bg-orange-400',
+  compoff_wfh: 'bg-cyan-400',
+  compoff_leave: 'bg-amber-400',
+}
+
+// Compact dot colour for a leave — used in the phone calendar where text chips
+// don't fit. Falls back to the category colour for custom leave types.
+function leaveDotClass(leave: LeaveWithUser) {
+  return TYPE_DOT[leave.requested_type ?? leave.type] ??
+    (leave.type_category === 'wfh' || leave.type_category === 'compoff_wfh'
+      ? 'bg-blue-400'
+      : 'bg-orange-400')
+}
+
 interface Props {
   currentUser: Tables<'users'>
   users: UserWithMembership[]
@@ -154,7 +170,7 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
       <Topbar title="Calendar" subtitle="Leaves and holidays at a glance" />
       <div className="px-5 lg:px-8 py-5 space-y-4">
         {/* Header bar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -164,7 +180,7 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="text-[14px] font-semibold w-36 text-center">
+            <div className="flex-1 text-center text-[14px] font-semibold sm:w-36 sm:flex-none">
               {format(cursor, 'MMMM yyyy')}
             </div>
             <Button
@@ -184,8 +200,8 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
             </Button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
               {(['wfh', 'leave', 'compoff_wfh', 'compoff_leave'] as const).map((t) => (
                 <span key={t} className={cn('rounded px-1.5 py-0.5 font-medium', TYPE_PILL[t])}>
                   {TYPE_LABEL[t]}
@@ -196,7 +212,7 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
               </span>
             </div>
             <Select value={scope} onValueChange={setScope}>
-              <SelectTrigger className="w-56">
+              <SelectTrigger className="w-full sm:w-56">
                 <SelectValue placeholder="Scope" />
               </SelectTrigger>
               <SelectContent>
@@ -236,34 +252,45 @@ export function CalendarClient({ currentUser, users, teams, holidays, allLeaves 
                 const wkend = isWeekendDay(d)
                 const isSelected = selected === iso
 
+                const dotClasses = Array.from(new Set(leaves.map(leaveDotClass)))
+
                 return (
                   <button
                     key={i}
                     onClick={() => setSelected(iso)}
                     className={cn(
-                      'relative min-h-[100px] border-r border-b last:border-r-0 p-1.5 text-left text-xs transition-colors hover:bg-muted/40 overflow-hidden',
+                      'relative min-h-[52px] border-r border-b last:border-r-0 p-1 text-left text-xs transition-colors hover:bg-muted/40 overflow-hidden sm:min-h-[100px] sm:p-1.5',
                       !inMonth && 'opacity-40 bg-muted/10',
                       wkend && 'bg-muted/30',
                       isToday && 'ring-2 ring-violet-500 ring-inset',
                       isSelected && 'bg-violet-50'
                     )}
                   >
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between sm:mb-1">
                       <span className={cn('text-[11px] font-semibold', isToday && 'text-violet-700')}>
                         {format(d, 'd')}
                       </span>
                       {leaves.length > 0 && (
-                        <span className="text-[9px] text-muted-foreground">{leaves.length}</span>
+                        <span className="hidden text-[9px] text-muted-foreground sm:inline">{leaves.length}</span>
                       )}
                     </div>
 
+                    {/* Compact dots on phones */}
+                    <div className="mt-1 flex flex-wrap items-center gap-0.5 sm:hidden">
+                      {holiday && <span className="h-1.5 w-1.5 rounded-full bg-rose-400" aria-label="Holiday" />}
+                      {dotClasses.map((c) => (
+                        <span key={c} className={cn('h-1.5 w-1.5 rounded-full', c)} />
+                      ))}
+                    </div>
+
+                    {/* Rich markers on >= sm */}
                     {holiday && (
-                      <div className="rounded bg-rose-100 text-rose-800 text-[9.5px] px-1 py-0.5 mb-1 truncate font-medium">
+                      <div className="hidden rounded bg-rose-100 text-rose-800 text-[9.5px] px-1 py-0.5 mb-1 truncate font-medium sm:block">
                         🏛 {holiday}
                       </div>
                     )}
 
-                    <div className="space-y-0.5">
+                    <div className="hidden space-y-0.5 sm:block">
                       {leaves.slice(0, 3).map((l) => {
                         const isStartDay = l.start_date === iso
                         const isEndDay = l.end_date === iso
