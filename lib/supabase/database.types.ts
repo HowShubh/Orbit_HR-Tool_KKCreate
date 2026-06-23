@@ -9,6 +9,24 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          id: number
+          slack_dm_enabled: boolean
+          slack_whereabouts_on_approval: boolean
+          slack_daily_digest: boolean
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          slack_dm_enabled?: boolean
+          slack_whereabouts_on_approval?: boolean
+          slack_daily_digest?: boolean
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['app_settings']['Insert']>
+        Relationships: []
+      }
       audit_log: {
         Row: {
           id: string
@@ -394,6 +412,7 @@ export type Database = {
           exited_at: string | null
           notifications_muted: boolean
           designation: string | null
+          slack_user_id: string | null
           created_at: string
           updated_at: string
         }
@@ -410,6 +429,7 @@ export type Database = {
           exited_at?: string | null
           notifications_muted?: boolean
           designation?: string | null
+          slack_user_id?: string | null
           created_at?: string
           updated_at?: string
         }

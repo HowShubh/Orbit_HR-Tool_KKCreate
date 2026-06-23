@@ -6,6 +6,70 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-23 — Slack HR Console tab + runtime toggles
+
+Builds on the Slack bot. Requires migration `019_slack_settings.sql`
+(`app_settings` singleton). Everything degrades gracefully pre-migration:
+`getSlackSettings` defaults all toggles ON when the table/row is missing.
+
+- **HR Console → Slack tab** (`components/hr/slack-tab.tsx`): connection status
+  (auth.test, fetched on mount), three feature toggles, a "Send test message"
+  button, a "Sync IDs from email" bulk button, and a per-user table of
+  name/email/Slack-member-ID. Wired via `hr/page.tsx` (passes `getSlackSettings`)
+  and `hr-console-client.tsx`.
+- **Toggles** (`app_settings`): `slack_dm_enabled`,
+  `slack_whereabouts_on_approval`, `slack_daily_digest`. Read by
+  `getSlackSettings(admin)` in `lib/slack.ts` and enforced at:
+  `notifyUser` DM path (dmEnabled), `postWhereaboutsOnApproval` used by the two
+  leaves.ts approval posts (whereaboutsOnApproval), and the digest cron route
+  (dailyDigest). Layered on top of the `SLACK_BOT_TOKEN` env gate.
+- **Actions** (`lib/actions/slack-settings.ts`): `updateSlackSetting`,
+  `setUserSlackId` (writes the SAME `users.slack_user_id` as the profile, so the
+  two stay in sync), `syncSlackIdsByEmail` (bulk match + cache via
+  `resolveSlackUserId`), `sendSlackTestMessage`, `getSlackConnectionStatus`.
+- **Digest time is fixed at 10:50 AM IST** via a single daily cron
+  (`vercel.json` → `20 5 * * *` = 05:20 UTC). Chosen over a UI-configurable time
+  so the project stays within the **Vercel Hobby** cron limits (max 2 cron jobs,
+  each once/day). The two crons are reconcile-compoff (`30 19 * * *`) +
+  post-whereabouts (`20 5 * * *`). Hobby timing has up to ~1h jitter, so the
+  digest may land anytime in the 05:00 UTC hour (10:30–11:29 IST); move the cron
+  earlier if it must always precede the 11:00 office start. The digest route is a
+  plain "post if anyone is out + toggle on" handler (no time-gating).
+
+---
+
+## 2026-06-23 — Slack #whereabouts bot (channel posts + approval DMs)
+
+Optional Slack integration. **Entirely gated on `SLACK_BOT_TOKEN`** — every Slack
+call no-ops (and never throws) when it's unset, so Orbit is unchanged until the
+token is added. Requires migration `018_user_slack_id.sql` (adds
+`users.slack_user_id`).
+
+- `lib/slack.ts` — bot-token Web API client: `postToWhereabouts(text)` (channel),
+  `resolveSlackUserId` (prefers stored id, else `users.lookupByEmail` and caches
+  it back), `dmSlackUser` (`conversations.open` → `chat.postMessage`). All
+  best-effort, never throw.
+- **Channel posts:** real-time on a leave going active — added right after the two
+  `notifyLeaveDownstream(...)` calls in `lib/actions/leaves.ts` (founder
+  auto-approve + `approveLeaveRequestById`). Daily 09:00 IST digest via new
+  `app/api/cron/post-whereabouts/route.ts` (clones the reconcile-compoff cron;
+  groups `listLeavesToday()` into 🌴 on-leave / 🏠 WFH; skips when empty).
+  `vercel.json` gained the `30 3 * * *` cron.
+- **Approval DMs:** `notifyUser` gained an opt-in `slackDm` flag — when set (and
+  not muted) it also DMs the recipient `*title*\nbody\nABSOLUTE_LINK`
+  (`APP_BASE_URL` + `link_url`). Enabled at `leave_requested` (→manager,
+  "approve on the website"), `leave_approved` and `leave_rejected` (→applicant),
+  in both the grouped and single-leave paths. Approval still happens only on the
+  website — Slack just carries the link. Mute silences both in-app and DM.
+- **Profile:** `slack_user_id` editable by self (Profile) and HR (Edit User);
+  mostly auto-fills via email match.
+- New env vars: `SLACK_BOT_TOKEN`, `SLACK_WHEREABOUTS_CHANNEL`, `APP_BASE_URL`
+  (+ existing `CRON_SECRET`). Bot scopes: `chat:write`, `im:write`, `users:read`,
+  `users:read.email`; invite the bot to #whereabouts. No signing secret / no
+  interactivity (link-only, no in-Slack buttons).
+
+---
+
 ## 2026-06-23 — Per-team weekly schedule (Office/WFH/Off) + profile photos
 
 **Requires migration `017_team_schedule_and_avatars.sql` to be applied in

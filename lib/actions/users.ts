@@ -33,6 +33,7 @@ const UpdateUserSchema = z.object({
   manager_id: z.string().uuid().nullable().optional(),
   designation: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
+  slack_user_id: z.string().nullable().optional(),
   // null clears the primary team; undefined leaves it untouched.
   primary_team_id: z.string().uuid().nullable().optional(),
 })

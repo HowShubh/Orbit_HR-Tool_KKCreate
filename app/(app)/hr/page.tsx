@@ -7,12 +7,14 @@ import { listCompoffGrants } from '@/lib/queries/compoff'
 import { listLeaveRequestHistory, listPendingApprovalsForReviewer } from '@/lib/queries/leave-requests'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
 import { currentFiscalYearStart } from '@/lib/date'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getSlackSettings } from '@/lib/slack'
 import { HRConsoleClient } from '@/components/hr/hr-console-client'
 
 export default async function HRConsolePage() {
   const me = await requireUser()
   const currentLeaveYear = currentFiscalYearStart()
-  const [users, teams, holidays, balances, compoffBalances, grants, leaveTypes, pendingRequests, history, balanceYears] =
+  const [users, teams, holidays, balances, compoffBalances, grants, leaveTypes, pendingRequests, history, balanceYears, slackSettings] =
     await Promise.all([
       listUsers(),
       listTeams(),
@@ -24,6 +26,7 @@ export default async function HRConsolePage() {
       listPendingApprovalsForReviewer(me.id, 'hr'),
       listLeaveRequestHistory(me.id, 'hr', { limit: 1000 }),
       listBalanceYears(),
+      getSlackSettings(createAdminClient()),
     ])
 
   return (
@@ -39,6 +42,7 @@ export default async function HRConsolePage() {
       availableYears={balanceYears}
       pendingRequests={pendingRequests}
       history={history}
+      slackSettings={slackSettings}
     />
   )
 }

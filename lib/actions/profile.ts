@@ -10,6 +10,7 @@ import { requireUser, writeAudit } from './_helpers'
 const ProfileSchema = z.object({
   phone: z.string().nullable().optional(),
   notifications_muted: z.boolean().optional(),
+  slack_user_id: z.string().nullable().optional(),
 })
 
 export async function updateMyProfile(input: z.infer<typeof ProfileSchema>) {

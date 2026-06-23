@@ -11,7 +11,9 @@ import {
   requireUser,
   writeAudit,
 } from './_helpers'
+import { format, parseISO } from 'date-fns'
 import { notifyUser } from './notifications'
+import { postWhereaboutsOnApproval, slackMention } from '@/lib/slack'
 import { reconcileCompoffExpiry } from '@/lib/compoff-expiry'
 import {
   resolveLeaveApprovalRouting,
@@ -33,7 +35,15 @@ import {
 
 const LeaveTypeSchema = z.string().trim().min(1)
 type LeaveStatus = 'active' | 'pending' | 'delete_requested' | 'rejected' | 'deleted'
-type LeaveReviewerUser = Pick<Tables<'users'>, 'id' | 'role' | 'manager_id' | 'full_name'>
+type LeaveReviewerUser = Pick<Tables<'users'>, 'id' | 'role' | 'manager_id' | 'full_name' | 'email'>
+
+// Human "when" for Slack/notifications, with weekday: "Tue, 23 Jun 2026" for a
+// single day, or "Tue, 23 Jun to Thu, 25 Jun 2026" for a range. No em dashes.
+function formatWhen(start: string, end: string) {
+  const fmt = (iso: string, withYear: boolean) =>
+    format(parseISO(iso), withYear ? 'EEE, d MMM yyyy' : 'EEE, d MMM')
+  return start === end ? fmt(start, true) : `${fmt(start, false)} to ${fmt(end, true)}`
+}
 
 const DayPlanTypeSchema = z.string().trim().min(1)
 
@@ -271,7 +281,7 @@ async function getLeaveUser(
 ): Promise<LeaveReviewerUser> {
   const { data: user } = await adminClient
     .from('users')
-    .select('id, role, manager_id, full_name')
+    .select('id, role, manager_id, full_name, email')
     .eq('id', userId)
     .maybeSingle()
 
@@ -404,6 +414,24 @@ function summarizePlanRows(
   return Array.from(totals.entries())
     .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
     .join(', ')
+}
+
+// Per-day breakdown for the Slack approval DM, e.g.:
+//   Wed, 1 Jul 2026 - Leave
+//   Thu, 2 Jul 2026 - WFH (half day)
+function buildDayList(
+  rows: Array<{ date: string; requested_type: string; half_day: boolean }>,
+  policies: LeaveTypePolicy[]
+) {
+  return rows
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((row) => {
+      const day = format(parseISO(row.date), 'EEE, d MMM yyyy')
+      const half = row.half_day ? ' (half day)' : ''
+      return `${day} - ${leaveTypeLabel(row.requested_type, policies)}${half}`
+    })
+    .join('\n')
 }
 
 async function bumpUsed(
@@ -804,6 +832,8 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
       await bumpUsed(adminClient, user.id, type, days, policies)
     }
     await notifyLeaveDownstream(adminClient, user, summary, startDate, endDate)
+    const who = await slackMention(adminClient, user)
+    await postWhereaboutsOnApproval(adminClient, `📅 ${who}: ${summary} (${formatWhen(startDate, endDate)})`)
   } else {
     // Look up the approver's name so the FYI reads "pending with <name>".
     const { data: approverRows } = await adminClient
@@ -815,16 +845,21 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
         ? approverRows[0].full_name
         : 'HR'
 
+    // Slack DM gets an itemised, per-day breakdown; the in-app body stays concise.
+    const slackText = `*Leave approval needed*\n${user.full_name} requested ${summary}:\n${buildDayList(planRows, policies)}`
+
     await Promise.all([
       ...routing.approverIds.map((approverId) =>
         notifyUser({
           user_id: approverId,
           type: 'leave_requested',
           title: 'Leave approval needed',
-          body: `${user.full_name} requested ${summary} across ${planRows.length} day(s).`,
+          body: `${user.full_name} requested ${summary} for ${formatWhen(startDate, endDate)}. Open Orbit to approve.`,
           link_url: '/',
           related_entity_type: 'leave_request',
           related_entity_id: request.id,
+          slackDm: true,
+          slackText,
         })
       ),
       ...routing.fyiLeadIds.map((leadId) =>
@@ -997,6 +1032,7 @@ async function approveLeaveRequestById(
     link_url: '/leaves',
     related_entity_type: 'leave_request',
     related_entity_id: requestId,
+    slackDm: true,
   })
 
   // Now that it's confirmed, tell everyone under the applicant they'll be away.
@@ -1004,12 +1040,19 @@ async function approveLeaveRequestById(
   const downstreamSummary = Array.from(totals.entries())
     .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
     .join(', ')
+  const downstreamStart = requestLeaves[0].start_date
+  const downstreamEnd = requestLeaves[requestLeaves.length - 1].end_date
   await notifyLeaveDownstream(
     adminClient,
     applicant,
     downstreamSummary,
-    requestLeaves[0].start_date,
-    requestLeaves[requestLeaves.length - 1].end_date
+    downstreamStart,
+    downstreamEnd
+  )
+  const who = await slackMention(adminClient, applicant)
+  await postWhereaboutsOnApproval(
+    adminClient,
+    `📅 ${who}: ${downstreamSummary} (${formatWhen(downstreamStart, downstreamEnd)})`
   )
 
   revalidatePath('/', 'layout')
@@ -1057,6 +1100,7 @@ async function rejectLeaveRequestById(
     link_url: '/leaves',
     related_entity_type: 'leave_request',
     related_entity_id: requestId,
+    slackDm: true,
   })
 
   revalidatePath('/', 'layout')
@@ -1115,6 +1159,7 @@ export async function approveLeave(leaveId: string) {
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
+    slackDm: true,
   })
 
   revalidatePath('/', 'layout')
@@ -1162,6 +1207,7 @@ export async function rejectLeave(leaveId: string) {
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
+    slackDm: true,
   })
 
   revalidatePath('/', 'layout')

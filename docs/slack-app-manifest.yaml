@@ -1,0 +1,55 @@
+# Orbit — Slack app manifest
+# ---------------------------------------------------------------------------
+# Create the app: api.slack.com/apps → "Create New App" → "From a manifest" →
+# pick your workspace → paste this file (switch the dialog to YAML if needed).
+#
+# After creating:
+#   1. "Install to Workspace" → approve → copy the *Bot User OAuth Token*
+#      (starts with xoxb-) → that is your SLACK_BOT_TOKEN env var.
+#   2. In Slack, invite the bot to the channel:  /invite @Orbit  in #whereabouts
+#   3. Set env vars (local .env.local + Vercel): SLACK_BOT_TOKEN,
+#      SLACK_WHEREABOUTS_CHANNEL (e.g. #whereabouts), APP_BASE_URL (site URL).
+#
+# This manifest intentionally enables NO interactivity / events / slash commands
+# — approval happens on the website; Slack only sends messages + a link. See the
+# commented "future" block at the bottom for what to add if you ever want
+# in-Slack approve buttons.
+# ---------------------------------------------------------------------------
+
+display_information:
+  name: Orbit
+  description: KK Create leave & whereabouts bot — posts who's out and DMs leave approvals.
+  background_color: "#4f46e5"
+
+features:
+  bot_user:
+    display_name: Orbit
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write          # post to #whereabouts and DM users
+      - im:write            # open direct-message channels with users
+      - users:read          # read basic user info
+      - users:read.email    # match Orbit accounts to Slack accounts by email
+
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+  # No event_subscriptions and no interactivity — not needed for the link-only flow.
+
+# ---------------------------------------------------------------------------
+# FUTURE (do NOT add now): in-Slack "Approve / Reject" buttons.
+# If you ever want managers to approve without leaving Slack, you'd add:
+#
+# settings:
+#   interactivity:
+#     is_enabled: true
+#     request_url: https://YOUR-DOMAIN/api/slack/interactivity
+#
+# ...and on the app side, set SLACK_SIGNING_SECRET and build that endpoint to
+# verify the signature and call the existing approveLeave/rejectLeave actions.
+# Nothing built today needs to change — this is purely additive.
+# ---------------------------------------------------------------------------

@@ -27,6 +27,10 @@ The app expects these env vars (no `.env.example` is committed — get values fr
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` — server-side only; used by `lib/supabase/admin.ts`
+- `CRON_SECRET` — guards the `app/api/cron/*` routes (Vercel Cron sends it as a Bearer token).
+- `SLACK_BOT_TOKEN` — optional; Slack bot token (`xoxb-…`) for #whereabouts posts + approval DMs (`lib/slack.ts`). When unset, the whole Slack integration silently no-ops.
+- `SLACK_WHEREABOUTS_CHANNEL` — optional; channel for the bot to post to (e.g. `#whereabouts` or a channel ID). The bot must be invited to it.
+- `APP_BASE_URL` — optional; absolute site URL (e.g. `https://orbit.kkc.…`) used to build links inside Slack DMs.
 
 ## Tech stack
 

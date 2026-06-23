@@ -46,6 +46,7 @@ const EditSchema = z.object({
   manager_id: z.string().optional(),
   designation: z.string().optional(),
   primary_team_id: z.string().optional(),
+  slack_user_id: z.string().optional(),
 })
 
 type CreateValues = z.infer<typeof CreateSchema>
@@ -87,6 +88,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
       manager_id: user?.manager_id ?? '',
       designation: user?.designation ?? '',
       primary_team_id: user?.memberships.find((m) => m.is_primary)?.team_id ?? '',
+      slack_user_id: user?.slack_user_id ?? '',
     },
   })
 
@@ -99,6 +101,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
         manager_id: user.manager_id ?? '',
         designation: user.designation ?? '',
         primary_team_id: user.memberships.find((m) => m.is_primary)?.team_id ?? '',
+        slack_user_id: user.slack_user_id ?? '',
       })
     }
     if (mode === 'create') {
@@ -141,6 +144,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           manager_id: data.manager_id || null,
           designation: data.designation || null,
           primary_team_id: data.primary_team_id || null,
+          slack_user_id: data.slack_user_id?.trim() ? data.slack_user_id.trim() : null,
         })
         pushToast({ title: 'User updated', variant: 'success' })
         onOpenChange(false)
@@ -336,6 +340,10 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
                 </Select>
               )}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit_slack_user_id">Slack member ID</Label>
+            <Input id="edit_slack_user_id" placeholder="U0XXXXXXX (auto-matched by email)" {...register('slack_user_id')} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

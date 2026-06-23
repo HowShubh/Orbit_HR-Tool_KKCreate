@@ -11,6 +11,8 @@ import { CompoffTab } from './compoff-tab'
 import { AnnualResetTab } from './annual-reset-tab'
 import { AllLeavesTab } from './all-leaves-tab'
 import { LeaveTypesTab } from './leave-types-tab'
+import { SlackTab } from './slack-tab'
+import type { SlackSettings } from '@/lib/slack'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { TeamWithMembers } from '@/lib/queries/teams'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
@@ -29,6 +31,7 @@ interface Props {
   availableYears: number[]
   pendingRequests: LeaveRequestWithDays[]
   history: LeaveRequestWithDays[]
+  slackSettings: SlackSettings
 }
 
 export function HRConsoleClient(props: Props) {
@@ -61,6 +64,7 @@ export function HRConsoleClient(props: Props) {
             <TabsTrigger value="balances">Balances</TabsTrigger>
             <TabsTrigger value="leave-types">Leave Types</TabsTrigger>
             <TabsTrigger value="compoff">Compoff</TabsTrigger>
+            <TabsTrigger value="slack">Slack</TabsTrigger>
             <TabsTrigger value="reset">Annual Reset</TabsTrigger>
           </TabsList>
 
@@ -96,6 +100,9 @@ export function HRConsoleClient(props: Props) {
           </TabsContent>
           <TabsContent value="compoff">
             <CompoffTab grants={props.grants} users={props.users} />
+          </TabsContent>
+          <TabsContent value="slack">
+            <SlackTab users={props.users} settings={props.slackSettings} />
           </TabsContent>
           <TabsContent value="reset">
             <AnnualResetTab leaveYear={props.leaveYear} availableYears={props.availableYears} />
