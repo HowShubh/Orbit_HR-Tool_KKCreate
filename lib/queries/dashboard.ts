@@ -18,7 +18,7 @@ export type DashboardTeamMember = Pick<
 
 export type DashboardTeam = Pick<
   Tables<'teams'>,
-  'id' | 'name' | 'wfo_pattern' | 'team_lead_id'
+  'id' | 'name' | 'wfo_pattern' | 'off_days' | 'team_lead_id'
 > & {
   team_lead_name: string | null
   members: DashboardTeamMember[]
@@ -83,9 +83,9 @@ export async function getDashboardData(
       myTeamIds.length > 0
         ? adminClient
             .from('teams')
-            .select('id, name, wfo_pattern, team_lead_id')
+            .select('id, name, wfo_pattern, off_days, team_lead_id')
             .in('id', myTeamIds)
-        : Promise.resolve({ data: [] as Pick<Tables<'teams'>, 'id' | 'name' | 'wfo_pattern' | 'team_lead_id'>[] }),
+        : Promise.resolve({ data: [] as Pick<Tables<'teams'>, 'id' | 'name' | 'wfo_pattern' | 'off_days' | 'team_lead_id'>[] }),
       myTeamIds.length > 0
         ? adminClient
             .from('team_members')

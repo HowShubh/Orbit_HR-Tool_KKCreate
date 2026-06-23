@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
-import { teamInitials } from '@/lib/utils'
+import { cn, teamInitials } from '@/lib/utils'
 import { TeamFormDialog } from './team-form-dialog'
 import { TeamMembersDialog } from './team-members-dialog'
 import { deleteTeam } from '@/lib/actions/teams'
@@ -28,6 +28,8 @@ const DAY_DISPLAY: Record<string, string> = {
   SAT: 'Sat',
   SUN: 'Sun',
 }
+
+const DAY_ORDER = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const
 
 export function TeamsTab({ teams, users }: Props) {
   const { pushToast } = useStore()
@@ -102,8 +104,12 @@ export function TeamsTab({ teams, users }: Props) {
               </thead>
               <tbody>
                 {teams.map((team) => {
-                  const officeDays = (team.wfo_pattern ?? '').split(',').filter(Boolean)
-                  const offDays = (team.off_days ?? '').split(',').filter(Boolean)
+                  const office = new Set(
+                    (team.wfo_pattern ?? '').split(',').map((s) => s.trim().toUpperCase())
+                  )
+                  const off = new Set(
+                    (team.off_days ?? '').split(',').map((s) => s.trim().toUpperCase())
+                  )
 
                   return (
                     <tr key={team.id} className="border-t hover:bg-muted/30">
@@ -115,27 +121,23 @@ export function TeamsTab({ teams, users }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
-                          {officeDays.map((d) => (
-                            <span
-                              key={`o-${d}`}
-                              title="Office"
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-800"
-                            >
-                              {DAY_DISPLAY[d] ?? d}
-                            </span>
-                          ))}
-                          {offDays.map((d) => (
-                            <span
-                              key={`x-${d}`}
-                              title="Weekly off"
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-muted text-muted-foreground"
-                            >
-                              {DAY_DISPLAY[d] ?? d}
-                            </span>
-                          ))}
-                          {officeDays.length === 0 && offDays.length === 0 && (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          {DAY_ORDER.map((d) => {
+                            const state = office.has(d) ? 'office' : off.has(d) ? 'off' : 'wfh'
+                            return (
+                              <span
+                                key={d}
+                                title={state === 'office' ? 'Office' : state === 'wfh' ? 'Work from home' : 'Weekly off'}
+                                className={cn(
+                                  'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold',
+                                  state === 'office' && 'bg-violet-100 text-violet-800',
+                                  state === 'wfh' && 'bg-blue-100 text-blue-800',
+                                  state === 'off' && 'bg-muted text-muted-foreground'
+                                )}
+                              >
+                                {DAY_DISPLAY[d] ?? d}
+                              </span>
+                            )
+                          })}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">

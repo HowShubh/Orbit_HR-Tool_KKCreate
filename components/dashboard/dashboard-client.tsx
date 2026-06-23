@@ -2,7 +2,7 @@
 
 import { type ComponentType, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { addDays, differenceInDays, format, isWeekend, parseISO, startOfWeek } from 'date-fns'
+import { addDays, differenceInDays, format, parseISO, startOfWeek } from 'date-fns'
 import {
   BriefcaseBusiness,
   Building2,
@@ -92,6 +92,16 @@ function parseWfoPattern(pattern?: string | null) {
       .map((day) => day.trim().toUpperCase())
       .filter(Boolean)
   )
+}
+
+// Off (weekly-off) days from the team's `off_days`; falls back to Sunday-only
+// when a user has no team. A weekday that is neither office nor off is WFH.
+function parseOffDays(pattern?: string | null) {
+  const codes = (pattern ?? '')
+    .split(',')
+    .map((day) => day.trim().toUpperCase())
+    .filter(Boolean)
+  return new Set(codes.length ? codes : ['SUN'])
 }
 
 function getPrimaryTeam(data: DashboardData) {
@@ -325,6 +335,7 @@ function EmployeeStatusCard({
   const leave = leavesToday.find((item) => item.user_id === currentUser.id)
   const holiday = holidays.find((item) => item.date === todayIso)
   const wfoDays = parseWfoPattern(team?.wfo_pattern)
+  const offDays = parseOffDays(team?.off_days)
   const todayCode = DAY_CODE_BY_INDEX[today.getDay()]
 
   const status = (() => {
@@ -352,10 +363,10 @@ function EmployeeStatusCard({
         className: 'bg-rose-50 text-rose-700 ring-rose-100',
       }
     }
-    if (isWeekend(today)) {
+    if (offDays.has(todayCode)) {
       return {
-        label: 'Weekend',
-        detail: 'Non-working day',
+        label: 'Day off',
+        detail: 'Weekly off',
         icon: Clock3,
         className: 'bg-slate-50 text-slate-700 ring-slate-100',
       }
@@ -454,6 +465,7 @@ function EmployeeScheduleCard({
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 })
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
   const wfoDays = parseWfoPattern(team?.wfo_pattern)
+  const offDays = parseOffDays(team?.off_days)
   const allLeaves = [
     ...todayLeaves.filter((leave) => leave.user_id === currentUser.id),
     ...leaves,
@@ -474,8 +486,8 @@ function EmployeeScheduleCard({
     if (holiday) {
       return { label: 'Holiday', className: 'bg-rose-50 text-rose-700 ring-rose-100' }
     }
-    if (isWeekend(date)) {
-      return { label: 'Weekend', className: 'bg-slate-50 text-slate-600 ring-slate-100' }
+    if (offDays.has(code)) {
+      return { label: 'Off', className: 'bg-slate-50 text-slate-600 ring-slate-100' }
     }
     if (wfoDays.has(code)) {
       return { label: 'Office', className: 'bg-emerald-50 text-emerald-700 ring-emerald-100' }
