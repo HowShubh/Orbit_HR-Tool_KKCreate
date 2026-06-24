@@ -950,6 +950,165 @@ export async function backdateLeave(input: z.infer<typeof CreateOnBehalfSchema>)
   return createLeaveOnBehalf(input)
 }
 
+const BacklogRowSchema = z.object({
+  email: z.string().trim().email('Invalid email').transform((v) => v.toLowerCase()),
+  type: z.string().trim().min(1, 'Type required'),
+  start_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'start_date must be YYYY-MM-DD'),
+  end_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'end_date must be YYYY-MM-DD'),
+  half_day: z.string().trim().optional().default(''),
+  reason: z.string().trim().optional().default(''),
+})
+
+/**
+ * Bulk-import already-taken (backlog) leaves from a CSV. HR-only (`edit_leaves`).
+ * Validates every row first; if any row is invalid nothing is imported. Created
+ * leaves are `active` (no approval) and deduct balance. No notifications/Slack —
+ * these are historical records. Columns: email,type,start_date,end_date,half_day,reason.
+ */
+export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
+  const actor = await requireCapability('edit_leaves')
+  const adminClient = createAdminClient()
+  const policies = await getLeaveTypePolicies(adminClient)
+  const typeByKey = new Map(policies.map((p) => [p.key.toLowerCase(), p]))
+  const typeByName = new Map(policies.map((p) => [p.name.toLowerCase(), p]))
+
+  const { data: usersData } = await adminClient
+    .from('users')
+    .select('id, email, full_name')
+    .eq('status', 'active')
+  const userByEmail = new Map((usersData ?? []).map((u) => [u.email.toLowerCase(), u]))
+
+  type Prepared = {
+    row: number
+    user_id: string
+    type: string
+    start_date: string
+    end_date: string
+    half_day_start: boolean
+    half_day_position: 'first_half' | 'second_half' | null
+    days: number
+    reason: string | null
+  }
+  const errors: { row: number; error: string }[] = []
+  const prepared: Prepared[] = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i]
+    const rowNumber = Number(raw.__row ?? i + 1)
+    const parsed = BacklogRowSchema.safeParse(raw)
+    if (!parsed.success) {
+      errors.push({ row: rowNumber, error: parsed.error.issues[0]?.message ?? 'Invalid row' })
+      continue
+    }
+    const d = parsed.data
+    const user = userByEmail.get(d.email)
+    if (!user) {
+      errors.push({ row: rowNumber, error: `No active user with email ${d.email}` })
+      continue
+    }
+    const policy = typeByKey.get(d.type.toLowerCase()) ?? typeByName.get(d.type.toLowerCase())
+    if (!policy) {
+      errors.push({ row: rowNumber, error: `Unknown leave type: ${d.type}` })
+      continue
+    }
+    if (d.end_date < d.start_date) {
+      errors.push({ row: rowNumber, error: 'end_date is before start_date' })
+      continue
+    }
+    const half = d.half_day.toLowerCase()
+    if (half && half !== 'first_half' && half !== 'second_half') {
+      errors.push({ row: rowNumber, error: 'half_day must be blank, first_half, or second_half' })
+      continue
+    }
+    if (half && d.start_date !== d.end_date) {
+      errors.push({ row: rowNumber, error: 'half_day only allowed when start_date = end_date' })
+      continue
+    }
+    const dayCount =
+      Math.round((new Date(d.end_date).getTime() - new Date(d.start_date).getTime()) / 86400000) + 1
+    prepared.push({
+      row: rowNumber,
+      user_id: user.id,
+      type: policy.key,
+      start_date: d.start_date,
+      end_date: d.end_date,
+      half_day_start: Boolean(half),
+      half_day_position: half ? (half as 'first_half' | 'second_half') : null,
+      days: half ? 0.5 : dayCount,
+      reason: d.reason || null,
+    })
+  }
+
+  // Overlap checks: against existing leaves and within the batch itself.
+  const involved = Array.from(new Set(prepared.map((p) => p.user_id)))
+  const existingByUser = new Map<string, { start_date: string; end_date: string }[]>()
+  if (involved.length > 0) {
+    const { data: existing } = await adminClient
+      .from('leaves')
+      .select('user_id, start_date, end_date')
+      .in('user_id', involved)
+      .in('status', ['active', 'pending', 'delete_requested'] as unknown as ('active' | 'pending' | 'delete_requested')[])
+    for (const l of existing ?? []) {
+      const arr = existingByUser.get(l.user_id) ?? []
+      arr.push({ start_date: l.start_date, end_date: l.end_date })
+      existingByUser.set(l.user_id, arr)
+    }
+  }
+  const batchByUser = new Map<string, { start_date: string; end_date: string }[]>()
+  for (const p of prepared) {
+    const overlapsExisting = (existingByUser.get(p.user_id) ?? []).some(
+      (e) => e.start_date <= p.end_date && e.end_date >= p.start_date
+    )
+    const overlapsBatch = (batchByUser.get(p.user_id) ?? []).some(
+      (e) => e.start_date <= p.end_date && e.end_date >= p.start_date
+    )
+    if (overlapsExisting) {
+      errors.push({ row: p.row, error: 'Overlaps an existing leave for this person' })
+    } else if (overlapsBatch) {
+      errors.push({ row: p.row, error: 'Overlaps another row in this CSV for the same person' })
+    } else {
+      const arr = batchByUser.get(p.user_id) ?? []
+      arr.push({ start_date: p.start_date, end_date: p.end_date })
+      batchByUser.set(p.user_id, arr)
+    }
+  }
+
+  if (errors.length > 0) {
+    return { imported: 0, errors }
+  }
+
+  let imported = 0
+  for (const p of prepared) {
+    const { data: leave, error } = await adminClient
+      .from('leaves')
+      .insert({
+        user_id: p.user_id,
+        type: p.type,
+        requested_type: p.type,
+        start_date: p.start_date,
+        end_date: p.end_date,
+        half_day_start: p.half_day_start,
+        half_day_end: false,
+        half_day_position: p.half_day_position,
+        reason: p.reason,
+        days_deducted: p.days,
+        created_by: actor.id,
+      })
+      .select('id')
+      .single()
+    if (error || !leave) {
+      errors.push({ row: p.row, error: error?.message ?? 'Insert failed' })
+      return { imported, errors }
+    }
+    await bumpUsed(adminClient, p.user_id, p.type, p.days, policies)
+    imported++
+  }
+
+  await writeAudit(actor.id, 'leave.import_backlog', 'leave', 'batch', { after: { imported } })
+  revalidatePath('/', 'layout')
+  return { imported, errors }
+}
+
 async function getPendingRequestLeaves(
   adminClient: ReturnType<typeof createAdminClient>,
   requestId: string
