@@ -37,6 +37,8 @@ type ColumnKey =
   | 'manager_email'
   | 'primary_team_name'
   | 'designation'
+  | 'joined_at'
+  | 'date_of_birth'
 
 interface EditableRow {
   id: string
@@ -48,6 +50,8 @@ interface EditableRow {
   manager_email: string
   primary_team_name: string
   designation: string
+  joined_at: string
+  date_of_birth: string
 }
 
 interface ValidatedRow extends EditableRow {
@@ -77,6 +81,8 @@ const HEADER_COLUMNS: ColumnKey[] = [
   'manager_email',
   'primary_team_name',
   'designation',
+  'joined_at',
+  'date_of_birth',
 ]
 const LEGACY_COLUMNS: ColumnKey[] = [
   'full_name',
@@ -85,8 +91,11 @@ const LEGACY_COLUMNS: ColumnKey[] = [
   'manager_email',
   'primary_team_name',
   'designation',
+  'joined_at',
+  'date_of_birth',
 ]
 const EMAIL_RE = /^[^@]+@[^@]+\.[^@]+$/
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function normalizeHeader(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, '_')
@@ -103,6 +112,8 @@ function createEmptyRow(row = 1): EditableRow {
     manager_email: '',
     primary_team_name: '',
     designation: '',
+    joined_at: '',
+    date_of_birth: '',
   }
 }
 
@@ -249,6 +260,12 @@ function validateRows(
     if (teamName && !teamNames.has(teamName)) {
       errors.primary_team_name = 'Team not found'
     }
+    if (row.joined_at.trim() && !DATE_RE.test(row.joined_at.trim())) {
+      errors.joined_at = 'Use YYYY-MM-DD'
+    }
+    if (row.date_of_birth.trim() && !DATE_RE.test(row.date_of_birth.trim())) {
+      errors.date_of_birth = 'Use YYYY-MM-DD'
+    }
 
     const errorSummary = Object.values(errors).join('; ')
     return {
@@ -357,6 +374,8 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
       manager_email: row.manager_email.trim().toLowerCase(),
       primary_team_name: row.primary_team_name.trim(),
       designation: row.designation.trim(),
+      joined_at: row.joined_at.trim(),
+      date_of_birth: row.date_of_birth.trim(),
     }))
 
     startTransition(async () => {
@@ -443,8 +462,9 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
           </div>
 
           <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Header: full_name,email,password,role,manager_email,primary_team_name,designation.
-            Password is optional; manager_email can reference an existing user or any row in this CSV.
+            Header: full_name,email,password,role,manager_email,primary_team_name,designation,joined_at,date_of_birth.
+            Password, joined_at (defaults to today) and date_of_birth are optional; dates are YYYY-MM-DD.
+            manager_email can reference an existing user or any row in this CSV.
           </div>
 
           <div className="space-y-2">
@@ -453,7 +473,7 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
               value={csvText}
               onChange={(event) => setCsvText(event.target.value)}
               placeholder={
-                'full_name,email,password,role,manager_email,primary_team_name,designation\nAlice Smith,alice@example.com,Welcome123!,employee,bob@example.com,Engineering,Software Engineer'
+                'full_name,email,password,role,manager_email,primary_team_name,designation,joined_at,date_of_birth\nAlice Smith,alice@example.com,Welcome123!,employee,bob@example.com,Engineering,Software Engineer,2025-04-01,1996-08-14'
               }
               rows={4}
               className="font-mono text-xs"
@@ -478,7 +498,7 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
               </div>
             ) : (
               <div className="max-h-[420px] overflow-auto rounded-lg border">
-                <table className="min-w-[1120px] w-full text-xs">
+                <table className="min-w-[1320px] w-full text-xs">
                   <thead>
                     <tr className="bg-muted/40 text-left text-muted-foreground">
                       <th className="px-3 py-2 font-medium">#</th>
@@ -489,6 +509,8 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
                       <th className="px-3 py-2 font-medium">Manager Email</th>
                       <th className="px-3 py-2 font-medium">Team</th>
                       <th className="px-3 py-2 font-medium">Designation</th>
+                      <th className="px-3 py-2 font-medium">Joined</th>
+                      <th className="px-3 py-2 font-medium">DOB</th>
                       <th className="px-3 py-2 font-medium">Status</th>
                       <th className="px-3 py-2 font-medium text-right">Actions</th>
                     </tr>
@@ -555,6 +577,18 @@ export function UsersCsvImport({ open, onOpenChange, users, teams }: Props) {
                         <EditableCell
                           value={row.designation}
                           onChange={(value) => updateRow(row.id, 'designation', value)}
+                        />
+                        <EditableCell
+                          value={row.joined_at}
+                          error={row.errors.joined_at}
+                          placeholder="YYYY-MM-DD"
+                          onChange={(value) => updateRow(row.id, 'joined_at', value)}
+                        />
+                        <EditableCell
+                          value={row.date_of_birth}
+                          error={row.errors.date_of_birth}
+                          placeholder="YYYY-MM-DD"
+                          onChange={(value) => updateRow(row.id, 'date_of_birth', value)}
                         />
                         <td className="px-3 py-2">
                           {row.valid ? (

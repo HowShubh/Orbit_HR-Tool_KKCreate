@@ -15,6 +15,13 @@ const OptionalEmailSchema = z
   .transform((value) => value.toLowerCase())
   .refine((value) => value === '' || /^[^@]+@[^@]+\.[^@]+$/.test(value), 'Invalid manager email')
 
+const OptionalDateSchema = z
+  .string()
+  .trim()
+  .optional()
+  .default('')
+  .refine((value) => value === '' || /^\d{4}-\d{2}-\d{2}$/.test(value), 'Date must be YYYY-MM-DD')
+
 const RowSchema = z.object({
   full_name: z.string().trim().min(1, 'Name required'),
   email: z.string().trim().email('Invalid email').transform((value) => value.toLowerCase()),
@@ -22,6 +29,8 @@ const RowSchema = z.object({
   manager_email: OptionalEmailSchema,
   primary_team_name: OptionalStringSchema,
   designation: OptionalStringSchema,
+  joined_at: OptionalDateSchema,
+  date_of_birth: OptionalDateSchema,
   password: OptionalStringSchema.refine(
     (value) => value === '' || value.length >= 8,
     'Password must be at least 8 characters'
@@ -47,6 +56,8 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
     manager_email: string
     primary_team_name: string
     designation: string
+    joined_at: string
+    date_of_birth: string
     password: string
   }> = []
   const uploadedEmails = new Map<string, number>()
@@ -134,7 +145,8 @@ export async function importUsersCsv(rows: Record<string, string>[]) {
       role: data.role,
       manager_id: null,
       designation: data.designation || null,
-      joined_at: todayIST(),
+      joined_at: data.joined_at || todayIST(),
+      date_of_birth: data.date_of_birth || null,
     })
 
     if (insertError) {
