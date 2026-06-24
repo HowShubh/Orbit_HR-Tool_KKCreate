@@ -5,7 +5,7 @@ import { ActionError } from './errors'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { todayIST } from '@/lib/date'
+import { todayIST, istMonthStart, istMonthEnd } from '@/lib/date'
 import {
   requireCapability,
   requireUser,
@@ -13,6 +13,7 @@ import {
   writeAudit,
 } from './_helpers'
 import { notifyUser } from './notifications'
+import { listLeaveTypes } from '@/lib/queries/leave-types'
 
 export async function decideCompoff(
   grantId: string,
@@ -171,4 +172,148 @@ export async function requestCompoff(input: z.infer<typeof RequestCompoffSchema>
 
   revalidatePath('/', 'layout')
   return grant
+}
+
+/**
+ * Calendar data for the comp-off request planner: holidays + the team's
+ * off-days for the past months (so the grid mirrors the leave planner), the two
+ * comp-off types, and the days the user already requested (to mark them).
+ */
+export async function getCompoffPlannerData() {
+  const user = await requireUser()
+  const adminClient = createAdminClient()
+  const startDate = istMonthStart(-6)
+  const endDate = istMonthEnd(0)
+
+  const { data: memberships } = await adminClient
+    .from('team_members')
+    .select('team_id, is_primary')
+    .eq('user_id', user.id)
+    .is('left_at', null)
+  const primaryTeamId =
+    (memberships ?? []).find((m) => m.is_primary)?.team_id ?? (memberships ?? [])[0]?.team_id ?? null
+
+  const [{ data: holidays }, teamRes, allTypes, { data: grants }] = await Promise.all([
+    adminClient.from('holidays').select('*').gte('date', startDate).lte('date', endDate).order('date'),
+    primaryTeamId
+      ? adminClient.from('teams').select('name, wfo_pattern, off_days').eq('id', primaryTeamId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    listLeaveTypes(),
+    adminClient
+      .from('compoff_grants')
+      .select('work_date, type, status')
+      .eq('user_id', user.id)
+      .gte('work_date', startDate),
+  ])
+
+  const compoffTypes = allTypes
+    .filter((t) => (t.category === 'compoff_leave' || t.category === 'compoff_wfh') && t.is_active)
+    .map((t) => ({ key: t.key, name: t.name, category: t.category }))
+
+  return {
+    holidays: holidays ?? [],
+    primaryTeam: teamRes.data ?? null,
+    compoffTypes,
+    existingGrants: grants ?? [],
+  }
+}
+
+const CompoffDaySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  type: z.enum(['compoff_wfh', 'compoff_leave']),
+  half_day: z.boolean().optional(),
+})
+const RequestCompoffPlanSchema = z.object({
+  days: z.array(CompoffDaySchema).min(1, 'Pick at least one day').max(31),
+  reason: z.string().trim().min(1, 'Reason required'),
+})
+
+/**
+ * Request comp-off for one or more days at once via the calendar. Creates a
+ * compoff_grant per day (1 day each, or 0.5 for a half day), with the per-day
+ * type. Founders auto-approve; everyone else routes to their manager (HR
+ * fallback) with one day-by-day notification.
+ */
+export async function requestCompoffPlan(input: z.infer<typeof RequestCompoffPlanSchema>) {
+  const user = await requireUser()
+  const parsed = RequestCompoffPlanSchema.parse(input)
+  const today = todayIST()
+
+  const days = Array.from(new Map(parsed.days.map((d) => [d.date, d])).values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  )
+  for (const d of days) {
+    if (d.date > today) {
+      throw new ActionError('Comp-off is for work already done — future dates are not allowed.')
+    }
+  }
+
+  const adminClient = createAdminClient()
+
+  const { data: existing } = await adminClient
+    .from('compoff_grants')
+    .select('work_date')
+    .eq('user_id', user.id)
+    .in('work_date', days.map((d) => d.date))
+  const existingDates = new Set((existing ?? []).map((g) => g.work_date))
+  const dup = days.find((d) => existingDates.has(d.date))
+  if (dup) throw new ActionError(`You already have a comp-off request for ${dup.date}.`)
+
+  const isFounder = user.role === 'founder'
+  let approverId: string | null = null
+  if (!isFounder) {
+    approverId = user.manager_id
+    if (!approverId) {
+      const { data: hrUser } = await adminClient
+        .from('users')
+        .select('id')
+        .in('role', ['hr', 'founder'] as unknown as ('hr' | 'founder')[])
+        .eq('status', 'active')
+        .neq('id', user.id)
+        .limit(1)
+        .maybeSingle()
+      approverId = hrUser?.id ?? null
+    }
+    if (!approverId) throw new ActionError('No approver available. Contact your founder or HR.')
+  }
+
+  const decidedAt = new Date().toISOString()
+  const grants = days.map((d) => ({
+    user_id: user.id,
+    type: d.type,
+    amount: d.half_day ? 0.5 : 1,
+    work_date: d.date,
+    reason: parsed.reason,
+    manager_id: isFounder ? user.id : approverId!,
+    status: isFounder ? ('approved' as const) : ('pending' as const),
+    ...(isFounder ? { decided_by: user.id, decided_at: decidedAt } : {}),
+  }))
+
+  const { data: inserted, error } = await adminClient.from('compoff_grants').insert(grants).select('id')
+  if (error || !inserted) throw new ActionError(error?.message ?? 'Comp-off request failed')
+
+  await writeAudit(user.id, 'compoff.request_plan', 'compoff_grant', 'batch', {
+    after: { count: inserted.length, autoApproved: isFounder },
+  })
+
+  if (!isFounder && approverId) {
+    const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
+    const list = days
+      .map((d) => `${d.date} - ${label(d.type)}${d.half_day ? ' (half day)' : ''}`)
+      .join('\n')
+    const total = days.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
+    await notifyUser({
+      user_id: approverId,
+      type: 'compoff_request',
+      title: 'New comp-off request',
+      body: `${user.full_name} requested ${total} day(s) of comp-off across ${days.length} day(s).`,
+      link_url: '/',
+      slackDm: true,
+      slackText: `*New comp-off request*\n${user.full_name} requested comp-off for:\n${list}`,
+    })
+  }
+
+  revalidatePath('/', 'layout')
+  await revalidateHR()
+  return { count: inserted.length }
 }
