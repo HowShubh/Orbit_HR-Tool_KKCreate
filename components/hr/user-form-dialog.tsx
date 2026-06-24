@@ -37,6 +37,7 @@ const CreateSchema = z.object({
   designation: z.string().optional(),
   primary_team_id: z.string().optional(),
   joined_at: z.string().optional(),
+  date_of_birth: z.string().optional(),
 })
 
 const EditSchema = z.object({
@@ -47,6 +48,7 @@ const EditSchema = z.object({
   designation: z.string().optional(),
   primary_team_id: z.string().optional(),
   slack_user_id: z.string().optional(),
+  date_of_birth: z.string().optional(),
 })
 
 type CreateValues = z.infer<typeof CreateSchema>
@@ -76,6 +78,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
       designation: '',
       primary_team_id: '',
       joined_at: new Date().toISOString().split('T')[0],
+      date_of_birth: '',
     },
   })
 
@@ -89,6 +92,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
       designation: user?.designation ?? '',
       primary_team_id: user?.memberships.find((m) => m.is_primary)?.team_id ?? '',
       slack_user_id: user?.slack_user_id ?? '',
+      date_of_birth: user?.date_of_birth ?? '',
     },
   })
 
@@ -102,6 +106,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
         designation: user.designation ?? '',
         primary_team_id: user.memberships.find((m) => m.is_primary)?.team_id ?? '',
         slack_user_id: user.slack_user_id ?? '',
+        date_of_birth: user.date_of_birth ?? '',
       })
     }
     if (mode === 'create') {
@@ -121,6 +126,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           designation: data.designation || null,
           primary_team_id: data.primary_team_id || null,
           joined_at: data.joined_at,
+          date_of_birth: data.date_of_birth || null,
         })
         pushToast({ title: 'User created', variant: 'success' })
         onOpenChange(false)
@@ -145,6 +151,7 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           designation: data.designation || null,
           primary_team_id: data.primary_team_id || null,
           slack_user_id: data.slack_user_id?.trim() ? data.slack_user_id.trim() : null,
+          date_of_birth: data.date_of_birth || null,
         })
         pushToast({ title: 'User updated', variant: 'success' })
         onOpenChange(false)
@@ -242,6 +249,10 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
             <div className="space-y-1.5">
               <Label htmlFor="joined_at">Joined Date</Label>
               <Input id="joined_at" type="date" {...register('joined_at')} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="date_of_birth">Date of Birth (optional)</Label>
+              <Input id="date_of_birth" type="date" {...register('date_of_birth')} />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -344,6 +355,10 @@ export function UserFormDialog({ open, onOpenChange, mode, user, users, teams }:
           <div className="space-y-1.5">
             <Label htmlFor="edit_slack_user_id">Slack member ID</Label>
             <Input id="edit_slack_user_id" placeholder="U0XXXXXXX (auto-matched by email)" {...register('slack_user_id')} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit_date_of_birth">Date of Birth</Label>
+            <Input id="edit_date_of_birth" type="date" {...register('date_of_birth')} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

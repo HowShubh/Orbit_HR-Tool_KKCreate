@@ -23,6 +23,7 @@ const CreateUserSchema = z.object({
   designation: z.string().optional().nullable(),
   primary_team_id: z.string().uuid().nullable().optional(),
   joined_at: z.string().optional(),
+  date_of_birth: z.string().nullable().optional(),
 })
 
 const UpdateUserSchema = z.object({
@@ -34,6 +35,7 @@ const UpdateUserSchema = z.object({
   designation: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   slack_user_id: z.string().nullable().optional(),
+  date_of_birth: z.string().nullable().optional(),
   // null clears the primary team; undefined leaves it untouched.
   primary_team_id: z.string().uuid().nullable().optional(),
 })
@@ -65,6 +67,7 @@ export async function createUser(input: z.infer<typeof CreateUserSchema>) {
       manager_id: parsed.manager_id ?? null,
       designation: parsed.designation ?? null,
       joined_at: parsed.joined_at ?? todayIST(),
+      date_of_birth: parsed.date_of_birth || null,
     })
     .select()
     .single()

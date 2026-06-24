@@ -13,7 +13,7 @@ import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-
 
 export type DashboardTeamMember = Pick<
   Tables<'users'>,
-  'id' | 'email' | 'full_name' | 'designation' | 'role' | 'manager_id' | 'joined_at' | 'status'
+  'id' | 'email' | 'full_name' | 'designation' | 'role' | 'manager_id' | 'joined_at' | 'status' | 'date_of_birth'
 >
 
 export type DashboardTeam = Pick<
@@ -30,6 +30,13 @@ export type WorkAnniversary = {
   designation: string | null
   joined_at: string
   years: number
+}
+
+export type Birthday = {
+  id: string
+  full_name: string
+  designation: string | null
+  date_of_birth: string
 }
 
 export type DashboardCompoffApproval = Tables<'compoff_grants'> & {
@@ -53,6 +60,7 @@ export interface DashboardData {
   employeeTeams: DashboardTeam[]
   teamLeavesToday: LeaveWithUser[]
   workAnniversariesToday: WorkAnniversary[]
+  birthdaysToday: Birthday[]
 }
 
 export async function getDashboardData(
@@ -67,6 +75,7 @@ export async function getDashboardData(
   let employeeTeams: DashboardTeam[] = []
   let teamMemberIds: string[] = []
   let workAnniversariesToday: WorkAnniversary[] = []
+  let birthdaysToday: Birthday[] = []
 
   if (currentUserRole === 'employee') {
     const { data: myMemberships } = await adminClient
@@ -104,7 +113,7 @@ export async function getDashboardData(
     const { data: teamUsers } = myTeamUserIds.length > 0
       ? await adminClient
           .from('users')
-          .select('id, email, full_name, designation, role, manager_id, joined_at, status')
+          .select('id, email, full_name, designation, role, manager_id, joined_at, status, date_of_birth')
           .in('id', myTeamUserIds)
           .eq('status', 'active')
       : { data: [] as DashboardTeamMember[] }
@@ -132,6 +141,16 @@ export async function getDashboardData(
         designation: user.designation,
         joined_at: user.joined_at,
         years: Math.max(0, currentYear - Number(user.joined_at.slice(0, 4))),
+      }))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+
+    birthdaysToday = Array.from(userById.values())
+      .filter((user) => Boolean(user.date_of_birth) && user.date_of_birth!.slice(5, 10) === todayMonthDay)
+      .map((user) => ({
+        id: user.id,
+        full_name: user.full_name,
+        designation: user.designation,
+        date_of_birth: user.date_of_birth as string,
       }))
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
   }
@@ -253,5 +272,6 @@ export async function getDashboardData(
     employeeTeams,
     teamLeavesToday: leavesToday.filter((leave) => teamMemberIds.includes(leave.user_id)),
     workAnniversariesToday,
+    birthdaysToday,
   }
 }

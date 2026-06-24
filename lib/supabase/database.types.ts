@@ -413,6 +413,7 @@ export type Database = {
           notifications_muted: boolean
           designation: string | null
           slack_user_id: string | null
+          date_of_birth: string | null
           created_at: string
           updated_at: string
         }
@@ -430,6 +431,7 @@ export type Database = {
           notifications_muted?: boolean
           designation?: string | null
           slack_user_id?: string | null
+          date_of_birth?: string | null
           created_at?: string
           updated_at?: string
         }

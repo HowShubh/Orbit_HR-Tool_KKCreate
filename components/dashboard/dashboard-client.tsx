@@ -605,11 +605,28 @@ function DailyTeamOverviewCard({ data }: { data: DashboardData }) {
             <TeamLeavesTodayList leaves={data.teamLeavesToday} />
           </TabsContent>
           <TabsContent value="birthday" className="mt-4">
-            <EmptyDailyState
-              icon={Cake}
-              title="No birthday data"
-              detail="Birth dates are not available in employee profiles yet."
-            />
+            {data.birthdaysToday.length === 0 ? (
+              <EmptyDailyState
+                icon={Cake}
+                title="No birthdays today"
+                detail="Team birthdays appear here when someone's birth date matches today."
+              />
+            ) : (
+              <div className="space-y-3">
+                {data.birthdaysToday.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3">
+                    <Avatar name={item.full_name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13.5px] font-medium truncate">{item.full_name}</div>
+                      <div className="text-[11.5px] text-muted-foreground truncate">
+                        {item.designation ?? 'Team member'}
+                      </div>
+                    </div>
+                    <Badge variant="success">🎂 {format(parseISO(item.date_of_birth), 'MMM d')}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
           </TabsContent>
           <TabsContent value="anniversary" className="mt-4">
             {data.workAnniversariesToday.length === 0 ? (
