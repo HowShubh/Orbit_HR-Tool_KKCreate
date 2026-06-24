@@ -372,8 +372,11 @@ export async function listLeaveRequestHistory(
       summary: {
         leave_days: leaveDays,
         wfh_days: wfhDays,
-        start_date: days[0].date,
-        end_date: days[days.length - 1].date,
+        // Use the actual min start / max end across the group's rows. Backdated
+        // (on-behalf) leaves are a single multi-day row, so deriving the range
+        // from the per-day list collapsed end_date onto start_date.
+        start_date: group.reduce((m, l) => (l.start_date < m ? l.start_date : m), group[0].start_date),
+        end_date: group.reduce((m, l) => (l.end_date > m ? l.end_date : m), group[0].end_date),
       },
       conflicts: [],
       decision_leave_id: first.id,
