@@ -361,8 +361,10 @@ function buildPlanRows(
     half_day_position?: 'first_half' | 'second_half' | null
   }>,
   remaining: Map<string, number>,
-  policies: LeaveTypePolicy[]
+  policies: LeaveTypePolicy[],
+  options?: { enforceBalance?: boolean }
 ) {
+  const enforceBalance = options?.enforceBalance ?? true
   const available = new Map(remaining)
   const rows: Array<{
     date: string
@@ -391,11 +393,13 @@ function buildPlanRows(
     })
   }
 
-  for (const [type, balance] of available.entries()) {
-    if (balance < 0) {
-      throw new ActionError(
-        `Insufficient ${leaveTypeLabel(type, policies)} balance. You need ${fmtDays(Math.abs(balance))} more day(s).`
-      )
+  if (enforceBalance) {
+    for (const [type, balance] of available.entries()) {
+      if (balance < 0) {
+        throw new ActionError(
+          `Insufficient ${leaveTypeLabel(type, policies)} balance. You need ${fmtDays(Math.abs(balance))} more day(s).`
+        )
+      }
     }
   }
 
@@ -467,26 +471,27 @@ async function bumpUsed(
   }
 }
 
-export async function getMyLeavePlannerData() {
-  const user = await requireUser()
-  const adminClient = createAdminClient()
-  // Debit any expired comp-off before reading balances, so the planner shows and
-  // enforces the post-expiry comp-off balance.
-  await reconcileCompoffExpiry(adminClient, user.id)
-  const startDate = istMonthStart(0)
-  const endDate = istMonthEnd(3)
+// Shared planner-data assembly for a given user + date window. Used by the
+// employee's own planner and the HR on-behalf planner (which uses a wider window
+// so HR can navigate to past months).
+async function buildPlannerData(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+  startDate: string,
+  endDate: string
+) {
   const allLeaveTypes = await getLeaveTypePolicies(adminClient)
   const eligibleLeaveTypes = allLeaveTypes.filter(
     (policy) =>
       policy.is_active &&
       isSelectablePlanCategory(policy.category) &&
-      isEligibleForPolicy(policy, user.id)
+      isEligibleForPolicy(policy, userId)
   )
 
   const { data: memberships } = await adminClient
     .from('team_members')
     .select('team_id, is_primary')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .is('left_at', null)
 
   const teamIds = Array.from(new Set((memberships ?? []).map((membership) => membership.team_id)))
@@ -518,12 +523,12 @@ export async function getMyLeavePlannerData() {
     adminClient
       .from('leave_balances')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .in('leave_year', [CURRENT_LEAVE_YEAR, COMPOFF_YEAR]),
   ])
 
   const teamUserIds = Array.from(
-    new Set([user.id, ...(membersRes.data ?? []).map((member) => member.user_id)])
+    new Set([userId, ...(membersRes.data ?? []).map((member) => member.user_id)])
   )
   const [leavesRes, usersRes] = await Promise.all([
     teamUserIds.length > 0
@@ -552,13 +557,13 @@ export async function getMyLeavePlannerData() {
   // by type — so the planner can show "X pending" and reserve it client-side too.
   const pending: Record<string, number> = {}
   for (const leave of leavesRes.data ?? []) {
-    if (leave.user_id !== user.id || leave.status !== 'pending') continue
+    if (leave.user_id !== userId || leave.status !== 'pending') continue
     const type = leave.requested_type ?? leave.type
     pending[type] = (pending[type] ?? 0) + Number(leave.days_deducted)
   }
 
   return {
-    currentUserId: user.id,
+    currentUserId: userId,
     primaryTeam,
     teamMembers: (usersRes.data ?? []).sort((a, b) => a.full_name.localeCompare(b.full_name)),
     holidays: holidaysRes.data ?? [],
@@ -573,6 +578,27 @@ export async function getMyLeavePlannerData() {
       type_category: leaveTypeCategory(leave.requested_type ?? leave.type, allLeaveTypes),
     })),
   }
+}
+
+export async function getMyLeavePlannerData() {
+  const user = await requireUser()
+  const adminClient = createAdminClient()
+  // Debit any expired comp-off before reading balances, so the planner shows and
+  // enforces the post-expiry comp-off balance.
+  await reconcileCompoffExpiry(adminClient, user.id)
+  return buildPlannerData(adminClient, user.id, istMonthStart(0), istMonthEnd(3))
+}
+
+/**
+ * HR on-behalf planner data for a chosen employee. Wider window (12 months back
+ * to 3 ahead) so HR can navigate to past months to backdate. Same shape as the
+ * employee planner so the calendar UI is identical.
+ */
+export async function getLeavePlannerDataForUser(userId: string) {
+  await requireCapability('edit_leaves')
+  const adminClient = createAdminClient()
+  await reconcileCompoffExpiry(adminClient, userId)
+  return buildPlannerData(adminClient, userId, istMonthStart(-12), istMonthEnd(3))
 }
 
 /**
@@ -880,6 +906,198 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     after: { request, leaves, autoApproved: routing.autoApprove },
   })
 
+  revalidatePath('/', 'layout')
+  return { request, leaves }
+}
+
+const CreatePlanForUserSchema = CreateLeavePlanSchema.extend({
+  user_id: z.string().uuid(),
+})
+
+/**
+ * HR adds a multi-day plan (mixed Leave/WFH/Comp-off) for an employee using the
+ * same calendar as the employee planner. Differences vs createMyLeavePlan:
+ *  - HR (`edit_leaves`), for a chosen employee.
+ *  - Past AND future dates allowed (backdate or pre-add).
+ *  - No approval — leaves are created ACTIVE immediately.
+ *  - Balance may go negative (no shortage block).
+ *  - Same day rules: weekly-offs, holidays, and WFH-only-on-office still apply.
+ *  - Notifies the employee AND their manager, in-app + Slack, day by day.
+ */
+export async function createLeavePlanForUser(input: z.infer<typeof CreatePlanForUserSchema>) {
+  const actor = await requireCapability('edit_leaves')
+  const parsed = CreatePlanForUserSchema.parse(input)
+  const adminClient = createAdminClient()
+  const policies = await getLeaveTypePolicies(adminClient)
+
+  const { data: employee } = await adminClient
+    .from('users')
+    .select('id, full_name, manager_id')
+    .eq('id', parsed.user_id)
+    .maybeSingle()
+  if (!employee) throw new ActionError('Employee not found')
+
+  const sortedDays = Array.from(
+    new Map(parsed.days.map((day) => [day.date, day])).values()
+  ).sort((a, b) => a.date.localeCompare(b.date))
+  const startDate = sortedDays[0]?.date
+  const endDate = sortedDays[sortedDays.length - 1]?.date
+  if (!startDate || !endDate) throw new ActionError('Select at least one day.')
+
+  for (const day of sortedDays) {
+    const policy = getPolicyOrThrow(policies, day.type)
+    if (!policy.is_active || !isSelectablePlanCategory(policy.category)) {
+      throw new ActionError(`${leaveTypeLabel(day.type, policies)} cannot be added from the planner.`)
+    }
+    if (!isEligibleForPolicy(policy, parsed.user_id)) {
+      throw new ActionError(`${leaveTypeLabel(day.type, policies)} is not available for this employee.`)
+    }
+  }
+  // No past-date restriction — HR may backdate or pre-add future leaves.
+
+  const [{ data: holidays }, { data: primaryMembership }] = await Promise.all([
+    adminClient.from('holidays').select('date, name').gte('date', startDate).lte('date', endDate),
+    adminClient
+      .from('team_members')
+      .select('team_id')
+      .eq('user_id', parsed.user_id)
+      .is('left_at', null)
+      .order('is_primary', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+  const holidayByDate = new Map((holidays ?? []).map((holiday) => [holiday.date, holiday.name]))
+  let wfoPattern: string | null = null
+  let offPattern: string | null = null
+  if (primaryMembership?.team_id) {
+    const { data: team } = await adminClient
+      .from('teams')
+      .select('wfo_pattern, off_days')
+      .eq('id', primaryMembership.team_id)
+      .maybeSingle()
+    wfoPattern = team?.wfo_pattern ?? null
+    offPattern = team?.off_days ?? null
+  }
+
+  for (const day of sortedDays) {
+    if (isOffDayForPattern(day.date, offPattern)) {
+      throw new ActionError(`${day.date} is a weekly off for this employee's team.`)
+    }
+    if (holidayByDate.has(day.date)) {
+      throw new ActionError(`${day.date} is a holiday.`)
+    }
+    const category = leaveTypeCategory(day.type, policies)
+    if (isWfhCategory(category) && !isWfoDayForPattern(day.date, wfoPattern)) {
+      throw new ActionError(`${day.date} is already a work-from-home day for this employee.`)
+    }
+  }
+
+  const { data: overlaps } = await adminClient
+    .from('leaves')
+    .select('id, start_date, end_date, type, requested_type')
+    .eq('user_id', parsed.user_id)
+    .in('status', ['active', 'pending', 'delete_requested'] as unknown as ('active' | 'pending' | 'delete_requested')[])
+    .lte('start_date', endDate)
+    .gte('end_date', startDate)
+  for (const day of sortedDays) {
+    const overlap = (overlaps ?? []).find(
+      (leave) => leave.start_date <= day.date && leave.end_date >= day.date
+    )
+    if (overlap) {
+      throw new ActionError(
+        `${day.date} overlaps an existing ${leaveTypeLabel(overlap.requested_type ?? overlap.type, policies)} from ${overlap.start_date} to ${overlap.end_date}.`
+      )
+    }
+  }
+
+  await reconcileCompoffExpiry(adminClient, parsed.user_id)
+  // Balance may go negative — HR is recording reality, so no shortage block.
+  const planRows = buildPlanRows(sortedDays, new Map(), policies, { enforceBalance: false })
+
+  const decidedAt = new Date().toISOString()
+  const { data: request, error: requestError } = await adminClient
+    .from('leave_requests')
+    .insert({
+      user_id: parsed.user_id,
+      status: 'active',
+      reason: parsed.reason ?? null,
+      created_by: actor.id,
+      decided_by: actor.id,
+      decided_at: decidedAt,
+    })
+    .select()
+    .single()
+  if (requestError || !request) {
+    throw new ActionError(requestError?.message ?? 'Create leave request failed')
+  }
+
+  const { data: leaves, error: leavesError } = await adminClient
+    .from('leaves')
+    .insert(
+      planRows.map((row) => ({
+        request_id: request.id,
+        user_id: parsed.user_id,
+        type: row.type,
+        requested_type: row.requested_type,
+        start_date: row.date,
+        end_date: row.date,
+        days_deducted: row.days_deducted,
+        half_day_start: row.half_day,
+        half_day_position: row.half_day_position,
+        status: 'active' as const,
+        created_by: actor.id,
+        reason: parsed.reason ?? null,
+        decided_by: actor.id,
+        decided_at: decidedAt,
+      }))
+    )
+    .select()
+  if (leavesError || !leaves) {
+    throw new ActionError(leavesError?.message ?? 'Create leave days failed')
+  }
+
+  const totals = new Map<string, number>()
+  for (const row of planRows) totals.set(row.type, (totals.get(row.type) ?? 0) + row.days_deducted)
+  for (const [type, days] of totals.entries()) {
+    await bumpUsed(adminClient, parsed.user_id, type, days, policies)
+  }
+
+  const summary = summarizePlanRows(planRows, policies)
+  const dayList = buildDayList(planRows, policies)
+  const when = formatWhen(startDate, endDate)
+
+  // Notify the employee (in-app + Slack DM, day by day).
+  await notifyUser({
+    user_id: parsed.user_id,
+    type: 'leave_created_for_you',
+    title: 'A leave was added to your record',
+    body: `${actor.full_name} added ${summary} for ${when}.`,
+    link_url: '/leaves',
+    related_entity_type: 'leave_request',
+    related_entity_id: request.id,
+    slackDm: true,
+    slackText: `*A leave was added to your record*\n${actor.full_name} added the following:\n${dayList}`,
+  })
+
+  // Notify the manager (in-app + Slack DM, day by day).
+  const managerId = employee.manager_id
+  if (managerId && managerId !== parsed.user_id && managerId !== actor.id) {
+    await notifyUser({
+      user_id: managerId,
+      type: 'leave_created_for_report',
+      title: 'A leave was added for your report',
+      body: `${actor.full_name} added ${summary} for ${employee.full_name} (${when}).`,
+      link_url: '/',
+      related_entity_type: 'leave_request',
+      related_entity_id: request.id,
+      slackDm: true,
+      slackText: `*Leave added for ${employee.full_name}*\n${actor.full_name} added:\n${dayList}`,
+    })
+  }
+
+  await writeAudit(actor.id, 'leave_request.create_for_user', 'leave_request', request.id, {
+    after: { request, leaves },
+  })
   revalidatePath('/', 'layout')
   return { request, leaves }
 }

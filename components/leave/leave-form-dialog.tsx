@@ -35,9 +35,19 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   createMyLeavePlan,
+  createLeavePlanForUser,
   getMyLeavePlannerData,
+  getLeavePlannerDataForUser,
 } from '@/lib/actions/leaves'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -49,8 +59,14 @@ import {
   type LeaveTypeCategory,
 } from '@/lib/leave-types'
 
+/** When set, the dialog runs in HR "add for an employee" mode. */
+type OnBehalfConfig = {
+  users: Array<{ id: string; full_name: string; status: string }>
+}
+
 interface Props {
   trigger?: React.ReactNode
+  onBehalf?: OnBehalfConfig
 }
 
 type PlannerData = Awaited<ReturnType<typeof getMyLeavePlannerData>>
@@ -162,7 +178,7 @@ function buildAllocation(data: PlannerData | null, selectedDays: SelectedDay[]) 
   return { available, used, shortages }
 }
 
-export function LeaveFormDialog({ trigger }: Props) {
+export function LeaveFormDialog({ trigger, onBehalf }: Props) {
   const router = useRouter()
   const { pushToast } = useStore()
   const [open, setOpen] = useState(false)
@@ -174,6 +190,8 @@ export function LeaveFormDialog({ trigger }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [isPending, startTransition] = useTransition()
+  // HR "add for an employee" mode: which employee the plan is for.
+  const [targetUserId, setTargetUserId] = useState('')
   // Inline feedback shown in the right panel (auto-dismisses) when a day can't be picked.
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -188,17 +206,30 @@ export function LeaveFormDialog({ trigger }: Props) {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
   }, [])
 
+  // In HR mode, reload the calendar whenever the chosen employee changes.
+  useEffect(() => {
+    if (!onBehalf) return
+    setData(null)
+    setSelectedDays([])
+    setSelectedDate(null)
+    setNotice(null)
+  }, [targetUserId, onBehalf])
+
   useEffect(() => {
     if (!open || data || loading) return
+    if (onBehalf && !targetUserId) return // wait for an employee to be picked
     setLoading(true)
-    getMyLeavePlannerData()
+    const request = onBehalf
+      ? getLeavePlannerDataForUser(targetUserId)
+      : getMyLeavePlannerData()
+    request
       .then(setData)
       .catch((err) => {
         const msg = err instanceof Error ? err.message : 'Failed to load leave planner'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
       })
       .finally(() => setLoading(false))
-  }, [data, loading, open, pushToast])
+  }, [data, loading, open, pushToast, onBehalf, targetUserId])
 
   useEffect(() => {
     if (!data || data.leaveTypes.length === 0) return
@@ -214,6 +245,8 @@ export function LeaveFormDialog({ trigger }: Props) {
     setMode('leave')
     setCursor(new Date())
     setNotice(null)
+    setTargetUserId('')
+    setData(null)
   }
 
   function handleOpenChange(value: boolean) {
@@ -262,11 +295,15 @@ export function LeaveFormDialog({ trigger }: Props) {
     [data, selectedDays]
   )
   const shortageLabels = allocation.shortages.map(([type]) => labelFor(data, type))
+  // HR mode lets balance go negative and requires an employee to be picked.
+  const futureSelected = onBehalf
+    ? selectedDays.some((d) => d.date > todayIso())
+    : false
   const canSubmit =
     selectedDays.length > 0 &&
-    shortageLabels.length === 0 &&
     (data?.leaveTypes.length ?? 0) > 0 &&
-    !isPending
+    !isPending &&
+    (onBehalf ? Boolean(targetUserId) : shortageLabels.length === 0)
 
   function leavesOn(dateIso: string) {
     return (data?.leaves ?? []).filter(
@@ -277,7 +314,7 @@ export function LeaveFormDialog({ trigger }: Props) {
   function validateDate(date: Date, type: PlanType) {
     const iso = format(date, 'yyyy-MM-dd')
     const nice = format(date, 'EEE, MMM d')
-    if (iso < todayIso()) return `${nice} is in the past. You can only apply for today or later.`
+    if (!onBehalf && iso < todayIso()) return `${nice} is in the past. You can only apply for today or later.`
     if (offDays.has(dayCode(date))) return `${nice} is a weekly off for your team, not a working day.`
     const holiday = holidayByDate.get(iso)
     if (holiday) return `${nice} is a holiday (${holiday}).`
@@ -355,25 +392,32 @@ export function LeaveFormDialog({ trigger }: Props) {
 
   function handleSubmit() {
     if (!canSubmit) return
+    const days = selectedDays
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((day) => ({
+        date: day.date,
+        type: day.type,
+        half_day: day.half_day ?? false,
+        half_day_position: day.half_day ? day.half_day_position ?? 'first_half' : null,
+      }))
     startTransition(async () => {
       try {
-        await createMyLeavePlan({
-          days: selectedDays
-            .slice()
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .map((day) => ({
-              date: day.date,
-              type: day.type,
-              half_day: day.half_day ?? false,
-              half_day_position: day.half_day ? day.half_day_position ?? 'first_half' : null,
-            })),
-          reason: reason.trim() || null,
-        })
-        pushToast({
-          title: 'Leave request submitted',
-          body: 'Your manager will review the complete plan.',
-          variant: 'success',
-        })
+        if (onBehalf) {
+          await createLeavePlanForUser({ user_id: targetUserId, days, reason: reason.trim() || null })
+          pushToast({
+            title: 'Leave added',
+            body: 'The employee and their manager have been notified.',
+            variant: 'success',
+          })
+        } else {
+          await createMyLeavePlan({ days, reason: reason.trim() || null })
+          pushToast({
+            title: 'Leave request submitted',
+            body: 'Your manager will review the complete plan.',
+            variant: 'success',
+          })
+        }
         setOpen(false)
         reset()
         router.refresh()
@@ -409,10 +453,39 @@ export function LeaveFormDialog({ trigger }: Props) {
       </DialogTrigger>
       <DialogContent className="max-h-[92vh] max-w-6xl overflow-x-hidden overflow-y-auto p-3 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Apply Leave / WFH</DialogTitle>
+          <DialogTitle>{onBehalf ? 'Add leave for an employee' : 'Apply Leave / WFH'}</DialogTitle>
         </DialogHeader>
 
-        {loading || !data ? (
+        {onBehalf && (
+          <div className="space-y-1.5">
+            <Label>Employee</Label>
+            <Select value={targetUserId} onValueChange={setTargetUserId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select an employee…" />
+              </SelectTrigger>
+              <SelectContent>
+                {onBehalf.users
+                  .filter((u) => u.status === 'active')
+                  .map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.full_name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {futureSelected && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+                Heads up: you&apos;re adding a future-dated leave (after today), not just backdating.
+              </div>
+            )}
+          </div>
+        )}
+
+        {onBehalf && !targetUserId ? (
+          <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
+            Select an employee to open their calendar.
+          </div>
+        ) : loading || !data ? (
           <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             Loading calendar planner...
@@ -745,7 +818,7 @@ export function LeaveFormDialog({ trigger }: Props) {
             Cancel
           </Button>
           <Button type="button" disabled={!canSubmit} onClick={handleSubmit}>
-            {isPending ? 'Submitting...' : 'Submit request'}
+            {isPending ? 'Submitting...' : onBehalf ? 'Add leave' : 'Submit request'}
           </Button>
         </DialogFooter>
       </DialogContent>

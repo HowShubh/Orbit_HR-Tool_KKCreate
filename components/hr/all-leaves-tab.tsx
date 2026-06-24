@@ -5,7 +5,7 @@ import { Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ApprovalQueueClient } from '@/components/approvals/approval-queue-client'
 import { RequestHistoryTable } from '@/components/approvals/request-history-table'
-import { BackdateLeaveDialog } from './backdate-leave-dialog'
+import { LeaveFormDialog } from '@/components/leave/leave-form-dialog'
 import { BacklogLeavesCsvImport } from './backlog-leaves-csv-import'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 import type { UserWithMembership } from '@/lib/queries/users'
@@ -55,10 +55,9 @@ export function AllLeavesTab({ pendingRequests, history, users, leaveTypes }: Pr
           <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
             Import CSV
           </Button>
-          <BackdateLeaveDialog
-            users={users}
-            leaveTypes={leaveTypes}
-            trigger={<Button size="sm">Backdate Leave</Button>}
+          <LeaveFormDialog
+            onBehalf={{ users }}
+            trigger={<Button size="sm">Add / backdate leave</Button>}
           />
         </div>
       </div>
