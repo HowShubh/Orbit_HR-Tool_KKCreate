@@ -1216,9 +1216,10 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
 
   const { data: usersData } = await adminClient
     .from('users')
-    .select('id, email, full_name')
+    .select('id, email, full_name, manager_id')
     .eq('status', 'active')
   const userByEmail = new Map((usersData ?? []).map((u) => [u.email.toLowerCase(), u]))
+  const userById = new Map((usersData ?? []).map((u) => [u.id, u]))
 
   type Prepared = {
     row: number
@@ -1344,6 +1345,51 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
     }
     await bumpUsed(adminClient, p.user_id, p.type, p.days, policies)
     imported++
+  }
+
+  // Notify each employee (and their manager) about everything added for them,
+  // entry by entry — same day-by-day style as the single backdate flow.
+  const byUser = new Map<string, typeof prepared>()
+  for (const p of prepared) {
+    const arr = byUser.get(p.user_id) ?? []
+    arr.push(p)
+    byUser.set(p.user_id, arr)
+  }
+  for (const [userId, rows] of byUser.entries()) {
+    const employee = userById.get(userId)
+    if (!employee) continue
+    const list = rows
+      .slice()
+      .sort((a, b) => a.start_date.localeCompare(b.start_date))
+      .map((r) => {
+        const half = r.half_day_start ? ' (half day)' : ''
+        return `${formatWhen(r.start_date, r.end_date)} - ${leaveTypeLabel(r.type, policies)}${half}`
+      })
+      .join('\n')
+    const count = rows.length
+
+    await notifyUser({
+      user_id: userId,
+      type: 'leave_created_for_you',
+      title: 'Leave records were added',
+      body: `${actor.full_name} added ${count} leave entr${count === 1 ? 'y' : 'ies'} to your record.`,
+      link_url: '/leaves',
+      slackDm: true,
+      slackText: `*Leave records were added*\n${actor.full_name} added the following to your record:\n${list}`,
+    })
+
+    const managerId = employee.manager_id
+    if (managerId && managerId !== userId && managerId !== actor.id) {
+      await notifyUser({
+        user_id: managerId,
+        type: 'leave_created_for_report',
+        title: 'Leave records were added for your report',
+        body: `${actor.full_name} added ${count} leave entr${count === 1 ? 'y' : 'ies'} for ${employee.full_name}.`,
+        link_url: '/',
+        slackDm: true,
+        slackText: `*Leave records added for ${employee.full_name}*\n${actor.full_name} added:\n${list}`,
+      })
+    }
   }
 
   await writeAudit(actor.id, 'leave.import_backlog', 'leave', 'batch', { after: { imported } })
