@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/post-whereabouts",
-      "schedule": "20 5 * * *"
+      "schedule": "30 4 * * *"
     }
   ]
 }
