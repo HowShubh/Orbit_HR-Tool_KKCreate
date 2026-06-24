@@ -928,16 +928,40 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
   await bumpUsed(adminClient, parsed.user_id, parsed.type, days, policies)
   await writeAudit(actor.id, 'leave.create_on_behalf', 'leave', leave.id, { after: leave })
 
-  // Notify the user
+  // Notify the employee AND their manager (in-app + Slack DM). No approval is
+  // needed since HR added it, but both should know it happened.
+  const { data: employee } = await adminClient
+    .from('users')
+    .select('full_name, manager_id')
+    .eq('id', parsed.user_id)
+    .maybeSingle()
+  const typeLabel = leaveTypeLabel(parsed.type, policies)
+  const when = formatWhen(parsed.start_date, parsed.end_date)
+
   await notifyUser({
     user_id: parsed.user_id,
     type: 'leave_created_for_you',
     title: 'A leave was added to your record',
-    body: `${actor.full_name} added ${leaveTypeLabel(parsed.type, policies)} from ${parsed.start_date} to ${parsed.end_date}.`,
+    body: `${actor.full_name} added ${typeLabel} for ${when}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
+    slackDm: true,
   })
+
+  const managerId = employee?.manager_id
+  if (managerId && managerId !== parsed.user_id && managerId !== actor.id) {
+    await notifyUser({
+      user_id: managerId,
+      type: 'leave_created_for_report',
+      title: 'A leave was added for your report',
+      body: `${actor.full_name} added ${typeLabel} for ${employee?.full_name ?? 'a team member'} (${when}).`,
+      link_url: '/',
+      related_entity_type: 'leave',
+      related_entity_id: leave.id,
+      slackDm: true,
+    })
+  }
 
   revalidatePath('/', 'layout')
   return leave

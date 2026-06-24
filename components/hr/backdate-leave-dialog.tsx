@@ -50,10 +50,15 @@ export function BackdateLeaveDialog({ users, leaveTypes, trigger }: Props) {
 
   const activeUsers = users.filter((u) => u.status === 'active')
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault()
+    if (isPending) return
     if (!userId) {
-      pushToast({ title: 'Error', body: 'Please select a user', variant: 'error' })
+      pushToast({ title: 'Select an employee', body: 'Choose who this leave is for.', variant: 'error' })
+      return
+    }
+    if (!startDate || !endDate) {
+      pushToast({ title: 'Pick the dates', body: 'Start and end date are required.', variant: 'error' })
       return
     }
     startTransition(async () => {
@@ -147,7 +152,6 @@ export function BackdateLeaveDialog({ users, leaveTypes, trigger }: Props) {
                   if (!endDate || e.target.value > endDate) setEndDate(e.target.value)
                 }}
                 className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                required
               />
             </div>
             <div className="space-y-1.5">
@@ -158,7 +162,6 @@ export function BackdateLeaveDialog({ users, leaveTypes, trigger }: Props) {
                 min={startDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                required
               />
             </div>
           </div>
@@ -219,7 +222,7 @@ export function BackdateLeaveDialog({ users, leaveTypes, trigger }: Props) {
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending}>
+            <Button type="button" onClick={() => handleSubmit()} disabled={isPending}>
               {isPending ? 'Saving…' : 'Backdate leave'}
             </Button>
           </DialogFooter>
