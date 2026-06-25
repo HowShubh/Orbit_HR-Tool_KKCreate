@@ -40,6 +40,10 @@ export function UsersTab({ users, teams }: Props) {
     )
   })
 
+  const total = users.length
+  const activeCount = users.filter((u) => u.status === 'active').length
+  const exitedCount = total - activeCount
+
   function openCreate() {
     setEditingUser(undefined)
     setDialogMode('create')
@@ -82,6 +86,14 @@ export function UsersTab({ users, teams }: Props) {
     <>
       <Card>
         <CardContent className="p-0">
+          <div className="px-4 pt-4 text-sm font-semibold">
+            {total} {total === 1 ? 'user' : 'users'}
+            <span className="ml-2 text-[12px] font-normal text-muted-foreground">
+              {activeCount} active
+              {exitedCount > 0 ? ` · ${exitedCount} former` : ''}
+              {search.trim() ? ` · ${filtered.length} shown` : ''}
+            </span>
+          </div>
           <div className="p-4 flex items-center justify-between gap-3 border-b">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
