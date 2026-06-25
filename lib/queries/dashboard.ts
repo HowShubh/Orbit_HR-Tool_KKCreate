@@ -48,6 +48,7 @@ export interface DashboardData {
   leavesToday: LeaveWithUser[]
   upcomingMine: LeaveWithUser[]
   upcomingTeam: LeaveWithUser[]
+  upcomingOrg: LeaveWithUser[]
   myBalances: Tables<'leave_balances'>[]
   myCompoffBalance: Tables<'leave_balances'>[]
   leaveTypes: LeaveTypePolicy[]
@@ -61,6 +62,21 @@ export interface DashboardData {
   teamLeavesToday: LeaveWithUser[]
   workAnniversariesToday: WorkAnniversary[]
   birthdaysToday: Birthday[]
+  orgBirthdays30: Birthday[]
+  orgAnniversaries30: WorkAnniversary[]
+}
+
+// Next calendar occurrence of a MM-DD (birthday / joining day) on or after
+// `startIso`, returned only if it falls on/before `endIso`. Checks the start
+// year and the next year so a window spanning Dec→Jan still matches January.
+// All strings are ISO 'YYYY-MM-DD'.
+function nextOccurrenceWithin(monthDay: string, startIso: string, endIso: string): string | null {
+  const startYear = Number(startIso.slice(0, 4))
+  for (const year of [startYear, startYear + 1]) {
+    const candidate = `${year}-${monthDay}`
+    if (candidate >= startIso && candidate <= endIso) return candidate
+  }
+  return null
 }
 
 export async function getDashboardData(
@@ -76,15 +92,24 @@ export async function getDashboardData(
   let teamMemberIds: string[] = []
   let workAnniversariesToday: WorkAnniversary[] = []
   let birthdaysToday: Birthday[] = []
+  // Org-wide, next-30-days lists for HR/founders (planning view).
+  let orgBirthdays30: Birthday[] = []
+  let orgAnniversaries30: WorkAnniversary[] = []
 
-  if (currentUserRole === 'employee') {
+  // Personal-team context (My Team / My Status / This Week Schedule / Daily Team
+  // Overview) is rendered for employees, team leads, and HR, so compute it for
+  // all three. The team set is their member teams unioned with the teams they
+  // lead — the latter covers leads who aren't listed as members of their team.
+  // (Founders still use the org-wide management layout, so skip the work there.)
+  if (currentUserRole !== 'founder') {
     const { data: myMemberships } = await adminClient
       .from('team_members')
       .select('team_id, is_primary')
       .eq('user_id', currentUserId)
       .is('left_at', null)
 
-    const myTeamIds = Array.from(new Set((myMemberships ?? []).map((m) => m.team_id)))
+    const membershipTeamIds = (myMemberships ?? []).map((m) => m.team_id)
+    const myTeamIds = Array.from(new Set([...membershipTeamIds, ...ledTeamIds]))
     primaryTeamId =
       (myMemberships ?? []).find((m) => m.is_primary)?.team_id ?? myTeamIds[0] ?? null
 
@@ -155,29 +180,55 @@ export async function getDashboardData(
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
   }
 
-  // For team_leads → only people in teams they lead.
-  // For HR/founders → everyone in the org (excluding themselves).
-  // For employees → no team widget (empty list).
+  // "My team" leaves = the teams I'm a member of or lead (resolved in the
+  // personal block above), minus me. Org-wide leaves (everyone) are a SEPARATE
+  // card shown only to HR/founders, so the "Team Leaves" card always means my
+  // own team rather than the whole company.
   const isOrgWide = currentUserRole === 'hr' || currentUserRole === 'founder'
+  const myTeamUserIds = teamMemberIds.filter((id) => id !== currentUserId)
 
-  let teamUserIds: string[]
+  let orgUserIds: string[] = []
   if (isOrgWide) {
+    // Pull every active person once — used both for the org-wide upcoming-leaves
+    // card and for the org-level Daily Overview (today's birthdays/anniversaries).
+    const { data: allActive } = await adminClient
+      .from('users')
+      .select('id, full_name, designation, joined_at, date_of_birth')
+      .eq('status', 'active')
+
     const allUserIds = new Set<string>()
     for (const ids of Object.values(membersByTeam)) {
       for (const id of ids) allUserIds.add(id)
     }
-    // Also include users that aren't in any team yet (still part of the org)
-    const { data: allActive } = await adminClient
-      .from('users')
-      .select('id')
-      .eq('status', 'active')
     for (const u of allActive ?? []) allUserIds.add(u.id)
     allUserIds.delete(currentUserId)
-    teamUserIds = Array.from(allUserIds)
-  } else {
-    teamUserIds = Array.from(
-      new Set(ledTeamIds.flatMap((teamId) => membersByTeam[teamId] ?? []))
-    ).filter((id) => id !== currentUserId)
+    orgUserIds = Array.from(allUserIds)
+
+    // HR/founders get a 30-day planning view in the Daily Org Overview: every
+    // upcoming birthday and work anniversary across the company, soonest first.
+    const startIso = todayIST()
+    const endIso = istDatePlusDays(30)
+
+    orgBirthdays30 = (allActive ?? [])
+      .flatMap((u) => {
+        if (!u.date_of_birth) return []
+        const occ = nextOccurrenceWithin(u.date_of_birth.slice(5, 10), startIso, endIso)
+        if (!occ) return []
+        return [{ occ, item: { id: u.id, full_name: u.full_name, designation: u.designation, date_of_birth: u.date_of_birth } }]
+      })
+      .sort((a, b) => a.occ.localeCompare(b.occ) || a.item.full_name.localeCompare(b.item.full_name))
+      .map((x) => x.item)
+
+    orgAnniversaries30 = (allActive ?? [])
+      .flatMap((u) => {
+        const occ = nextOccurrenceWithin(u.joined_at.slice(5, 10), startIso, endIso)
+        if (!occ) return []
+        const years = Number(occ.slice(0, 4)) - Number(u.joined_at.slice(0, 4))
+        if (years <= 0) return [] // their joining day itself, not an anniversary
+        return [{ occ, item: { id: u.id, full_name: u.full_name, designation: u.designation, joined_at: u.joined_at, years } }]
+      })
+      .sort((a, b) => a.occ.localeCompare(b.occ) || a.item.full_name.localeCompare(b.item.full_name))
+      .map((x) => x.item)
   }
 
   // Run as much as we can in parallel. All "today"/range math resolves in IST.
@@ -189,6 +240,7 @@ export async function getDashboardData(
     leavesToday,
     upcomingMine,
     upcomingTeam,
+    upcomingOrg,
     balancesRes,
     compoffBalRes,
     approvalsRes,
@@ -199,7 +251,8 @@ export async function getDashboardData(
   ] = await Promise.all([
     listLeavesToday(),
     listUpcomingLeaves(60, [currentUserId]),
-    teamUserIds.length > 0 ? listUpcomingLeaves(30, teamUserIds) : Promise.resolve([]),
+    myTeamUserIds.length > 0 ? listUpcomingLeaves(30, myTeamUserIds) : Promise.resolve([]),
+    orgUserIds.length > 0 ? listUpcomingLeaves(30, orgUserIds) : Promise.resolve([]),
     adminClient
       .from('leave_balances')
       .select('*')
@@ -254,6 +307,7 @@ export async function getDashboardData(
     leavesToday,
     upcomingMine,
     upcomingTeam,
+    upcomingOrg,
     myBalances: balancesRes.data ?? [],
     myCompoffBalance: compoffBalRes.data ?? [],
     leaveTypes: leaveTypes.filter(
@@ -273,5 +327,7 @@ export async function getDashboardData(
     teamLeavesToday: leavesToday.filter((leave) => teamMemberIds.includes(leave.user_id)),
     workAnniversariesToday,
     birthdaysToday,
+    orgBirthdays30,
+    orgAnniversaries30,
   }
 }

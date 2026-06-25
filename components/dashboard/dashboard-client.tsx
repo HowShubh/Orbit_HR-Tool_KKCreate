@@ -146,9 +146,13 @@ export function DashboardClient({ currentUser, data }: Props) {
   const isHROrAbove = role === 'hr' || role === 'founder'
   const isTeamLead = role === 'team_lead' || isHROrAbove
 
-  if (role === 'employee') {
+  // Employees, team leads, and HR get the rich personal dashboard (My Status,
+  // schedule, My Team, etc.). Team leads also see their team's upcoming leaves;
+  // HR additionally gets an org-wide "Everyone" card. Founders keep the
+  // org-wide management layout for now.
+  if (role === 'employee' || role === 'team_lead' || role === 'hr') {
     return (
-      <EmployeeDashboard
+      <PersonalDashboard
         currentUser={currentUser}
         data={data}
         greeting={greeting}
@@ -208,9 +212,9 @@ export function DashboardClient({ currentUser, data }: Props) {
           {/* Upcoming (mine) */}
           <UpcomingMineCard leaves={data.upcomingMine} />
 
-          {/* Upcoming (team) — only show when has team data */}
+          {/* Upcoming (org-wide) — founders see the whole company here. */}
           {isTeamLead && (
-            <UpcomingTeamCard leaves={data.upcomingTeam} />
+            <UpcomingTeamCard leaves={data.upcomingOrg} />
           )}
 
           {/* Pending approvals */}
@@ -234,7 +238,7 @@ export function DashboardClient({ currentUser, data }: Props) {
   )
 }
 
-function EmployeeDashboard({
+function PersonalDashboard({
   currentUser,
   data,
   greeting,
@@ -246,6 +250,10 @@ function EmployeeDashboard({
   todayLabel: string
 }) {
   const primaryTeam = getPrimaryTeam(data)
+  // HR (and later founders) see an extra org-wide leaves card; anyone who
+  // leads/belongs to a team also gets a "my team" upcoming-leaves card.
+  const isOrgWide = currentUser.role === 'hr' || currentUser.role === 'founder'
+  const showTeamCard = currentUser.role === 'team_lead' || isOrgWide
 
   return (
     <>
@@ -309,7 +317,16 @@ function EmployeeDashboard({
               <EmployeeQuickActionsCard />
             </div>
 
-            <DailyTeamOverviewCard data={data} />
+            {showTeamCard ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <UpcomingMineCard leaves={data.upcomingMine} />
+                <UpcomingTeamCard leaves={data.upcomingTeam} />
+              </div>
+            ) : (
+              <UpcomingMineCard leaves={data.upcomingMine} />
+            )}
+
+            <DailyTeamOverviewCard data={data} orgWide={isOrgWide} />
           </div>
 
           <MyTeamReferenceCard currentUserId={currentUser.id} data={data} />
@@ -583,14 +600,21 @@ function EmployeeQuickActionsCard() {
   )
 }
 
-function DailyTeamOverviewCard({ data }: { data: DashboardData }) {
+function DailyTeamOverviewCard({ data, orgWide = false }: { data: DashboardData; orgWide?: boolean }) {
+  // Team view = today, scoped to my team. Org view (HR/founders) = the next 30
+  // days across the whole company, so HR can plan ahead.
+  const birthdays = orgWide ? data.orgBirthdays30 : data.birthdaysToday
+  const anniversaries = orgWide ? data.orgAnniversaries30 : data.workAnniversariesToday
+
   return (
     <Card>
       <CardHeader>
         <div>
-          <CardTitle>Daily Team Overview</CardTitle>
+          <CardTitle>{orgWide ? 'Daily Org Overview' : 'Daily Team Overview'}</CardTitle>
           <div className="mt-1 text-[12px] text-muted-foreground">
-            Leave, WFH, birthdays, and work anniversaries for today
+            {orgWide
+              ? 'Upcoming Leave, WFH, birthdays, and work anniversaries — next 30 days, company-wide'
+              : 'Leave, WFH, birthdays, and work anniversaries for today'}
           </div>
         </div>
       </CardHeader>
@@ -602,18 +626,25 @@ function DailyTeamOverviewCard({ data }: { data: DashboardData }) {
             <TabsTrigger value="anniversary">Anniversary</TabsTrigger>
           </TabsList>
           <TabsContent value="leave" className="mt-4">
-            <TeamLeavesTodayList leaves={data.teamLeavesToday} />
+            <TeamLeavesTodayList
+              leaves={orgWide ? data.upcomingOrg : data.teamLeavesToday}
+              orgWide={orgWide}
+            />
           </TabsContent>
           <TabsContent value="birthday" className="mt-4">
-            {data.birthdaysToday.length === 0 ? (
+            {birthdays.length === 0 ? (
               <EmptyDailyState
                 icon={Cake}
-                title="No birthdays today"
-                detail="Team birthdays appear here when someone's birth date matches today."
+                title={orgWide ? 'No birthdays in the next 30 days' : 'No birthdays today'}
+                detail={
+                  orgWide
+                    ? 'Upcoming company birthdays will appear here once a date falls within the next 30 days.'
+                    : "Team birthdays appear here when someone's birth date matches today."
+                }
               />
             ) : (
               <div className="space-y-3">
-                {data.birthdaysToday.map((item) => (
+                {birthdays.map((item) => (
                   <div key={item.id} className="flex items-center gap-3">
                     <Avatar name={item.full_name} size="sm" />
                     <div className="min-w-0 flex-1">
@@ -629,21 +660,27 @@ function DailyTeamOverviewCard({ data }: { data: DashboardData }) {
             )}
           </TabsContent>
           <TabsContent value="anniversary" className="mt-4">
-            {data.workAnniversariesToday.length === 0 ? (
+            {anniversaries.length === 0 ? (
               <EmptyDailyState
                 icon={BriefcaseBusiness}
-                title="No work anniversaries today"
-                detail="Team anniversaries will appear here when the joining date matches today."
+                title={orgWide ? 'No work anniversaries in the next 30 days' : 'No work anniversaries today'}
+                detail={
+                  orgWide
+                    ? 'Upcoming work anniversaries will appear here once a joining date falls within the next 30 days.'
+                    : 'Team anniversaries will appear here when the joining date matches today.'
+                }
               />
             ) : (
               <div className="space-y-3">
-                {data.workAnniversariesToday.map((item) => (
+                {anniversaries.map((item) => (
                   <div key={item.id} className="flex items-center gap-3">
                     <Avatar name={item.full_name} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-medium truncate">{item.full_name}</div>
                       <div className="text-[11.5px] text-muted-foreground truncate">
-                        {item.designation ?? 'Team member'}
+                        {orgWide
+                          ? `${format(parseISO(item.joined_at), 'MMM d')}${item.designation ? ` · ${item.designation}` : ''}`
+                          : item.designation ?? 'Team member'}
                       </div>
                     </div>
                     <Badge variant="success">{item.years} yr</Badge>
@@ -658,32 +695,49 @@ function DailyTeamOverviewCard({ data }: { data: DashboardData }) {
   )
 }
 
-function TeamLeavesTodayList({ leaves }: { leaves: DashboardData['teamLeavesToday'] }) {
+function TeamLeavesTodayList({
+  leaves,
+  orgWide = false,
+}: {
+  leaves: DashboardData['teamLeavesToday']
+  orgWide?: boolean
+}) {
   if (leaves.length === 0) {
     return (
       <EmptyDailyState
         icon={CheckCircleIcon}
-        title="No one is away today"
-        detail="Your team has no active Leave or WFH entries today."
+        title={orgWide ? 'No upcoming Leave or WFH' : 'No one is away today'}
+        detail={
+          orgWide
+            ? 'No Leave or WFH is scheduled across the company in the next 30 days.'
+            : 'Your team has no active Leave or WFH entries today.'
+        }
       />
     )
   }
 
+  const shown = orgWide ? leaves.slice(0, 10) : leaves
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {leaves.map((leave) => (
-        <div key={leave.id} className="flex items-center gap-3 rounded-lg border p-3">
-          <Avatar name={leave.user_full_name} size="sm" />
-          <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
-            <div className="text-[11.5px] text-muted-foreground">
-              {formatDateRange(leave.start_date, leave.end_date)}
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {shown.map((leave) => (
+          <div key={leave.id} className="flex items-center gap-3 rounded-lg border p-3">
+            <Avatar name={leave.user_full_name} size="sm" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
+              <div className="text-[11.5px] text-muted-foreground">
+                {formatDateRange(leave.start_date, leave.end_date)}
+              </div>
             </div>
+            <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
           </div>
-          <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+      {leaves.length > shown.length && (
+        <p className="mt-3 text-[12px] text-muted-foreground">+{leaves.length - shown.length} more</p>
+      )}
+    </>
   )
 }
 
