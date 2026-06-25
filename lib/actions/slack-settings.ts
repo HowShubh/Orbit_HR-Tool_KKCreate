@@ -3,7 +3,7 @@
 import { ActionError } from './errors'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireCapability, writeAudit, revalidateHR } from './_helpers'
-import { slackApi, resolveSlackUserId } from '@/lib/slack'
+import { slackApi } from '@/lib/slack'
 
 const TOGGLE_KEYS = [
   'slack_dm_enabled',
@@ -55,12 +55,39 @@ export async function setUserSlackId(userId: string, slackId: string | null) {
 
 /**
  * Bulk-fill Slack member ids by matching each active user's Orbit email to a
- * Slack account (users.lookupByEmail). Only fills users who don't have one yet.
+ * Slack account. Pulls the WHOLE Slack member list once (users.list, paginated)
+ * and matches in memory — a couple of API calls total, rather than one
+ * lookupByEmail per user (which is slow and hits Slack's per-method rate limit).
  */
 export async function syncSlackIdsByEmail() {
   const actor = await requireCapability('manage_users')
   if (!process.env.SLACK_BOT_TOKEN) {
     throw new ActionError('Slack bot token is not configured.')
+  }
+
+  type SlackMember = {
+    id: string
+    deleted?: boolean
+    is_bot?: boolean
+    profile?: { email?: string | null }
+  }
+
+  // Build email -> slack id from the full workspace member list (cursor-paged).
+  const slackByEmail = new Map<string, string>()
+  let cursor: string | undefined
+  for (let page = 0; page < 25; page++) {
+    const res = await slackApi('users.list', { limit: 200, ...(cursor ? { cursor } : {}) })
+    if (!res?.ok) {
+      throw new ActionError(`Slack error while listing members: ${(res?.error as string) ?? 'unknown'}`)
+    }
+    for (const m of (res.members as SlackMember[] | undefined) ?? []) {
+      const email = m.profile?.email
+      if (email && !m.deleted && !m.is_bot) {
+        slackByEmail.set(email.toLowerCase(), m.id)
+      }
+    }
+    cursor = ((res.response_metadata as { next_cursor?: string } | undefined)?.next_cursor) || undefined
+    if (!cursor) break
   }
 
   const admin = createAdminClient()
@@ -77,9 +104,13 @@ export async function syncSlackIdsByEmail() {
       already++
       continue
     }
-    const id = await resolveSlackUserId(admin, u) // looks up by email + caches the id
-    if (id) matched++
-    else unmatched++
+    const id = u.email ? slackByEmail.get(u.email.toLowerCase()) : undefined
+    if (id) {
+      await admin.from('users').update({ slack_user_id: id }).eq('id', u.id)
+      matched++
+    } else {
+      unmatched++
+    }
   }
 
   await writeAudit(actor.id, 'slack.sync_ids', 'app_settings', '1', {
