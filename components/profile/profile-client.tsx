@@ -33,11 +33,13 @@ export function ProfileClient({ user, teams, managerName, directReports }: Props
   const [phone, setPhone] = useState(user.phone ?? '')
   const [muted, setMuted] = useState(user.notifications_muted ?? false)
   const [slackId, setSlackId] = useState(user.slack_user_id ?? '')
+  const [dob, setDob] = useState(user.date_of_birth ?? '')
 
   const dirty =
     (phone.trim() || null) !== (user.phone ?? null) ||
     muted !== (user.notifications_muted ?? false) ||
-    (slackId.trim() || null) !== (user.slack_user_id ?? null)
+    (slackId.trim() || null) !== (user.slack_user_id ?? null) ||
+    (dob || null) !== (user.date_of_birth ?? null)
 
   function save() {
     startTransition(async () => {
@@ -46,6 +48,7 @@ export function ProfileClient({ user, teams, managerName, directReports }: Props
           phone: phone.trim() ? phone.trim() : null,
           notifications_muted: muted,
           slack_user_id: slackId.trim() ? slackId.trim() : null,
+          date_of_birth: dob || null,
         })
         pushToast({ title: 'Profile updated', variant: 'success' })
         router.refresh()
@@ -127,8 +130,8 @@ export function ProfileClient({ user, teams, managerName, directReports }: Props
               <div>
                 <h2 className="text-[15px] font-semibold">Contact & preferences</h2>
                 <p className="text-[12.5px] text-muted-foreground">
-                  Your phone, Slack ID, and notification preference are editable here. Ask HR to
-                  change your name, role, or team.
+                  Your phone, birthday, Slack ID, and notification preference are editable here. Ask
+                  HR to change your name, role, or team.
                 </p>
               </div>
 
@@ -142,6 +145,19 @@ export function ProfileClient({ user, teams, managerName, directReports }: Props
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                 />
+              </div>
+
+              <div className="space-y-1.5 max-w-sm">
+                <Label htmlFor="date_of_birth">Birthday</Label>
+                <Input
+                  id="date_of_birth"
+                  type="date"
+                  value={dob}
+                  onChange={(e) => setDob(e.target.value)}
+                />
+                <p className="text-[11.5px] text-muted-foreground">
+                  Only the day and month are shown to your team (no year).
+                </p>
               </div>
 
               <div className="space-y-1.5 max-w-sm">
