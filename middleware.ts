@@ -25,11 +25,14 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Keep middleware lightweight. Protected layouts perform the authoritative
-  // user lookup; here we only need to know whether a session cookie exists.
+  // IMPORTANT: use getUser() (not getSession()). getUser validates the token
+  // with Supabase and, when the access token has expired, refreshes it and
+  // writes the new cookies via setAll above. getSession() only reads the cookie
+  // without refreshing, so an expired token would slip past the middleware and
+  // then fail server components/actions with "Not authenticated".
   const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    data: { user },
+  } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
 
@@ -42,14 +45,14 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/cron/')
 
   // Unauthenticated user trying to reach a protected route
-  if (!session && !isPublic) {
+  if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
   // Authenticated user going to login — redirect home
-  if (session && pathname === '/login') {
+  if (user && pathname === '/login') {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

@@ -6,6 +6,20 @@ dashboard, or any date math.
 
 ---
 
+## 2026-06-25 — Middleware must use getUser(), not getSession()
+
+Symptom: after ~1 hour, navigating to a page (e.g. /hr) threw **"Not
+authenticated"** in `requireUser`, while the (client-cached) sidebar still
+showed the user logged in. Cause: `middleware.ts` used `supabase.auth.getSession()`,
+which only reads the cookie and does **not** refresh an expired access token.
+The expired token slipped past middleware, then `auth.getUser()` in server
+components/actions rejected it. Fix: middleware now calls `auth.getUser()`, which
+validates AND refreshes the token, persisting the new cookies via the `setAll`
+handler. Do not revert to `getSession()` here. (Per Supabase SSR guidance: always
+use getUser in middleware/server; never trust getSession for auth decisions.)
+
+---
+
 ## 2026-06-23 — Slack HR Console tab + runtime toggles
 
 Builds on the Slack bot. Requires migration `019_slack_settings.sql`
