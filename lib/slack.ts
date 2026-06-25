@@ -21,13 +21,20 @@ export async function slackApi(
   const token = botToken()
   if (!token) return null
   try {
+    // Use form-encoding, not JSON. Slack's read methods (e.g.
+    // users.lookupByEmail) reject a JSON body with `invalid_arguments`; only a
+    // few write methods accept JSON. Form-encoding works for every method we use.
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined && value !== null) params.append(key, String(value))
+    }
     const res = await fetch(`${SLACK_API}/${method}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(body),
+      body: params,
     })
     const json = (await res.json()) as { ok: boolean; error?: string }
     if (!json.ok) {
