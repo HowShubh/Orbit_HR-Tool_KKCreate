@@ -178,17 +178,19 @@ export async function requestCompoff(input: z.infer<typeof RequestCompoffSchema>
  * Calendar data for the comp-off request planner: holidays + the team's
  * off-days for the past months (so the grid mirrors the leave planner), the two
  * comp-off types, and the days the user already requested (to mark them).
+ * Shared by the self planner and the HR on-behalf planner.
  */
-export async function getCompoffPlannerData() {
-  const user = await requireUser()
-  const adminClient = createAdminClient()
+async function buildCompoffPlannerData(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string
+) {
   const startDate = istMonthStart(-6)
   const endDate = istMonthEnd(0)
 
   const { data: memberships } = await adminClient
     .from('team_members')
     .select('team_id, is_primary')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .is('left_at', null)
   const primaryTeamId =
     (memberships ?? []).find((m) => m.is_primary)?.team_id ?? (memberships ?? [])[0]?.team_id ?? null
@@ -202,7 +204,7 @@ export async function getCompoffPlannerData() {
     adminClient
       .from('compoff_grants')
       .select('work_date, type, status')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .gte('work_date', startDate),
   ])
 
@@ -216,6 +218,17 @@ export async function getCompoffPlannerData() {
     compoffTypes,
     existingGrants: grants ?? [],
   }
+}
+
+export async function getCompoffPlannerData() {
+  const user = await requireUser()
+  return buildCompoffPlannerData(createAdminClient(), user.id)
+}
+
+/** HR on-behalf comp-off planner data for a chosen employee. */
+export async function getCompoffPlannerDataForUser(userId: string) {
+  await requireCapability('approve_compoff')
+  return buildCompoffPlannerData(createAdminClient(), userId)
 }
 
 const CompoffDaySchema = z.object({
@@ -310,6 +323,102 @@ export async function requestCompoffPlan(input: z.infer<typeof RequestCompoffPla
       link_url: '/',
       slackDm: true,
       slackText: `*New comp-off request*\n${user.full_name} requested comp-off for:\n${list}`,
+    })
+  }
+
+  revalidatePath('/', 'layout')
+  await revalidateHR()
+  return { count: inserted.length }
+}
+
+const RequestCompoffPlanForUserSchema = RequestCompoffPlanSchema.extend({
+  user_id: z.string().uuid(),
+})
+
+/**
+ * HR grants comp-off to an employee via the calendar. Same rules as the
+ * self-service planner, but added directly as APPROVED (credited immediately,
+ * no manager approval), and the employee + their manager are notified day by day.
+ */
+export async function requestCompoffPlanForUser(
+  input: z.infer<typeof RequestCompoffPlanForUserSchema>
+) {
+  const actor = await requireCapability('approve_compoff')
+  const parsed = RequestCompoffPlanForUserSchema.parse(input)
+  const today = todayIST()
+
+  const days = Array.from(new Map(parsed.days.map((d) => [d.date, d])).values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  )
+  for (const d of days) {
+    if (d.date > today) {
+      throw new ActionError('Comp-off is for work already done — future dates are not allowed.')
+    }
+  }
+
+  const adminClient = createAdminClient()
+  const { data: employee } = await adminClient
+    .from('users')
+    .select('id, full_name, manager_id')
+    .eq('id', parsed.user_id)
+    .maybeSingle()
+  if (!employee) throw new ActionError('Employee not found')
+
+  const { data: existing } = await adminClient
+    .from('compoff_grants')
+    .select('work_date')
+    .eq('user_id', parsed.user_id)
+    .in('work_date', days.map((d) => d.date))
+  const existingDates = new Set((existing ?? []).map((g) => g.work_date))
+  const dup = days.find((d) => existingDates.has(d.date))
+  if (dup) throw new ActionError(`A comp-off entry already exists for ${dup.date}.`)
+
+  const decidedAt = new Date().toISOString()
+  const grants = days.map((d) => ({
+    user_id: parsed.user_id,
+    type: d.type,
+    amount: d.half_day ? 0.5 : 1,
+    work_date: d.date,
+    reason: parsed.reason,
+    manager_id: actor.id,
+    status: 'approved' as const,
+    decided_by: actor.id,
+    decided_at: decidedAt,
+  }))
+
+  const { data: inserted, error } = await adminClient.from('compoff_grants').insert(grants).select('id')
+  if (error || !inserted) throw new ActionError(error?.message ?? 'Comp-off grant failed')
+
+  await writeAudit(actor.id, 'compoff.grant_for_user', 'compoff_grant', 'batch', {
+    after: { user_id: parsed.user_id, count: inserted.length },
+  })
+
+  const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
+  const list = days
+    .map((d) => `${d.date} - ${label(d.type)}${d.half_day ? ' (half day)' : ''}`)
+    .join('\n')
+  const total = days.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
+
+  await notifyUser({
+    user_id: parsed.user_id,
+    type: 'compoff_granted',
+    title: 'Comp-off was added to your balance',
+    body: `${actor.full_name} added ${total} comp-off day(s) to your balance.`,
+    link_url: '/leaves',
+    slackDm: true,
+    slackText: `*Comp-off added to your balance*\n${actor.full_name} added:\n${list}`,
+  })
+
+  const managerId = employee.manager_id
+  if (managerId && managerId !== parsed.user_id && managerId !== actor.id) {
+    await notifyUser({
+      user_id: managerId,
+      type: 'compoff_granted_for_report',
+      title: 'Comp-off was added for your report',
+      body: `${actor.full_name} added ${total} comp-off day(s) for ${employee.full_name}.`,
+      link_url: '/',
+      slackDm: true,
+      slackText: `*Comp-off added for ${employee.full_name}*\n${actor.full_name} added:\n${list}`,
     })
   }
 

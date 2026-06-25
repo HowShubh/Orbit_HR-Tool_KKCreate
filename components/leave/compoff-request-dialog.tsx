@@ -26,12 +26,29 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { getCompoffPlannerData, requestCompoffPlan } from '@/lib/actions/compoff'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  getCompoffPlannerData,
+  getCompoffPlannerDataForUser,
+  requestCompoffPlan,
+  requestCompoffPlanForUser,
+} from '@/lib/actions/compoff'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 
+type OnBehalfConfig = {
+  users: Array<{ id: string; full_name: string; status: string }>
+}
+
 interface Props {
   trigger?: React.ReactNode
+  onBehalf?: OnBehalfConfig
 }
 
 type CompoffType = 'compoff_leave' | 'compoff_wfh'
@@ -52,7 +69,7 @@ function todayIso() {
   return format(new Date(), 'yyyy-MM-dd')
 }
 
-export function CompoffRequestDialog({ trigger }: Props) {
+export function CompoffRequestDialog({ trigger, onBehalf }: Props) {
   const router = useRouter()
   const { pushToast } = useStore()
   const [open, setOpen] = useState(false)
@@ -62,6 +79,7 @@ export function CompoffRequestDialog({ trigger }: Props) {
   const [mode, setMode] = useState<CompoffType>('compoff_leave')
   const [selectedDays, setSelectedDays] = useState<SelectedDay[]>([])
   const [reason, setReason] = useState('')
+  const [targetUserId, setTargetUserId] = useState('')
   const [isPending, startTransition] = useTransition()
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -76,17 +94,29 @@ export function CompoffRequestDialog({ trigger }: Props) {
     if (noticeTimer.current) clearTimeout(noticeTimer.current)
   }, [])
 
+  // HR mode: reload when the chosen employee changes.
+  useEffect(() => {
+    if (!onBehalf) return
+    setData(null)
+    setSelectedDays([])
+    setNotice(null)
+  }, [targetUserId, onBehalf])
+
   useEffect(() => {
     if (!open || data || loading) return
+    if (onBehalf && !targetUserId) return
     setLoading(true)
-    getCompoffPlannerData()
+    const request = onBehalf
+      ? getCompoffPlannerDataForUser(targetUserId)
+      : getCompoffPlannerData()
+    request
       .then(setData)
       .catch((err) => {
         const msg = err instanceof Error ? err.message : 'Failed to load comp-off planner'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
       })
       .finally(() => setLoading(false))
-  }, [open, data, loading, pushToast])
+  }, [open, data, loading, pushToast, onBehalf, targetUserId])
 
   function reset() {
     setSelectedDays([])
@@ -95,6 +125,7 @@ export function CompoffRequestDialog({ trigger }: Props) {
     setCursor(new Date())
     setNotice(null)
     setData(null)
+    setTargetUserId('')
   }
 
   function handleOpenChange(v: boolean) {
@@ -172,22 +203,31 @@ export function CompoffRequestDialog({ trigger }: Props) {
   }
 
   const total = selectedDays.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
-  const canSubmit = selectedDays.length > 0 && reason.trim().length > 0 && !isPending
+  const canSubmit =
+    selectedDays.length > 0 &&
+    reason.trim().length > 0 &&
+    !isPending &&
+    (!onBehalf || Boolean(targetUserId))
 
   function handleSubmit() {
     if (!canSubmit) return
+    const days = selectedDays.map((d) => ({ date: d.date, type: d.type, half_day: d.half_day }))
     startTransition(async () => {
       try {
-        const result = await requestCompoffPlan({
-          days: selectedDays.map((d) => ({ date: d.date, type: d.type, half_day: d.half_day })),
-          reason: reason.trim(),
+        const result = onBehalf
+          ? await requestCompoffPlanForUser({ user_id: targetUserId, days, reason: reason.trim() })
+          : await requestCompoffPlan({ days, reason: reason.trim() })
+        pushToast({
+          title: onBehalf
+            ? `Comp-off added for ${result.count} day(s)`
+            : `Comp-off requested for ${result.count} day(s)`,
+          variant: 'success',
         })
-        pushToast({ title: `Comp-off requested for ${result.count} day(s)`, variant: 'success' })
         setOpen(false)
         reset()
         router.refresh()
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to request comp-off'
+        const msg = err instanceof Error ? err.message : 'Failed to submit comp-off'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
       }
     })
@@ -205,10 +245,34 @@ export function CompoffRequestDialog({ trigger }: Props) {
       </DialogTrigger>
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-x-hidden overflow-y-auto p-3 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Request Comp-off</DialogTitle>
+          <DialogTitle>{onBehalf ? 'Add comp-off for an employee' : 'Request Comp-off'}</DialogTitle>
         </DialogHeader>
 
-        {loading || !data ? (
+        {onBehalf && (
+          <div className="space-y-1.5">
+            <Label>Employee</Label>
+            <Select value={targetUserId} onValueChange={setTargetUserId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select an employee…" />
+              </SelectTrigger>
+              <SelectContent>
+                {onBehalf.users
+                  .filter((u) => u.status === 'active')
+                  .map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.full_name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {onBehalf && !targetUserId ? (
+          <div className="flex min-h-[380px] items-center justify-center text-sm text-muted-foreground">
+            Select an employee to open their calendar.
+          </div>
+        ) : loading || !data ? (
           <div className="flex min-h-[380px] items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             Loading calendar…
@@ -381,7 +445,9 @@ export function CompoffRequestDialog({ trigger }: Props) {
             Cancel
           </Button>
           <Button type="button" disabled={!canSubmit} onClick={handleSubmit}>
-            {isPending ? 'Submitting…' : `Request ${total} comp-off day(s)`}
+            {isPending
+              ? 'Submitting…'
+              : `${onBehalf ? 'Add' : 'Request'} ${total} comp-off day(s)`}
           </Button>
         </DialogFooter>
       </DialogContent>

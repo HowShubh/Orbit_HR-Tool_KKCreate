@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { decideCompoff } from '@/lib/actions/compoff'
+import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Tables } from '@/lib/supabase/database.types'
@@ -80,6 +81,15 @@ export function CompoffTab({ grants, users }: Props) {
   return (
     <Card>
       <CardContent className="space-y-5 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">Comp-off</div>
+          {isPrivileged && (
+            <CompoffRequestDialog
+              onBehalf={{ users }}
+              trigger={<Button size="sm">Add comp-off</Button>}
+            />
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard label="Pending" value={pending.length} tone="warning" />
           <StatCard label="Approved" value={approved.length} tone="success" />
