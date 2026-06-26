@@ -97,11 +97,10 @@ export async function getDashboardData(
   let orgAnniversaries30: WorkAnniversary[] = []
 
   // Personal-team context (My Team / My Status / This Week Schedule / Daily Team
-  // Overview) is rendered for employees, team leads, and HR, so compute it for
-  // all three. The team set is their member teams unioned with the teams they
-  // lead — the latter covers leads who aren't listed as members of their team.
-  // (Founders still use the org-wide management layout, so skip the work there.)
-  if (currentUserRole !== 'founder') {
+  // Overview) is rendered for every role now, so compute it for all of them. The
+  // team set is their member teams unioned with the teams they lead — the latter
+  // covers leads/founders who aren't listed as members of their own team.
+  {
     const { data: myMemberships } = await adminClient
       .from('team_members')
       .select('team_id, is_primary')

@@ -2,7 +2,7 @@
 
 import { type ComponentType, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { addDays, differenceInDays, format, parseISO, startOfWeek } from 'date-fns'
+import { addDays, format, parseISO, startOfWeek } from 'date-fns'
 import {
   BriefcaseBusiness,
   Building2,
@@ -134,107 +134,17 @@ interface Props {
 export function DashboardClient({ currentUser, data }: Props) {
   const greeting = greet()
   const today = format(new Date(), 'EEEE, MMM d')
-  const role = currentUser.role
 
-  const subtitle =
-    role === 'employee'
-      ? "Here's what's happening with your work this week."
-      : role === 'team_lead'
-      ? "Here's how your team is doing today."
-      : "Here's what's happening across the organization today."
-
-  const isHROrAbove = role === 'hr' || role === 'founder'
-  const isTeamLead = role === 'team_lead' || isHROrAbove
-
-  // Employees, team leads, and HR get the rich personal dashboard (My Status,
-  // schedule, My Team, etc.). Team leads also see their team's upcoming leaves;
-  // HR additionally gets an org-wide "Everyone" card. Founders keep the
-  // org-wide management layout for now.
-  if (role === 'employee' || role === 'team_lead' || role === 'hr') {
-    return (
-      <PersonalDashboard
-        currentUser={currentUser}
-        data={data}
-        greeting={greeting}
-        todayLabel={today}
-      />
-    )
-  }
-
+  // Every role gets the rich personal dashboard. Team leads also see their
+  // team's upcoming leaves; HR and founders additionally get the org-wide
+  // Daily Org Overview (next 30 days) and an org-scoped leaves view.
   return (
-    <>
-      <Topbar
-        title={`${greeting}, ${currentUser.full_name.split(' ')[0]} 👋`}
-        subtitle={subtitle}
-      />
-
-      <div className="px-5 lg:px-8 py-5 space-y-5">
-        {/* Action bar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-[13px] text-muted-foreground">
-            <span className="font-semibold text-foreground">{today}</span> · FY {FISCAL_YEAR_LABEL}
-          </div>
-          <div className="flex items-center gap-2">
-            <CompoffRequestDialog
-              trigger={
-                <Button variant="outline" size="sm">
-                  <Sparkles className="h-4 w-4" />
-                  Request comp-off
-                </Button>
-              }
-            />
-            <LeaveFormDialog
-              trigger={
-                <Button size="sm">
-                  <Plus className="h-4 w-4" />
-                  Apply for leave
-                </Button>
-              }
-            />
-          </div>
-        </div>
-
-        {/* Cards grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Who's out today */}
-          <WhosOutTodayCard leaves={data.leavesToday} />
-
-          {/* My balances */}
-          <MyBalancesCard
-            balances={data.myBalances}
-            compoffBalances={data.myCompoffBalance}
-            leaveTypes={data.leaveTypes}
-          />
-
-          {/* Upcoming holidays */}
-          <HolidaysCard holidays={data.upcomingHolidays} />
-
-          {/* Upcoming (mine) */}
-          <UpcomingMineCard leaves={data.upcomingMine} />
-
-          {/* Upcoming (org-wide) — founders see the whole company here. */}
-          {isTeamLead && (
-            <UpcomingTeamCard leaves={data.upcomingOrg} />
-          )}
-
-          {/* Pending approvals */}
-          {data.pendingApprovalRequests.length > 0 && (
-            <Card className="border-amber-200 bg-amber-50/50 lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-amber-900">Leave Approvals</CardTitle>
-                <Badge variant="warning">{data.pendingApprovalRequests.length}</Badge>
-              </CardHeader>
-              <CardContent>
-                <ApprovalQueueClient initialRequests={data.pendingApprovalRequests} />
-              </CardContent>
-            </Card>
-          )}
-          {data.pendingApprovalsForMe.length > 0 && (
-            <PendingApprovalsCard approvals={data.pendingApprovalsForMe} />
-          )}
-        </div>
-      </div>
-    </>
+    <PersonalDashboard
+      currentUser={currentUser}
+      data={data}
+      greeting={greeting}
+      todayLabel={today}
+    />
   )
 }
 
@@ -841,39 +751,6 @@ function MyTeamReferenceCard({
   )
 }
 
-function WhosOutTodayCard({ leaves }: { leaves: DashboardData['leavesToday'] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Who's Out Today</CardTitle>
-        {leaves.length > 0 && (
-          <Badge variant="warning">{leaves.length}</Badge>
-        )}
-      </CardHeader>
-      <CardContent>
-        {leaves.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Everyone is in today 🎉</p>
-        ) : (
-          <div className="space-y-3">
-            {leaves.slice(0, 6).map((leave) => (
-              <div key={leave.id} className="flex items-center gap-3">
-                <Avatar name={leave.user_full_name} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
-                </div>
-                <TypePill type={leave.requested_type ?? leave.type} label={leave.type_name} />
-              </div>
-            ))}
-            {leaves.length > 6 && (
-              <p className="text-[12px] text-muted-foreground">+{leaves.length - 6} more</p>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 function MyBalancesCard({
   balances,
   compoffBalances,
@@ -995,45 +872,6 @@ function UpcomingTeamCard({ leaves }: { leaves: DashboardData['upcomingTeam'] })
             {leaves.length > 6 && (
               <p className="text-[12px] text-muted-foreground">+{leaves.length - 6} more</p>
             )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function HolidaysCard({ holidays }: { holidays: DashboardData['upcomingHolidays'] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Upcoming Holidays</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {holidays.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No holidays in the next 30 days.</p>
-        ) : (
-          <div className="space-y-2.5">
-            {holidays.map((h) => {
-              const daysAway = differenceInDays(parseISO(h.date), new Date())
-              return (
-                <div key={h.id} className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg bg-orange-50 text-orange-700">
-                    <span className="text-[10px] font-bold uppercase leading-none">
-                      {format(parseISO(h.date), 'MMM')}
-                    </span>
-                    <span className="text-[14px] font-bold leading-none">
-                      {format(parseISO(h.date), 'd')}
-                    </span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13.5px] font-medium truncate">{h.name}</div>
-                    <div className="text-[11.5px] text-muted-foreground">
-                      {daysAway === 0 ? 'Today' : daysAway === 1 ? 'Tomorrow' : `In ${daysAway} days`}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
           </div>
         )}
       </CardContent>
