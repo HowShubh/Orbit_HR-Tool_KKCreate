@@ -6,8 +6,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { Upload } from 'lucide-react'
-import { decideCompoff } from '@/lib/actions/compoff'
+import { Upload, Trash2 } from 'lucide-react'
+import { decideCompoff, removeCompoffGrant } from '@/lib/actions/compoff'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
 import { CompoffCsvImport } from './compoff-csv-import'
 import { useStore } from '@/lib/store'
@@ -45,6 +45,7 @@ export function CompoffTab({ grants, users }: Props) {
   const [confirm, setConfirm] = useState<{ id: string; decision: 'approved' | 'rejected' } | null>(null)
 
   const [csvOpen, setCsvOpen] = useState(false)
+  const [removeId, setRemoveId] = useState<string | null>(null)
 
   const pending = grants.filter((g) => g.status === 'pending')
   const approved = grants.filter((g) => g.status === 'approved')
@@ -78,6 +79,19 @@ export function CompoffTab({ grants, users }: Props) {
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
+      }
+    })
+  }
+
+  function handleRemove(grantId: string) {
+    setRemoveId(null)
+    startTransition(async () => {
+      try {
+        await removeCompoffGrant(grantId)
+        pushToast({ title: 'Comp-off removed', body: 'Balance refunded.', variant: 'success' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed'
+        pushToast({ title: 'Could not remove', body: msg, variant: 'error' })
       }
     })
   }
@@ -223,6 +237,41 @@ export function CompoffTab({ grants, users }: Props) {
                     <Badge variant={g.status === 'approved' ? 'success' : 'muted'} className="capitalize">
                       {g.status}
                     </Badge>
+                    {isPrivileged && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-rose-600 hover:bg-rose-50"
+                        disabled={isPending}
+                        onClick={() => setRemoveId(g.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </Button>
+                    )}
+
+                    {removeId === g.id && (
+                      <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-lg bg-rose-50 px-3 py-2.5 text-[12.5px] text-rose-900 ring-1 ring-rose-200">
+                        <span>
+                          Remove this comp-off entry
+                          {g.status === 'approved' ? ' and refund the credited balance?' : '?'} This
+                          can&rsquo;t be undone.
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="sm" disabled={isPending} onClick={() => setRemoveId(null)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-rose-600 hover:bg-rose-700"
+                            disabled={isPending}
+                            onClick={() => handleRemove(g.id)}
+                          >
+                            {isPending ? 'Removing…' : 'Yes, remove'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

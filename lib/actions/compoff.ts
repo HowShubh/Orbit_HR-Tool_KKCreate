@@ -37,6 +37,7 @@ export async function decideCompoff(
     await requireCapability('approve_compoff', grant.user_id)
   }
 
+  // Compare-and-swap on status so a double-click can't decide (and credit) twice.
   const { data: after, error } = await adminClient
     .from('compoff_grants')
     .update({
@@ -45,10 +46,12 @@ export async function decideCompoff(
       decided_by: actor.id,
     })
     .eq('id', grantId)
+    .eq('status', 'pending')
     .select()
-    .single()
+    .maybeSingle()
 
   if (error) throw new ActionError(error.message)
+  if (!after) throw new ActionError('This comp-off was just decided by someone else.')
 
   await writeAudit(actor.id, `compoff.${decision}`, 'compoff_grant', grantId, {
     before: grant,
@@ -71,6 +74,54 @@ export async function decideCompoff(
   revalidatePath('/', 'layout')
   await revalidateHR()
   return after
+}
+
+/**
+ * Remove a comp-off grant and refund the credit it added, atomically (audit
+ * finding #5). HR-only. The SQL function blocks removal of an approved grant
+ * whose credit has already been spent, so balances can never go negative; in
+ * that case HR is told to handle it deliberately.
+ */
+export async function removeCompoffGrant(grantId: string) {
+  const actor = await requireCapability('approve_compoff')
+  const adminClient = createAdminClient()
+
+  const { data: grant } = await adminClient
+    .from('compoff_grants')
+    .select('*')
+    .eq('id', grantId)
+    .single()
+  if (!grant) throw new ActionError('Comp-off grant not found')
+
+  const { error } = await adminClient.rpc('remove_compoff_grant_atomic', {
+    p_grant_id: grantId,
+    p_actor: actor.id,
+  })
+  if (error) {
+    const m = error.message ?? ''
+    if (m.includes('COMPOFF_ALREADY_USED')) {
+      throw new ActionError(
+        'This comp-off has already been spent, so it cannot be removed automatically. Adjust the balance with HR first.'
+      )
+    }
+    if (m.includes('GRANT_NOT_FOUND')) throw new ActionError('Comp-off grant not found.')
+    throw new ActionError(m || 'Could not remove comp-off grant')
+  }
+
+  await writeAudit(actor.id, 'compoff.remove', 'compoff_grant', grantId, { before: grant })
+  await notifyUser({
+    user_id: grant.user_id,
+    type: 'compoff_removed',
+    title: 'A comp-off entry was removed',
+    body: `${actor.full_name} removed a comp-off entry (${grant.work_date}, ${grant.amount} day(s)) from your record.`,
+    link_url: '/leaves',
+    related_entity_type: 'compoff_grant',
+    related_entity_id: grantId,
+  })
+
+  revalidatePath('/', 'layout')
+  await revalidateHR()
+  return { ok: true }
 }
 
 const RequestCompoffSchema = z.object({

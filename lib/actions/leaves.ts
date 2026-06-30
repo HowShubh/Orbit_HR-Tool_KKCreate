@@ -321,30 +321,6 @@ async function requireLeaveApprover(
   throw new ActionError('You do not have permission to approve this leave request.', 'forbidden')
 }
 
-async function ensureBalance(
-  adminClient: ReturnType<typeof createAdminClient>,
-  userId: string,
-  type: string,
-  daysNeeded: number,
-  policies: LeaveTypePolicy[]
-) {
-  const year = getYearForType(type, policies)
-  const { data: bal } = await adminClient
-    .from('leave_balances')
-    .select('allocated, used')
-    .eq('user_id', userId)
-    .eq('leave_year', year)
-    .eq('type', type)
-    .maybeSingle()
-
-  const remaining = (bal?.allocated ?? 0) - (bal?.used ?? 0)
-  if (remaining < daysNeeded) {
-    throw new ActionError(
-      `Insufficient ${leaveTypeLabel(type, policies)} balance: you have ${remaining} day(s) available but need ${daysNeeded}. Contact HR for help.`
-    )
-  }
-}
-
 async function getBalanceRemaining(
   adminClient: ReturnType<typeof createAdminClient>,
   userId: string
@@ -450,6 +426,10 @@ function buildDayList(
     .join('\n')
 }
 
+// Atomic balance change. Delegates to the apply_balance_delta SQL function so the
+// increment is a single statement (no lost updates under concurrency). Used by the
+// create flows; the approve/delete flows go through their own atomic RPCs which
+// also flip status in the same transaction.
 async function bumpUsed(
   adminClient: ReturnType<typeof createAdminClient>,
   userId: string,
@@ -458,29 +438,31 @@ async function bumpUsed(
   policies: LeaveTypePolicy[]
 ) {
   const year = getYearForType(type, policies)
-  const { data: bal } = await adminClient
-    .from('leave_balances')
-    .select('id, allocated, used')
-    .eq('user_id', userId)
-    .eq('leave_year', year)
-    .eq('type', type)
-    .maybeSingle()
+  const { error } = await adminClient.rpc('apply_balance_delta', {
+    p_user_id: userId,
+    p_leave_year: year,
+    p_type: type,
+    p_delta: delta,
+    p_enforce: false,
+  })
+  if (error) throw new ActionError(error.message)
+}
 
-  if (bal) {
-    await adminClient
-      .from('leave_balances')
-      .update({ used: Number(bal.used) + delta })
-      .eq('id', bal.id)
-  } else {
-    // Insert with allocated=0; this happens when HR creates on behalf and balance row missing
-    await adminClient.from('leave_balances').insert({
-      user_id: userId,
-      leave_year: year,
-      type,
-      allocated: 0,
-      used: delta,
-    })
+// Map the RAISE messages from the atomic leave RPCs to friendly errors.
+function rpcErrorToAction(message: string | undefined, fallback: string): ActionError {
+  const m = message ?? ''
+  if (m.includes('INSUFFICIENT_BALANCE')) {
+    const type = m.split('INSUFFICIENT_BALANCE:')[1]?.split(/\s/)[0]
+    return new ActionError(
+      `Insufficient ${type ? type.replace(/_/g, ' ') : 'leave'} balance for this approval.`
+    )
   }
+  if (m.includes('ALREADY_PROCESSED')) {
+    return new ActionError('This request was just actioned by someone else. Refresh and try again.')
+  }
+  if (m.includes('LEAVE_NOT_FOUND')) return new ActionError('Leave not found.')
+  if (m.includes('NOT_DELETABLE')) return new ActionError('This leave can no longer be deleted.')
+  return new ActionError(m || fallback)
 }
 
 // Shared planner-data assembly for a given user + date window. Used by the
@@ -1503,34 +1485,19 @@ async function approveLeaveRequestById(
   for (const leave of requestLeaves) {
     totals.set(leave.type, (totals.get(leave.type) ?? 0) + Number(leave.days_deducted))
   }
-  for (const [type, days] of totals.entries()) {
-    await ensureBalance(adminClient, firstLeave.user_id, type, days, policies)
-  }
 
-  const decidedAt = new Date().toISOString()
-  const [{ data: updatedRequest, error: requestError }, { data: updatedLeaves, error: leavesError }] =
-    await Promise.all([
-      adminClient
-        .from('leave_requests')
-        .update({ status: 'active', decided_by: actor.id, decided_at: decidedAt })
-        .eq('id', requestId)
-        .select()
-        .single(),
-      adminClient
-        .from('leaves')
-        .update({ status: 'active', decided_by: actor.id, decided_at: decidedAt })
-        .eq('request_id', requestId)
-        .eq('status', 'pending')
-        .select(),
-    ])
+  // Atomic: flip the whole request pending -> active and deduct balance per type,
+  // enforcing non-negative remaining, all in one transaction.
+  const { error: rpcError } = await adminClient.rpc('approve_leave_atomic', {
+    p_leave_id: firstLeave.id,
+    p_actor: actor.id,
+  })
+  if (rpcError) throw rpcErrorToAction(rpcError.message, 'Approve leave request failed')
 
-  if (requestError || leavesError || !updatedRequest || !updatedLeaves) {
-    throw new ActionError(requestError?.message ?? leavesError?.message ?? 'Approve leave request failed')
-  }
-
-  for (const [type, days] of totals.entries()) {
-    await bumpUsed(adminClient, firstLeave.user_id, type, days, policies)
-  }
+  const [{ data: updatedRequest }, { data: updatedLeaves }] = await Promise.all([
+    adminClient.from('leave_requests').select('*').eq('id', requestId).single(),
+    adminClient.from('leaves').select('*').eq('request_id', requestId),
+  ])
 
   await writeAudit(actor.id, 'leave_request.approve', 'leave_request', requestId, {
     before: requestLeaves,
@@ -1646,22 +1613,17 @@ export async function approveLeave(leaveId: string) {
     leave.id,
     ['active']
   )
-  await ensureBalance(adminClient, leave.user_id, leave.type, Number(leave.days_deducted), policies)
 
-  const { data: updated, error } = await adminClient
-    .from('leaves')
-    .update({
-      status: 'active',
-      decided_by: actor.id,
-      decided_at: new Date().toISOString(),
-    })
-    .eq('id', leaveId)
-    .select()
-    .single()
+  // Atomic: flip pending -> active and deduct balance (enforced) in one transaction.
+  const { error: rpcError } = await adminClient.rpc('approve_leave_atomic', {
+    p_leave_id: leaveId,
+    p_actor: actor.id,
+  })
+  if (rpcError) throw rpcErrorToAction(rpcError.message, 'Approve leave failed')
 
-  if (error || !updated) throw new ActionError(error?.message ?? 'Approve leave failed')
+  const { data: updated } = await adminClient.from('leaves').select('*').eq('id', leaveId).single()
+  if (!updated) throw new ActionError('Approve leave failed')
 
-  await bumpUsed(adminClient, leave.user_id, leave.type, Number(leave.days_deducted), policies)
   await writeAudit(actor.id, 'leave.approve', 'leave', leaveId, { before: leave, after: updated })
   await notifyUser({
     user_id: leave.user_id,
@@ -1763,15 +1725,18 @@ export async function requestLeaveDeletion(leaveId: string) {
     throw new ActionError('No leave deletion approver is available. Contact HR or your founder.')
   }
 
+  // Compare-and-swap so two concurrent requests can't both fire reviewer DMs.
   const { data: updated, error } = await adminClient
     .from('leaves')
     .update({ status: 'delete_requested' })
     .eq('id', leaveId)
+    .eq('status', 'active')
     .select()
-    .single()
+    .maybeSingle()
 
-  if (error || !updated) {
-    throw new ActionError(error?.message ?? 'Request leave deletion failed')
+  if (error) throw new ActionError(error.message)
+  if (!updated) {
+    throw new ActionError('This leave was just updated. Refresh and try again.')
   }
 
   const policies = await getLeaveTypePolicies(adminClient)
@@ -1813,22 +1778,17 @@ export async function approveLeaveDeletion(leaveId: string) {
 
   const actor = await requireLeaveApprover(adminClient, leave.user_id)
   const policies = await getLeaveTypePolicies(adminClient)
-  const { data: updated, error } = await adminClient
-    .from('leaves')
-    .update({
-      status: 'deleted',
-      deleted_by: actor.id,
-      deleted_at: new Date().toISOString(),
-    })
-    .eq('id', leaveId)
-    .select()
-    .single()
 
-  if (error || !updated) {
-    throw new ActionError(error?.message ?? 'Approve leave deletion failed')
-  }
+  // Atomic: flip delete_requested -> deleted and refund balance in one transaction.
+  const { error: rpcError } = await adminClient.rpc('mark_leave_deleted_atomic', {
+    p_leave_id: leaveId,
+    p_actor: actor.id,
+  })
+  if (rpcError) throw rpcErrorToAction(rpcError.message, 'Approve leave deletion failed')
 
-  await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted), policies)
+  const { data: updated } = await adminClient.from('leaves').select('*').eq('id', leaveId).single()
+  if (!updated) throw new ActionError('Approve leave deletion failed')
+
   await writeAudit(actor.id, 'leave.delete_approve', 'leave', leaveId, {
     before: leave,
     after: updated,
@@ -1930,21 +1890,13 @@ export async function deleteLeave(leaveId: string) {
     )
   }
 
-  const { error } = await adminClient
-    .from('leaves')
-    .update({
-      status: 'deleted',
-      deleted_by: user.id,
-      deleted_at: new Date().toISOString(),
-    })
-    .eq('id', leaveId)
-
-  if (error) throw new ActionError(error.message)
-
-  if (leave.status === 'active' || leave.status === 'delete_requested') {
-    // Pending requests have not consumed balance yet.
-    await bumpUsed(adminClient, leave.user_id, leave.type, -Number(leave.days_deducted), policies)
-  }
+  // Atomic: flip to deleted and refund balance (only if it had consumed it) in
+  // one transaction, compare-and-swapped so the refund happens exactly once.
+  const { error: rpcError } = await adminClient.rpc('mark_leave_deleted_atomic', {
+    p_leave_id: leaveId,
+    p_actor: user.id,
+  })
+  if (rpcError) throw rpcErrorToAction(rpcError.message, 'Delete leave failed')
 
   await writeAudit(user.id, 'leave.delete', 'leave', leaveId, { before: leave })
 

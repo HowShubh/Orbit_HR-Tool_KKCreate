@@ -504,6 +504,32 @@ export type Database = {
         Args: { p_user_id: string; p_new_role: string }
         Returns: void
       }
+      leave_balance_year: {
+        Args: { p_type: string }
+        Returns: number
+      }
+      apply_balance_delta: {
+        Args: {
+          p_user_id: string
+          p_leave_year: number
+          p_type: string
+          p_delta: number
+          p_enforce?: boolean
+        }
+        Returns: undefined
+      }
+      approve_leave_atomic: {
+        Args: { p_leave_id: string; p_actor: string }
+        Returns: number
+      }
+      mark_leave_deleted_atomic: {
+        Args: { p_leave_id: string; p_actor: string }
+        Returns: string
+      }
+      remove_compoff_grant_atomic: {
+        Args: { p_grant_id: string; p_actor: string }
+        Returns: undefined
+      }
     }
   }
 }
