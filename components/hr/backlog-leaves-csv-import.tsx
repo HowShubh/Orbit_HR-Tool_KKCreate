@@ -151,12 +151,21 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
   }
 
   function downloadTemplate() {
+    // Every combination, so the uploader sees the full schema:
+    // 4 types x {full / first_half / second_half} + multi-day + optional reason.
     const csv =
       'email,type,date,half_day,reason\n' +
-      'employee@kkcreate.in,leave,2026-05-04,,Full-day leave\n' +
-      'employee@kkcreate.in,wfh,2026-05-05,,Full-day work from home\n' +
-      'employee@kkcreate.in,leave,2026-05-06,first_half,Half-day leave (morning off)\n' +
-      'employee@kkcreate.in,leave,2026-05-07,second_half,Half-day leave (afternoon off)\n'
+      'employee@kkcreate.in,leave,2026-06-02,,Full-day leave\n' +
+      'employee@kkcreate.in,leave,2026-06-03,first_half,Half-day leave first_half = morning off\n' +
+      'employee@kkcreate.in,leave,2026-06-04,second_half,Half-day leave second_half = afternoon off\n' +
+      'employee@kkcreate.in,wfh,2026-06-05,,Full-day WFH\n' +
+      'employee@kkcreate.in,wfh,2026-06-08,first_half,Half-day WFH morning\n' +
+      'employee@kkcreate.in,wfh,2026-06-09,second_half,Half-day WFH afternoon\n' +
+      'employee@kkcreate.in,leave,2026-06-11,,(reason can be blank for leaves)\n' +
+      'employee@kkcreate.in,leave,2026-06-15,,Multi-day leave is one row per day (day 1 of 2)\n' +
+      'employee@kkcreate.in,leave,2026-06-16,,Multi-day leave is one row per day (day 2 of 2)\n' +
+      'employee@kkcreate.in,compoff_leave,2026-06-18,,Comp-off leave taken (grant it first via the Comp-off CSV)\n' +
+      'employee@kkcreate.in,compoff_wfh,2026-06-19,,Comp-off WFH taken (grant it first via the Comp-off CSV)\n'
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -230,12 +239,16 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
             </div>
           </div>
 
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Header: <code>email,type,date,half_day,reason</code>. <strong>One row = one day</strong> (a 10-day
-            leave is 10 rows). <code>date</code> is YYYY-MM-DD. <code>type</code> is a leave-type key (e.g.
-            leave, wfh, compoff_leave). <code>half_day</code> is optional (first_half / second_half). Imported
-            leaves are active and deduct balance. Holidays and weekly-off days are blocked; WFH on an
-            already-WFH day is flagged as a warning you can override.
+          <div className="space-y-1 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div>Header: <code>email,type,date,half_day,reason</code>. <strong>One row = one day</strong> (a 10-day leave is 10 rows).</div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              <li><code>email</code> — the person&rsquo;s login email (must be an active user).</li>
+              <li><code>type</code> — one of <code>leave</code>, <code>wfh</code>, <code>compoff_leave</code>, <code>compoff_wfh</code>.</li>
+              <li><code>date</code> — the single day, <code>YYYY-MM-DD</code>.</li>
+              <li><code>half_day</code> — blank for a full day, or <code>first_half</code> / <code>second_half</code> for a half day.</li>
+              <li><code>reason</code> — optional (can be left blank).</li>
+            </ul>
+            <div>Imported leaves are active and deduct balance. Holidays and weekly-off days are blocked; WFH on an already-WFH day is a warning you can override. <code>compoff_*</code> rows need the comp-off granted first (via the Comp-off CSV).</div>
           </div>
 
           <div className="space-y-2">

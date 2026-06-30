@@ -154,10 +154,13 @@ export function CompoffCsvImport({ open, onOpenChange, users }: Props) {
   }
 
   function downloadTemplate() {
+    // Every combination: 2 types x {full / half}. reason is required.
     const csv =
       'email,type,work_date,half_day,reason\n' +
-      'employee@kkcreate.in,compoff_leave,2026-05-25,,Full-day comp-off (worked Sunday)\n' +
-      'employee@kkcreate.in,compoff_wfh,2026-05-18,yes,Half-day comp-off (half_day = yes)\n'
+      'employee@kkcreate.in,compoff_leave,2026-06-07,,Full-day comp-off leave (worked Sunday)\n' +
+      'employee@kkcreate.in,compoff_leave,2026-06-13,yes,Half-day comp-off leave (half_day = yes is 0.5 day)\n' +
+      'employee@kkcreate.in,compoff_wfh,2026-06-14,,Full-day comp-off WFH (worked Sunday)\n' +
+      'employee@kkcreate.in,compoff_wfh,2026-06-21,yes,Half-day comp-off WFH (half_day = yes is 0.5 day)\n'
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -220,11 +223,16 @@ export function CompoffCsvImport({ open, onOpenChange, users }: Props) {
             </div>
           </div>
 
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Header: <code>email,type,work_date,half_day,reason</code>. <code>work_date</code> is the day
-            worked (YYYY-MM-DD, not in the future). <code>type</code> is <code>compoff_leave</code> or
-            <code> compoff_wfh</code>. <code>half_day</code> is optional (yes = 0.5 day); <code>reason</code> is
-            required. Grants are credited to the balance immediately and the employee + manager are notified.
+          <div className="space-y-1 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div>Header: <code>email,type,work_date,half_day,reason</code>. One row = one earned comp-off.</div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              <li><code>email</code> — the person&rsquo;s login email (must be an active user).</li>
+              <li><code>type</code> — <code>compoff_leave</code> or <code>compoff_wfh</code>.</li>
+              <li><code>work_date</code> — the day they actually worked, <code>YYYY-MM-DD</code> (today or earlier, never future).</li>
+              <li><code>half_day</code> — blank for a full day (1), or <code>yes</code> for a half day (0.5).</li>
+              <li><code>reason</code> — required.</li>
+            </ul>
+            <div>Grants are credited to the balance immediately and the employee + manager are notified. Only one comp-off per person per work_date.</div>
           </div>
 
           <div className="space-y-2">
