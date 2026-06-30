@@ -1,6 +1,9 @@
-email,type,start_date,end_date,half_day,reason
-ananya@kkcreate.in,leave,2026-05-04,2026-05-06,,Family function
-rahul@kkcreate.in,wfh,2026-05-11,2026-05-11,,Plumber visit
-ananya@kkcreate.in,leave,2026-05-20,2026-05-20,first_half,Doctor appointment (half day)
-pranshu@kkcreate.in,compoff_leave,2026-06-01,2026-06-01,,Comp-off taken
-rahul@kkcreate.in,leave,2026-06-15,2026-06-16,,Personal
+email,type,date,half_day,reason
+ananya@kkcreate.in,leave,2026-05-04,,Family function
+ananya@kkcreate.in,leave,2026-05-05,,Family function
+ananya@kkcreate.in,leave,2026-05-06,,Family function
+rahul@kkcreate.in,wfh,2026-05-11,,Plumber visit
+ananya@kkcreate.in,leave,2026-05-20,first_half,Doctor appointment (half day)
+pranshu@kkcreate.in,compoff_leave,2026-06-01,,Comp-off taken
+rahul@kkcreate.in,leave,2026-06-15,,Personal
+rahul@kkcreate.in,leave,2026-06-16,,Personal

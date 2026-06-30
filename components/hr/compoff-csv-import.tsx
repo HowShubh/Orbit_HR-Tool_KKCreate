@@ -156,8 +156,8 @@ export function CompoffCsvImport({ open, onOpenChange, users }: Props) {
   function downloadTemplate() {
     const csv =
       'email,type,work_date,half_day,reason\n' +
-      'employee@kkcreate.in,compoff_leave,2026-05-25,,Worked on Sunday launch\n' +
-      'employee@kkcreate.in,compoff_wfh,2026-05-18,yes,Half day on a holiday\n'
+      'employee@kkcreate.in,compoff_leave,2026-05-25,,Full-day comp-off (worked Sunday)\n' +
+      'employee@kkcreate.in,compoff_wfh,2026-05-18,yes,Half-day comp-off (half_day = yes)\n'
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

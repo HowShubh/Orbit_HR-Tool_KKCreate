@@ -20,15 +20,14 @@ import { cn } from '@/lib/utils'
 import type { UserWithMembership } from '@/lib/queries/users'
 import type { LeaveTypePolicy } from '@/lib/leave-types'
 
-const COLUMNS = ['email', 'type', 'start_date', 'end_date', 'half_day', 'reason'] as const
+const COLUMNS = ['email', 'type', 'date', 'half_day', 'reason'] as const
 type Col = (typeof COLUMNS)[number]
 
 interface Row {
   row: number
   email: string
   type: string
-  start_date: string
-  end_date: string
+  date: string
   half_day: string
   reason: string
 }
@@ -81,7 +80,7 @@ function parseCsv(text: string): Row[] {
   const dataRows = hasHeader ? records.slice(1) : records
   const offset = hasHeader ? 2 : 1
   return dataRows.map((rec, i) => {
-    const r: Row = { row: i + offset, email: '', type: '', start_date: '', end_date: '', half_day: '', reason: '' }
+    const r: Row = { row: i + offset, email: '', type: '', date: '', half_day: '', reason: '' }
     cols.forEach((col, idx) => {
       if (!col) return
       r[col] = rec[idx] ?? ''
@@ -98,6 +97,8 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
   const [csvText, setCsvText] = useState('')
   const [sourceName, setSourceName] = useState('')
   const [importErrors, setImportErrors] = useState<{ row: number; error: string }[]>([])
+  const [importWarnings, setImportWarnings] = useState<{ row: number; warning: string }[]>([])
+  const [needsConfirm, setNeedsConfirm] = useState(false)
   const [importedCount, setImportedCount] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -119,13 +120,9 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
       else if (!emailSet.has(email)) errs.push('email not an active user')
       if (!r.type.trim()) errs.push('type required')
       else if (!typeSet.has(r.type.trim().toLowerCase())) errs.push(`unknown type "${r.type}"`)
-      if (!DATE_RE.test(r.start_date.trim())) errs.push('start_date must be YYYY-MM-DD')
-      if (!DATE_RE.test(r.end_date.trim())) errs.push('end_date must be YYYY-MM-DD')
-      if (DATE_RE.test(r.start_date) && DATE_RE.test(r.end_date) && r.end_date < r.start_date)
-        errs.push('end_date before start_date')
+      if (!DATE_RE.test(r.date.trim())) errs.push('date must be YYYY-MM-DD')
       const half = r.half_day.trim().toLowerCase()
       if (half && half !== 'first_half' && half !== 'second_half') errs.push('half_day: blank/first_half/second_half')
-      else if (half && r.start_date !== r.end_date) errs.push('half_day needs start_date = end_date')
       return { ...r, valid: errs.length === 0, errorSummary: errs.join('; ') }
     })
   }, [rows, emailSet, typeSet])
@@ -138,6 +135,8 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
     setRows(parseCsv(text))
     setSourceName(name)
     setImportErrors([])
+    setImportWarnings([])
+    setNeedsConfirm(false)
     setImportedCount(null)
   }
 
@@ -152,7 +151,12 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
   }
 
   function downloadTemplate() {
-    const csv = 'email,type,start_date,end_date,half_day,reason\nemployee@kkcreate.in,leave,2026-05-04,2026-05-06,,Family function\n'
+    const csv =
+      'email,type,date,half_day,reason\n' +
+      'employee@kkcreate.in,leave,2026-05-04,,Full-day leave\n' +
+      'employee@kkcreate.in,wfh,2026-05-05,,Full-day work from home\n' +
+      'employee@kkcreate.in,leave,2026-05-06,first_half,Half-day leave (morning off)\n' +
+      'employee@kkcreate.in,leave,2026-05-07,second_half,Half-day leave (afternoon off)\n'
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -160,21 +164,30 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
     URL.revokeObjectURL(url)
   }
 
-  function handleImport() {
+  function handleImport(confirm = false) {
     if (!canImport) return
     const payload = validated.map((r) => ({
       __row: String(r.row),
       email: r.email.trim().toLowerCase(),
       type: r.type.trim(),
-      start_date: r.start_date.trim(),
-      end_date: r.end_date.trim(),
+      date: r.date.trim(),
       half_day: r.half_day.trim(),
       reason: r.reason.trim(),
     }))
     startTransition(async () => {
       try {
-        const result = await importBacklogLeavesCsv(payload)
+        const result = await importBacklogLeavesCsv(payload, { confirmWarnings: confirm })
         setImportErrors(result.errors)
+        setImportWarnings(result.warnings)
+        setNeedsConfirm(result.needsConfirm)
+        if (result.needsConfirm) {
+          pushToast({
+            title: 'Review before importing',
+            body: `${result.warnings.length} row(s) look inconsistent`,
+            variant: 'info',
+          })
+          return
+        }
         setImportedCount(result.imported)
         router.refresh()
         pushToast({
@@ -189,7 +202,8 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
   }
 
   function close() {
-    setRows([]); setCsvText(''); setSourceName(''); setImportErrors([]); setImportedCount(null)
+    setRows([]); setCsvText(''); setSourceName('')
+    setImportErrors([]); setImportWarnings([]); setNeedsConfirm(false); setImportedCount(null)
     onOpenChange(false)
   }
 
@@ -217,9 +231,11 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
           </div>
 
           <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Header: <code>email,type,start_date,end_date,half_day,reason</code>. Dates are YYYY-MM-DD.
-            <code>type</code> is a leave-type key (e.g. leave, wfh, compoff_leave). <code>half_day</code> is
-            optional (first_half / second_half, single-day only). Imported leaves are active and deduct balance.
+            Header: <code>email,type,date,half_day,reason</code>. <strong>One row = one day</strong> (a 10-day
+            leave is 10 rows). <code>date</code> is YYYY-MM-DD. <code>type</code> is a leave-type key (e.g.
+            leave, wfh, compoff_leave). <code>half_day</code> is optional (first_half / second_half). Imported
+            leaves are active and deduct balance. Holidays and weekly-off days are blocked; WFH on an
+            already-WFH day is flagged as a warning you can override.
           </div>
 
           <div className="space-y-2">
@@ -227,7 +243,7 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
             <Textarea
               value={csvText}
               onChange={(e) => setCsvText(e.target.value)}
-              placeholder={'email,type,start_date,end_date,half_day,reason\nrahul@kkcreate.in,leave,2026-05-04,2026-05-06,,Family function'}
+              placeholder={'email,type,date,half_day,reason\nrahul@kkcreate.in,leave,2026-05-04,,Family function'}
               rows={4}
               className="font-mono text-xs"
             />
@@ -242,8 +258,7 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
                     <th className="px-3 py-2 font-medium">#</th>
                     <th className="px-3 py-2 font-medium">Email</th>
                     <th className="px-3 py-2 font-medium">Type</th>
-                    <th className="px-3 py-2 font-medium">Start</th>
-                    <th className="px-3 py-2 font-medium">End</th>
+                    <th className="px-3 py-2 font-medium">Date</th>
                     <th className="px-3 py-2 font-medium">Half</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                   </tr>
@@ -254,8 +269,7 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
                       <td className="px-3 py-2 text-muted-foreground">{r.row}</td>
                       <td className="px-3 py-2">{r.email || '—'}</td>
                       <td className="px-3 py-2">{r.type || '—'}</td>
-                      <td className="px-3 py-2 font-mono">{r.start_date || '—'}</td>
-                      <td className="px-3 py-2 font-mono">{r.end_date || '—'}</td>
+                      <td className="px-3 py-2 font-mono">{r.date || '—'}</td>
                       <td className="px-3 py-2">{r.half_day || '—'}</td>
                       <td className="px-3 py-2">
                         {r.valid ? (
@@ -283,6 +297,21 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
             </div>
           )}
 
+          {needsConfirm && importWarnings.length > 0 && importedCount === null && (
+            <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <div className="text-[12px] font-semibold text-amber-800">
+                Possible inconsistencies ({importWarnings.length}) — nothing imported yet
+              </div>
+              {importWarnings.map((w, i) => (
+                <div key={`${w.row}-${i}`} className="text-xs text-amber-800">Row {w.row}: {w.warning}</div>
+              ))}
+              <div className="pt-1 text-[11px] text-amber-700">
+                These don&apos;t block the import (schedules change when people switch teams). Are you sure
+                you want to proceed? Click <strong>Import anyway</strong> below to confirm.
+              </div>
+            </div>
+          )}
+
           {importedCount !== null && importErrors.length === 0 && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
               Imported {importedCount} backlog leave{importedCount !== 1 ? 's' : ''}.
@@ -292,8 +321,16 @@ export function BacklogLeavesCsvImport({ open, onOpenChange, users, leaveTypes }
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={close}>Close</Button>
-          <Button onClick={handleImport} disabled={isPending || !canImport}>
-            {isPending ? 'Importing…' : `Import ${validCount} leave${validCount !== 1 ? 's' : ''}`}
+          <Button
+            onClick={() => handleImport(needsConfirm)}
+            disabled={isPending || !canImport}
+            className={needsConfirm ? 'bg-amber-600 hover:bg-amber-700' : undefined}
+          >
+            {isPending
+              ? 'Importing…'
+              : needsConfirm
+                ? `Import anyway (${importWarnings.length} warning${importWarnings.length !== 1 ? 's' : ''})`
+                : `Import ${validCount} leave${validCount !== 1 ? 's' : ''}`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -108,6 +108,18 @@ function isWfoDayForPattern(date: string, pattern?: string | null) {
   return parseWfoPattern(pattern).has(dayCode(date))
 }
 
+/** Every ISO date from start to end (inclusive). Uses UTC to avoid TZ drift. */
+function eachDateInRange(start: string, end: string): string[] {
+  const out: string[] = []
+  const cur = new Date(`${start}T00:00:00Z`)
+  const last = new Date(`${end}T00:00:00Z`)
+  while (cur <= last) {
+    out.push(cur.toISOString().slice(0, 10))
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
+  return out
+}
+
 function fmtDays(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
@@ -1195,19 +1207,22 @@ export async function backdateLeave(input: z.infer<typeof CreateOnBehalfSchema>)
 const BacklogRowSchema = z.object({
   email: z.string().trim().email('Invalid email').transform((v) => v.toLowerCase()),
   type: z.string().trim().min(1, 'Type required'),
-  start_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'start_date must be YYYY-MM-DD'),
-  end_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'end_date must be YYYY-MM-DD'),
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
   half_day: z.string().trim().optional().default(''),
   reason: z.string().trim().optional().default(''),
 })
 
 /**
  * Bulk-import already-taken (backlog) leaves from a CSV. HR-only (`edit_leaves`).
- * Validates every row first; if any row is invalid nothing is imported. Created
- * leaves are `active` (no approval) and deduct balance. No notifications/Slack —
- * these are historical records. Columns: email,type,start_date,end_date,half_day,reason.
+ * One row = one day (matching the per-day leave log), so a 10-day leave is 10
+ * rows. Validates every row first; if any row is invalid nothing is imported.
+ * Created leaves are `active` (no approval) and deduct balance. No notifications/
+ * Slack — these are historical records. Columns: email,type,date,half_day,reason.
  */
-export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
+export async function importBacklogLeavesCsv(
+  rows: Record<string, string>[],
+  options?: { confirmWarnings?: boolean }
+) {
   const actor = await requireCapability('edit_leaves')
   const adminClient = createAdminClient()
   const policies = await getLeaveTypePolicies(adminClient)
@@ -1233,6 +1248,7 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
     reason: string | null
   }
   const errors: { row: number; error: string }[] = []
+  const warnings: { row: number; warning: string }[] = []
   const prepared: Prepared[] = []
 
   for (let i = 0; i < rows.length; i++) {
@@ -1254,30 +1270,21 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
       errors.push({ row: rowNumber, error: `Unknown leave type: ${d.type}` })
       continue
     }
-    if (d.end_date < d.start_date) {
-      errors.push({ row: rowNumber, error: 'end_date is before start_date' })
-      continue
-    }
     const half = d.half_day.toLowerCase()
     if (half && half !== 'first_half' && half !== 'second_half') {
       errors.push({ row: rowNumber, error: 'half_day must be blank, first_half, or second_half' })
       continue
     }
-    if (half && d.start_date !== d.end_date) {
-      errors.push({ row: rowNumber, error: 'half_day only allowed when start_date = end_date' })
-      continue
-    }
-    const dayCount =
-      Math.round((new Date(d.end_date).getTime() - new Date(d.start_date).getTime()) / 86400000) + 1
     prepared.push({
       row: rowNumber,
       user_id: user.id,
       type: policy.key,
-      start_date: d.start_date,
-      end_date: d.end_date,
+      // One row = one day, so start and end are the same date.
+      start_date: d.date,
+      end_date: d.date,
       half_day_start: Boolean(half),
       half_day_position: half ? (half as 'first_half' | 'second_half') : null,
-      days: half ? 0.5 : dayCount,
+      days: half ? 0.5 : 1,
       reason: d.reason || null,
     })
   }
@@ -1316,8 +1323,66 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
     }
   }
 
+  // Schedule-aware checks (match the planner): holidays and weekly-off days are
+  // HARD blocks. Logging WFH on a day that is already a WFH day (per the team
+  // schedule) is only a SOFT warning — people change teams, so their schedule
+  // can legitimately shift, and HR may still want to record it.
+  const { data: holidayRows } = await adminClient.from('holidays').select('date')
+  const holidaySet = new Set((holidayRows ?? []).map((h) => h.date))
+
+  const { data: memberships } =
+    involved.length > 0
+      ? await adminClient
+          .from('team_members')
+          .select('user_id, team_id, is_primary')
+          .in('user_id', involved)
+          .is('left_at', null)
+      : { data: [] as { user_id: string; team_id: string; is_primary: boolean }[] }
+  const teamIdByUser = new Map<string, string>()
+  for (const m of memberships ?? []) {
+    if (m.is_primary || !teamIdByUser.has(m.user_id)) teamIdByUser.set(m.user_id, m.team_id)
+  }
+  const teamIds = Array.from(new Set(teamIdByUser.values()))
+  const { data: teamRows } =
+    teamIds.length > 0
+      ? await adminClient.from('teams').select('id, wfo_pattern, off_days').in('id', teamIds)
+      : { data: [] as { id: string; wfo_pattern: string | null; off_days: string | null }[] }
+  const teamById = new Map((teamRows ?? []).map((t) => [t.id, t]))
+  const patternFor = (userId: string) => {
+    const team = teamById.get(teamIdByUser.get(userId) ?? '')
+    return { wfo: team?.wfo_pattern ?? null, off: team?.off_days ?? null }
+  }
+
+  for (const p of prepared) {
+    const name = userById.get(p.user_id)?.full_name ?? 'this employee'
+    const pat = patternFor(p.user_id)
+    const days = eachDateInRange(p.start_date, p.end_date)
+    const holidayDays = days.filter((d) => holidaySet.has(d))
+    const offDays = days.filter((d) => isOffDayForPattern(d, pat.off))
+    if (holidayDays.length > 0) {
+      errors.push({ row: p.row, error: `Falls on a holiday: ${holidayDays.join(', ')}` })
+    }
+    if (offDays.length > 0) {
+      errors.push({ row: p.row, error: `Falls on a weekly-off day for ${name}: ${offDays.join(', ')}` })
+    }
+    if (isWfhCategory(leaveTypeCategory(p.type, policies))) {
+      const wfhConflicts = days.filter(
+        (d) => !isWfoDayForPattern(d, pat.wfo) && !holidaySet.has(d) && !isOffDayForPattern(d, pat.off)
+      )
+      if (wfhConflicts.length > 0) {
+        warnings.push({
+          row: p.row,
+          warning: `${name} is already working from home (per their team schedule) on ${wfhConflicts.join(', ')} — logging WFH here is redundant.`,
+        })
+      }
+    }
+  }
+
   if (errors.length > 0) {
-    return { imported: 0, errors }
+    return { imported: 0, errors, warnings, needsConfirm: false }
+  }
+  if (warnings.length > 0 && !options?.confirmWarnings) {
+    return { imported: 0, errors: [], warnings, needsConfirm: true }
   }
 
   let imported = 0
@@ -1341,7 +1406,7 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
       .single()
     if (error || !leave) {
       errors.push({ row: p.row, error: error?.message ?? 'Insert failed' })
-      return { imported, errors }
+      return { imported, errors, warnings, needsConfirm: false }
     }
     await bumpUsed(adminClient, p.user_id, p.type, p.days, policies)
     imported++
@@ -1394,7 +1459,7 @@ export async function importBacklogLeavesCsv(rows: Record<string, string>[]) {
 
   await writeAudit(actor.id, 'leave.import_backlog', 'leave', 'batch', { after: { imported } })
   revalidatePath('/', 'layout')
-  return { imported, errors }
+  return { imported, errors, warnings, needsConfirm: false }
 }
 
 async function getPendingRequestLeaves(
