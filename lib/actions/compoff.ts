@@ -426,3 +426,193 @@ export async function requestCompoffPlanForUser(
   await revalidateHR()
   return { count: inserted.length }
 }
+
+/** Map a CSV `type` cell to a comp-off type, accepting a few friendly aliases. */
+function normalizeCompoffType(raw: string): 'compoff_leave' | 'compoff_wfh' | null {
+  const t = raw.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (['compoff_leave', 'comp_off_leave', 'comp_leave', 'leave'].includes(t)) return 'compoff_leave'
+  if (['compoff_wfh', 'comp_off_wfh', 'comp_wfh', 'wfh'].includes(t)) return 'compoff_wfh'
+  return null
+}
+
+/** A truthy `half_day` cell means a half-day (0.5) credit; blank means a full day. */
+function isHalfDayCell(raw: string): boolean {
+  return ['true', 'yes', 'y', 'half', '0.5'].includes(raw.trim().toLowerCase())
+}
+
+/**
+ * Bulk-grant comp-off from a CSV (HR Console). Each row credits one person's
+ * balance for a day they worked. Columns: email, type, work_date, half_day,
+ * reason. Like the single "Add comp-off" flow, grants are inserted as APPROVED
+ * (credited immediately by the DB trigger) and the employee + manager are
+ * notified day by day. Validation is all-or-nothing: if any row is bad, nothing
+ * is imported.
+ */
+export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
+  const actor = await requireCapability('approve_compoff')
+  const adminClient = createAdminClient()
+  const today = todayIST()
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+  const { data: usersData } = await adminClient
+    .from('users')
+    .select('id, email, full_name, manager_id')
+    .eq('status', 'active')
+  const userByEmail = new Map((usersData ?? []).map((u) => [u.email.toLowerCase(), u]))
+  const userById = new Map((usersData ?? []).map((u) => [u.id, u]))
+
+  type Prepared = {
+    row: number
+    user_id: string
+    type: 'compoff_leave' | 'compoff_wfh'
+    work_date: string
+    amount: number
+    reason: string
+  }
+  const errors: { row: number; error: string }[] = []
+  const prepared: Prepared[] = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i]
+    const rowNumber = Number(raw.__row ?? i + 1)
+    const email = (raw.email ?? '').trim().toLowerCase()
+    const typeRaw = (raw.type ?? '').trim()
+    const workDate = (raw.work_date ?? '').trim()
+    const reason = (raw.reason ?? '').trim()
+
+    if (!email) {
+      errors.push({ row: rowNumber, error: 'email required' })
+      continue
+    }
+    const user = userByEmail.get(email)
+    if (!user) {
+      errors.push({ row: rowNumber, error: `No active user with email ${email}` })
+      continue
+    }
+    const type = normalizeCompoffType(typeRaw)
+    if (!type) {
+      errors.push({ row: rowNumber, error: `type must be compoff_leave or compoff_wfh (got "${typeRaw}")` })
+      continue
+    }
+    if (!DATE_RE.test(workDate)) {
+      errors.push({ row: rowNumber, error: 'work_date must be YYYY-MM-DD' })
+      continue
+    }
+    if (workDate > today) {
+      errors.push({ row: rowNumber, error: 'work_date cannot be in the future' })
+      continue
+    }
+    if (!reason) {
+      errors.push({ row: rowNumber, error: 'reason required' })
+      continue
+    }
+    prepared.push({
+      row: rowNumber,
+      user_id: user.id,
+      type,
+      work_date: workDate,
+      amount: isHalfDayCell(raw.half_day ?? '') ? 0.5 : 1,
+      reason,
+    })
+  }
+
+  // One comp-off per (person, work_date): check the DB and within this batch.
+  const involved = Array.from(new Set(prepared.map((p) => p.user_id)))
+  const existingByUser = new Map<string, Set<string>>()
+  if (involved.length > 0) {
+    const { data: existing } = await adminClient
+      .from('compoff_grants')
+      .select('user_id, work_date')
+      .in('user_id', involved)
+    for (const g of existing ?? []) {
+      const set = existingByUser.get(g.user_id) ?? new Set<string>()
+      set.add(g.work_date)
+      existingByUser.set(g.user_id, set)
+    }
+  }
+  const batchByUser = new Map<string, Set<string>>()
+  for (const p of prepared) {
+    const batchSet = batchByUser.get(p.user_id) ?? new Set<string>()
+    if (existingByUser.get(p.user_id)?.has(p.work_date)) {
+      errors.push({ row: p.row, error: `A comp-off entry already exists for ${p.work_date}` })
+    } else if (batchSet.has(p.work_date)) {
+      errors.push({ row: p.row, error: `Duplicate ${p.work_date} for the same person in this CSV` })
+    } else {
+      batchSet.add(p.work_date)
+      batchByUser.set(p.user_id, batchSet)
+    }
+  }
+
+  if (errors.length > 0) return { imported: 0, errors }
+  if (prepared.length === 0) return { imported: 0, errors: [{ row: 0, error: 'No rows to import' }] }
+
+  const decidedAt = new Date().toISOString()
+  const { data: inserted, error } = await adminClient
+    .from('compoff_grants')
+    .insert(
+      prepared.map((p) => ({
+        user_id: p.user_id,
+        type: p.type,
+        amount: p.amount,
+        work_date: p.work_date,
+        reason: p.reason,
+        manager_id: actor.id,
+        status: 'approved' as const,
+        decided_by: actor.id,
+        decided_at: decidedAt,
+      }))
+    )
+    .select('id')
+  if (error || !inserted) {
+    return { imported: 0, errors: [{ row: 0, error: error?.message ?? 'Insert failed' }] }
+  }
+
+  // Notify each employee (and their manager) about everything added for them.
+  const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
+  const byUser = new Map<string, Prepared[]>()
+  for (const p of prepared) {
+    const arr = byUser.get(p.user_id) ?? []
+    arr.push(p)
+    byUser.set(p.user_id, arr)
+  }
+  for (const [userId, list] of byUser.entries()) {
+    const employee = userById.get(userId)
+    if (!employee) continue
+    const lines = list
+      .slice()
+      .sort((a, b) => a.work_date.localeCompare(b.work_date))
+      .map((r) => `${r.work_date} - ${label(r.type)}${r.amount === 0.5 ? ' (half day)' : ''}`)
+      .join('\n')
+    const total = list.reduce((s, r) => s + r.amount, 0)
+
+    await notifyUser({
+      user_id: userId,
+      type: 'compoff_granted',
+      title: 'Comp-off was added to your balance',
+      body: `${actor.full_name} added ${total} comp-off day(s) to your balance.`,
+      link_url: '/leaves',
+      slackDm: true,
+      slackText: `*Comp-off added to your balance*\n${actor.full_name} added:\n${lines}`,
+    })
+
+    const managerId = employee.manager_id
+    if (managerId && managerId !== userId && managerId !== actor.id) {
+      await notifyUser({
+        user_id: managerId,
+        type: 'compoff_granted_for_report',
+        title: 'Comp-off was added for your report',
+        body: `${actor.full_name} added ${total} comp-off day(s) for ${employee.full_name}.`,
+        link_url: '/',
+        slackDm: true,
+        slackText: `*Comp-off added for ${employee.full_name}*\n${actor.full_name} added:\n${lines}`,
+      })
+    }
+  }
+
+  await writeAudit(actor.id, 'compoff.import_csv', 'compoff_grant', 'batch', {
+    after: { imported: inserted.length },
+  })
+  revalidatePath('/', 'layout')
+  await revalidateHR()
+  return { imported: inserted.length, errors }
+}

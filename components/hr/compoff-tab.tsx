@@ -6,8 +6,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
+import { Upload } from 'lucide-react'
 import { decideCompoff } from '@/lib/actions/compoff'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
+import { CompoffCsvImport } from './compoff-csv-import'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Tables } from '@/lib/supabase/database.types'
@@ -41,6 +43,8 @@ export function CompoffTab({ grants, users }: Props) {
   const { pushToast, currentUser } = useStore()
   const [isPending, startTransition] = useTransition()
   const [confirm, setConfirm] = useState<{ id: string; decision: 'approved' | 'rejected' } | null>(null)
+
+  const [csvOpen, setCsvOpen] = useState(false)
 
   const pending = grants.filter((g) => g.status === 'pending')
   const approved = grants.filter((g) => g.status === 'approved')
@@ -84,12 +88,21 @@ export function CompoffTab({ grants, users }: Props) {
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-semibold">Comp-off</div>
           {isPrivileged && (
-            <CompoffRequestDialog
-              onBehalf={{ users }}
-              trigger={<Button size="sm">Add comp-off</Button>}
-            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setCsvOpen(true)}>
+                <Upload className="h-4 w-4" />
+                Import CSV
+              </Button>
+              <CompoffRequestDialog
+                onBehalf={{ users }}
+                trigger={<Button size="sm">Add comp-off</Button>}
+              />
+            </div>
           )}
         </div>
+        {isPrivileged && (
+          <CompoffCsvImport open={csvOpen} onOpenChange={setCsvOpen} users={users} />
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard label="Pending" value={pending.length} tone="warning" />
           <StatCard label="Approved" value={approved.length} tone="success" />
