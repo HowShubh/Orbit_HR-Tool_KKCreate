@@ -2,6 +2,7 @@
 
 import { Topbar } from '@/components/layout/topbar'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { PersonDrawerProvider } from '@/components/people/person-drawer-context'
 import { useCapabilities } from '@/hooks/use-capabilities'
 import { UsersTab } from './users-tab'
 import { TeamsTab } from './teams-tab'
@@ -49,7 +50,7 @@ export function HRConsoleClient(props: Props) {
   }
 
   return (
-    <>
+    <PersonDrawerProvider>
       <Topbar
         title="HR Console"
         subtitle="Manage people, teams, holidays, leaves, balances and compoff"
@@ -109,6 +110,6 @@ export function HRConsoleClient(props: Props) {
           </TabsContent>
         </Tabs>
       </div>
-    </>
+    </PersonDrawerProvider>
   )
 }

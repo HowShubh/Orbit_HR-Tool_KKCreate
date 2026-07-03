@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
+import { PersonName } from '@/components/people/person-drawer-context'
 import { Input } from '@/components/ui/input'
 import { Save, Wand2 } from 'lucide-react'
 import {
@@ -265,7 +266,7 @@ export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leav
                   <div className="flex items-center gap-2.5">
                     <Avatar name={u.full_name} size="sm" />
                     <div>
-                      <div className="text-[13px] font-medium">{u.full_name}</div>
+                      <PersonName userId={u.id} name={u.full_name} className="text-[13px] font-medium" />
                       <div className="text-[11px] text-muted-foreground capitalize">
                         {u.role.replace('_', ' ')}
                       </div>

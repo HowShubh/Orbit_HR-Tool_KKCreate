@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { format, parseISO, differenceInDays } from 'date-fns'
-import { Loader2, CalendarDays, Briefcase } from 'lucide-react'
+import { Loader2, CalendarDays, Briefcase, Trash2 } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { getUserLeaveProfile } from '@/lib/actions/person-detail'
+import { deleteLeave } from '@/lib/actions/leaves'
 import type { PersonLeaveProfile, PersonLeaveRow } from '@/lib/person-detail-types'
 import { useStore } from '@/lib/store'
 
@@ -38,12 +39,19 @@ function matchesType(l: PersonLeaveRow, f: TypeFilter) {
 }
 
 export function PersonDetail({ userId }: { userId: string }) {
-  const { pushToast } = useStore()
+  const { pushToast, currentUser } = useStore()
   const [data, setData] = useState<PersonLeaveProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isDeleting, startDelete] = useTransition()
 
+  const canManage = currentUser?.role === 'hr' || currentUser?.role === 'founder'
+
+  // Same fetch shape as before, with an `active` guard, plus a refreshKey the
+  // delete action bumps to reload after a successful delete.
   useEffect(() => {
     let active = true
     setLoading(true)
@@ -52,6 +60,7 @@ export function PersonDetail({ userId }: { userId: string }) {
         if (active) setData(d)
       })
       .catch((err) => {
+        if (!active) return
         const msg = err instanceof Error ? err.message : 'Failed to load'
         pushToast({ title: 'Error', body: msg, variant: 'error' })
       })
@@ -61,7 +70,21 @@ export function PersonDetail({ userId }: { userId: string }) {
     return () => {
       active = false
     }
-  }, [userId, pushToast])
+  }, [userId, pushToast, refreshKey])
+
+  function handleDelete(leaveId: string) {
+    setConfirmId(null)
+    startDelete(async () => {
+      try {
+        await deleteLeave(leaveId)
+        pushToast({ title: 'Leave removed', body: 'The balance was refunded.', variant: 'success' })
+        setRefreshKey((k) => k + 1) // reload the profile
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to delete'
+        pushToast({ title: 'Could not delete', body: msg, variant: 'error' })
+      }
+    })
+  }
 
   const filteredLeaves = useMemo(() => {
     if (!data) return []
@@ -210,20 +233,56 @@ export function PersonDetail({ userId }: { userId: string }) {
               No entries match.
             </p>
           ) : (
-            filteredLeaves.map((l) => (
-              <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-[12px]">
-                <span className="font-medium">{l.type_name}</span>
-                <span className="text-muted-foreground">{dateRange(l)}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {fmtDays(Number(l.days_deducted))}d
-                  {l.half_day_position ? ' (½)' : ''}
-                </span>
-                <Badge variant={STATUS_VARIANT[l.status] ?? 'muted'} className="capitalize">
-                  {l.status === 'delete_requested' ? 'delete requested' : l.status}
-                </Badge>
-                {l.reason && <span className="text-muted-foreground truncate">· {l.reason}</span>}
-              </div>
-            ))
+            filteredLeaves.map((l) => {
+              const deletable =
+                l.status === 'active' || l.status === 'pending' || l.status === 'delete_requested'
+              return (
+                <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-[12px]">
+                  <span className="font-medium">{l.type_name}</span>
+                  <span className="text-muted-foreground">{dateRange(l)}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {fmtDays(Number(l.days_deducted))}d
+                    {l.half_day_position ? ' (½)' : ''}
+                  </span>
+                  <Badge variant={STATUS_VARIANT[l.status] ?? 'muted'} className="capitalize">
+                    {l.status === 'delete_requested' ? 'delete requested' : l.status}
+                  </Badge>
+                  {l.reason && <span className="text-muted-foreground truncate">· {l.reason}</span>}
+                  {canManage && deletable && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmId(l.id)}
+                      disabled={isDeleting}
+                      className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete
+                    </button>
+                  )}
+                  {confirmId === l.id && (
+                    <div className="mt-1 flex w-full items-center justify-between gap-2 rounded-md bg-rose-50 px-2 py-1.5 text-[11px] text-rose-900 ring-1 ring-inset ring-rose-200">
+                      <span>Delete this record and refund the balance?</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmId(null)}
+                          className="rounded px-1.5 py-0.5 hover:bg-white/70"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(l.id)}
+                          disabled={isDeleting}
+                          className="rounded bg-rose-600 px-2 py-0.5 font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                        >
+                          {isDeleting ? 'Deleting…' : 'Yes, delete'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })
           )}
         </div>
       </div>

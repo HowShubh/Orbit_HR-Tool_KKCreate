@@ -10,6 +10,7 @@ import { Upload, Trash2 } from 'lucide-react'
 import { decideCompoff, removeCompoffGrant } from '@/lib/actions/compoff'
 import { CompoffRequestDialog } from '@/components/leave/compoff-request-dialog'
 import { CompoffCsvImport } from './compoff-csv-import'
+import { PersonName } from '@/components/people/person-drawer-context'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Tables } from '@/lib/supabase/database.types'
@@ -144,7 +145,7 @@ export function CompoffTab({ grants, users }: Props) {
                     <Avatar name={u?.full_name ?? '?'} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[13.5px] font-semibold">{u?.full_name ?? 'Unknown'}</span>
+                        <PersonName userId={g.user_id} name={u?.full_name ?? 'Unknown'} className="text-[13.5px] font-semibold" />
                         <span className="text-[11.5px] text-muted-foreground">
                           {TYPE_LABEL[g.type] ?? g.type} · {g.amount} day · worked{' '}
                           {format(parseISO(g.work_date), 'MMM d')}
@@ -224,7 +225,7 @@ export function CompoffTab({ grants, users }: Props) {
                     <Avatar name={u?.full_name ?? '?'} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[13.5px] font-semibold">{u?.full_name ?? 'Unknown'}</span>
+                        <PersonName userId={g.user_id} name={u?.full_name ?? 'Unknown'} className="text-[13.5px] font-semibold" />
                         <span className="text-[11.5px] text-muted-foreground">
                           {TYPE_LABEL[g.type] ?? g.type} · {g.amount} day · worked{' '}
                           {format(parseISO(g.work_date), 'MMM d')}

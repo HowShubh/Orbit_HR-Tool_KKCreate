@@ -6,6 +6,7 @@ import { format, parseISO } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar } from '@/components/ui/avatar'
+import { PersonName } from '@/components/people/person-drawer-context'
 import { cn } from '@/lib/utils'
 import type { LeaveRequestWithDays, LeaveRequestStatus } from './leave-request-types'
 
@@ -80,7 +81,7 @@ export function RequestHistoryTable({
                         <td className="whitespace-nowrap px-4 py-2">
                           <div className="flex items-center gap-2">
                             <Avatar name={r.user_full_name} size="sm" />
-                            <span className="font-medium">{r.user_full_name}</span>
+                            <PersonName userId={r.user_id} name={r.user_full_name} className="font-medium" />
                           </div>
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">

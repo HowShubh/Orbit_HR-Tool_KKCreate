@@ -6,6 +6,7 @@ import { CheckCircle2, AlertTriangle, Send, RefreshCw, Loader2 } from 'lucide-re
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PersonName } from '@/components/people/person-drawer-context'
 import { Switch } from '@/components/ui/switch'
 import { useStore } from '@/lib/store'
 import {
@@ -245,7 +246,9 @@ function SlackIdRow({ user }: { user: UserWithMembership }) {
 
   return (
     <tr className="border-t">
-      <td className="px-3 py-2 font-medium">{user.full_name}</td>
+      <td className="px-3 py-2 font-medium">
+        <PersonName userId={user.id} name={user.full_name} />
+      </td>
       <td className="px-3 py-2 text-muted-foreground">{user.email}</td>
       <td className="px-3 py-2">
         <div className="flex items-center gap-2">

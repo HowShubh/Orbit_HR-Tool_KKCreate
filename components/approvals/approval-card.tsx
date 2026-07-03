@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useStore } from '@/lib/store'
+import { PersonName } from '@/components/people/person-drawer-context'
 import { cn } from '@/lib/utils'
 import {
   approveLeave,
@@ -104,9 +105,11 @@ export function ApprovalCard({
         <Avatar name={request.user_full_name} size="md" />
         <div className="min-w-[200px] flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[14px] font-semibold text-foreground">
-              {request.user_full_name}
-            </span>
+            <PersonName
+              userId={request.user_id}
+              name={request.user_full_name}
+              className="text-[14px] font-semibold text-foreground"
+            />
             {isDeleteRequest ? (
               <Badge variant="warning">Delete request</Badge>
             ) : (
