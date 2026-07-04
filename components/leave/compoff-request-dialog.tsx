@@ -79,6 +79,8 @@ export function CompoffRequestDialog({ trigger, onBehalf }: Props) {
   const [mode, setMode] = useState<CompoffType>('compoff_leave')
   const [selectedDays, setSelectedDays] = useState<SelectedDay[]>([])
   const [reason, setReason] = useState('')
+  const [reasonError, setReasonError] = useState(false)
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
   const [targetUserId, setTargetUserId] = useState('')
   const [isPending, startTransition] = useTransition()
   const [notice, setNotice] = useState<string | null>(null)
@@ -121,6 +123,7 @@ export function CompoffRequestDialog({ trigger, onBehalf }: Props) {
   function reset() {
     setSelectedDays([])
     setReason('')
+    setReasonError(false)
     setMode('compoff_leave')
     setCursor(new Date())
     setNotice(null)
@@ -203,14 +206,21 @@ export function CompoffRequestDialog({ trigger, onBehalf }: Props) {
   }
 
   const total = selectedDays.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
+  // Reason is required, but we keep the button enabled so a click can explain
+  // why nothing happens (instead of a silently-dead button).
   const canSubmit =
     selectedDays.length > 0 &&
-    reason.trim().length > 0 &&
     !isPending &&
     (!onBehalf || Boolean(targetUserId))
 
   function handleSubmit() {
     if (!canSubmit) return
+    if (reason.trim().length === 0) {
+      setReasonError(true)
+      reasonRef.current?.focus()
+      return
+    }
+    setReasonError(false)
     const days = selectedDays.map((d) => ({ date: d.date, type: d.type, half_day: d.half_day }))
     startTransition(async () => {
       try {
@@ -426,15 +436,32 @@ export function CompoffRequestDialog({ trigger, onBehalf }: Props) {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="compoff-reason">Reason</Label>
+                <Label htmlFor="compoff-reason">
+                  Reason <span className="text-rose-500">*</span>
+                </Label>
                 <textarea
                   id="compoff-reason"
+                  ref={reasonRef}
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
+                  onChange={(e) => {
+                    setReason(e.target.value)
+                    if (reasonError && e.target.value.trim().length > 0) setReasonError(false)
+                  }}
                   rows={3}
+                  aria-invalid={reasonError}
                   placeholder="Why did you work these days?"
-                  className="flex min-h-[72px] w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={cn(
+                    'flex min-h-[72px] w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2',
+                    reasonError
+                      ? 'border-rose-400 focus-visible:ring-rose-400'
+                      : 'border-input focus-visible:ring-ring'
+                  )}
                 />
+                {reasonError && (
+                  <p className="text-[12px] font-medium text-rose-600">
+                    A reason is required before you can request comp-off.
+                  </p>
+                )}
               </div>
             </aside>
           </div>
