@@ -70,9 +70,15 @@ export function CompoffTab({ grants, users }: Props) {
 
   function handleDecide(grantId: string, decision: 'approved' | 'rejected') {
     setConfirm(null)
+    let reason: string | undefined
+    if (decision === 'rejected') {
+      const input = window.prompt('Reason for rejection (optional — the employee sees this on Slack):')
+      if (input === null) return // cancelled
+      reason = input.trim() || undefined
+    }
     startTransition(async () => {
       try {
-        await decideCompoff(grantId, decision)
+        await decideCompoff(grantId, decision, reason)
         pushToast({
           title: decision === 'approved' ? 'Compoff approved' : 'Compoff rejected',
           variant: decision === 'approved' ? 'success' : 'info',

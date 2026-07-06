@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import { format, parseISO } from 'date-fns'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { listLeavesToday } from '@/lib/queries/leaves'
-import { isAwayCategory, isWfhCategory } from '@/lib/leave-types'
-import { getSlackSettings, postToWhereabouts } from '@/lib/slack'
+import { getSlackSettings, postToWhereabouts, slackMention } from '@/lib/slack'
 import { todayIST } from '@/lib/date'
 
 /**
@@ -33,31 +32,53 @@ export async function GET(request: Request) {
     }
 
     const leaves = await listLeavesToday()
-    const label = (name: string, halfDay: boolean) => (halfDay ? `${name} (½ day)` : name)
-    const dedupe = (arr: string[]) => Array.from(new Set(arr))
-
-    const onLeave = dedupe(
-      leaves
-        .filter((l) => isAwayCategory(l.type_category))
-        .map((l) => label(l.user_full_name, Number(l.days_deducted) === 0.5))
-    )
-    const wfh = dedupe(
-      leaves
-        .filter((l) => isWfhCategory(l.type_category))
-        .map((l) => label(l.user_full_name, Number(l.days_deducted) === 0.5))
-    )
-
-    if (onLeave.length === 0 && wfh.length === 0) {
+    if (leaves.length === 0) {
       return NextResponse.json({ ok: true, posted: false, count: 0 })
     }
 
-    const header = format(parseISO(todayIST()), 'EEE, MMM d')
-    const lines = [`*Out today (${header})*`]
-    if (onLeave.length) lines.push(`🌴 On leave: ${onLeave.join(', ')}`)
-    if (wfh.length) lines.push(`🏠 WFH: ${wfh.join(', ')}`)
-    await postToWhereabouts(lines.join('\n'))
+    // Look up the people once for @mentions and their role/designation.
+    const userIds = Array.from(new Set(leaves.map((l) => l.user_id)))
+    const { data: users } = await admin
+      .from('users')
+      .select('id, full_name, designation, slack_user_id, email')
+      .in('id', userIds)
+    const userById = new Map((users ?? []).map((u) => [u.id, u]))
 
-    return NextResponse.json({ ok: true, posted: true, count: onLeave.length + wfh.length })
+    // One numbered, blockquoted line per person in a category (deduped per user).
+    async function group(match: (category: string) => boolean): Promise<string[]> {
+      const seen = new Set<string>()
+      const out: string[] = []
+      for (const l of leaves) {
+        if (!match(l.type_category) || seen.has(l.user_id)) continue
+        seen.add(l.user_id)
+        const u = userById.get(l.user_id)
+        const mention = u ? await slackMention(admin, u) : `*${l.user_full_name}*`
+        const role = u?.designation ? `, ${u.designation}` : ''
+        const half = Number(l.days_deducted) === 0.5 ? ' (half day)' : ''
+        out.push(`> ${out.length + 1}. ${mention}${role}${half}`)
+      }
+      return out
+    }
+
+    const onLeave = await group((c) => c === 'leave')
+    const compoffLeave = await group((c) => c === 'compoff_leave')
+    const wfh = await group((c) => c === 'wfh')
+    const compoffWfh = await group((c) => c === 'compoff_wfh')
+
+    const totalPeople = onLeave.length + compoffLeave.length + wfh.length + compoffWfh.length
+    if (totalPeople === 0) {
+      return NextResponse.json({ ok: true, posted: false, count: 0 })
+    }
+
+    const header = format(parseISO(todayIST()), 'EEE, d MMM yyyy')
+    const sections = [`*Daily #whereabouts-kkcreate digest — ${header}*`]
+    if (onLeave.length) sections.push(`\n*On leave 🌴*\n${onLeave.join('\n')}`)
+    if (compoffLeave.length) sections.push(`\n*On comp-off leave 🌴*\n${compoffLeave.join('\n')}`)
+    if (wfh.length) sections.push(`\n*On WFH 🏠*\n${wfh.join('\n')}`)
+    if (compoffWfh.length) sections.push(`\n*On Comp-off WFH 🏠*\n${compoffWfh.join('\n')}`)
+    await postToWhereabouts(sections.join('\n'))
+
+    return NextResponse.json({ ok: true, posted: true, count: totalPeople })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Whereabouts digest failed'
     return NextResponse.json({ ok: false, error: message }, { status: 500 })

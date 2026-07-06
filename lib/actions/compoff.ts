@@ -14,10 +14,27 @@ import {
 } from './_helpers'
 import { notifyUser } from './notifications'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
+import { slackMentionById } from '@/lib/slack'
+import { format, parseISO } from 'date-fns'
+
+// Blockquote day list for comp-off Slack messages, with a type emoji + half-day
+// marker, e.g. "> Sat, 4 Jul 2026 — Comp-off WFH 🏠 (half day)".
+function slackCompoffLines(days: Array<{ date: string; type: string; half: boolean }>): string {
+  return days
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => {
+      const emoji = d.type === 'compoff_wfh' ? '🏠' : '🌴'
+      const label = d.type === 'compoff_wfh' ? 'Comp-off WFH' : 'Comp-off Leave'
+      return `> ${format(parseISO(d.date), 'EEE, d MMM yyyy')} — ${label} ${emoji}${d.half ? ' (half day)' : ''}`
+    })
+    .join('\n')
+}
 
 export async function decideCompoff(
   grantId: string,
-  decision: 'approved' | 'rejected'
+  decision: 'approved' | 'rejected',
+  reason?: string
 ) {
   const adminClient = createAdminClient()
   const { data: grant } = await adminClient
@@ -58,6 +75,11 @@ export async function decideCompoff(
     after,
   })
 
+  const approverMention = await slackMentionById(adminClient, actor.id)
+  const line = slackCompoffLines([
+    { date: grant.work_date, type: grant.type, half: Number(grant.amount) === 0.5 },
+  ])
+  const cleanReason = reason?.trim()
   await notifyUser({
     user_id: grant.user_id,
     type: `compoff_${decision}`,
@@ -69,7 +91,16 @@ export async function decideCompoff(
     link_url: '/leaves',
     related_entity_type: 'compoff_grant',
     related_entity_id: grantId,
+    slackDm: true,
+    slackText:
+      decision === 'approved'
+        ? `✅ *Your comp-off is approved*\n> *Earned for working:*\n${line}\n> Approved by ${approverMention}`
+        : `❌ *Your comp-off was not approved*\n> *Worked on:*\n${line}${cleanReason ? `\n> Reason: ${cleanReason}` : ''}\n> Rejected by ${approverMention}`,
   })
+
+  // Note: earning comp-off is a *credit* (the person worked extra), not an
+  // absence, so it is a personal DM only — never a #whereabouts channel post.
+  // The daily digest shows the *debit* side (who is actually away today).
 
   revalidatePath('/', 'layout')
   await revalidateHR()
@@ -361,11 +392,19 @@ export async function requestCompoffPlan(input: z.infer<typeof RequestCompoffPla
   })
 
   if (!isFounder && approverId) {
-    const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
-    const list = days
-      .map((d) => `${d.date} - ${label(d.type)}${d.half_day ? ' (half day)' : ''}`)
-      .join('\n')
     const total = days.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
+    const leaveCount = days.filter((d) => d.type === 'compoff_leave').length
+    const wfhCount = days.filter((d) => d.type === 'compoff_wfh').length
+    const summary = [
+      leaveCount ? `${leaveCount} Comp-off Leave` : null,
+      wfhCount ? `${wfhCount} Comp-off WFH` : null,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    const requesterMention = await slackMentionById(adminClient, user.id)
+    const compoffDays = slackCompoffLines(
+      days.map((d) => ({ date: d.date, type: d.type, half: Boolean(d.half_day) }))
+    )
     await notifyUser({
       user_id: approverId,
       type: 'compoff_request',
@@ -373,7 +412,8 @@ export async function requestCompoffPlan(input: z.infer<typeof RequestCompoffPla
       body: `${user.full_name} requested ${total} day(s) of comp-off across ${days.length} day(s).`,
       link_url: '/',
       slackDm: true,
-      slackText: `*New comp-off request*\n${user.full_name} requested comp-off for:\n${list}`,
+      slackText: `*Comp-off approval needed*\n${requesterMention} applied for *${summary}*\n> *Worked on:*\n${compoffDays}\n> Reason: ${parsed.reason}`,
+      slackLinkLabel: 'Approve or reject in Orbit',
     })
   }
 
@@ -444,11 +484,12 @@ export async function requestCompoffPlanForUser(
     after: { user_id: parsed.user_id, count: inserted.length },
   })
 
-  const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
-  const list = days
-    .map((d) => `${d.date} - ${label(d.type)}${d.half_day ? ' (half day)' : ''}`)
-    .join('\n')
   const total = days.reduce((s, d) => s + (d.half_day ? 0.5 : 1), 0)
+  const compoffDays = slackCompoffLines(
+    days.map((d) => ({ date: d.date, type: d.type, half: Boolean(d.half_day) }))
+  )
+  const adderMention = await slackMentionById(adminClient, actor.id)
+  const employeeMention = await slackMentionById(adminClient, parsed.user_id)
 
   await notifyUser({
     user_id: parsed.user_id,
@@ -457,7 +498,7 @@ export async function requestCompoffPlanForUser(
     body: `${actor.full_name} added ${total} comp-off day(s) to your balance.`,
     link_url: '/leaves',
     slackDm: true,
-    slackText: `*Comp-off added to your balance*\n${actor.full_name} added:\n${list}`,
+    slackText: `⭐ Comp-off was added to your balance\n> *Earned for working:*\n${compoffDays}\n> Added by ${adderMention}`,
   })
 
   const managerId = employee.manager_id
@@ -469,7 +510,7 @@ export async function requestCompoffPlanForUser(
       body: `${actor.full_name} added ${total} comp-off day(s) for ${employee.full_name}.`,
       link_url: '/',
       slackDm: true,
-      slackText: `*Comp-off added for ${employee.full_name}*\n${actor.full_name} added:\n${list}`,
+      slackText: `Comp-off record updated for ${employeeMention}\n> *Earned for working:*\n${compoffDays}\n> Added by ${adderMention}`,
     })
   }
 
@@ -619,7 +660,7 @@ export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
   }
 
   // Notify each employee (and their manager) about everything added for them.
-  const label = (t: string) => (t === 'compoff_leave' ? 'Comp-off Leave' : 'Comp-off WFH')
+  const adderMention = await slackMentionById(adminClient, actor.id)
   const byUser = new Map<string, Prepared[]>()
   for (const p of prepared) {
     const arr = byUser.get(p.user_id) ?? []
@@ -629,11 +670,9 @@ export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
   for (const [userId, list] of byUser.entries()) {
     const employee = userById.get(userId)
     if (!employee) continue
-    const lines = list
-      .slice()
-      .sort((a, b) => a.work_date.localeCompare(b.work_date))
-      .map((r) => `${r.work_date} - ${label(r.type)}${r.amount === 0.5 ? ' (half day)' : ''}`)
-      .join('\n')
+    const compoffDays = slackCompoffLines(
+      list.map((r) => ({ date: r.work_date, type: r.type, half: r.amount === 0.5 }))
+    )
     const total = list.reduce((s, r) => s + r.amount, 0)
 
     await notifyUser({
@@ -643,11 +682,12 @@ export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
       body: `${actor.full_name} added ${total} comp-off day(s) to your balance.`,
       link_url: '/leaves',
       slackDm: true,
-      slackText: `*Comp-off added to your balance*\n${actor.full_name} added:\n${lines}`,
+      slackText: `⭐ Comp-off was added to your balance\n> *Earned for working:*\n${compoffDays}\n> Added by ${adderMention}`,
     })
 
     const managerId = employee.manager_id
     if (managerId && managerId !== userId && managerId !== actor.id) {
+      const employeeMention = await slackMentionById(adminClient, userId)
       await notifyUser({
         user_id: managerId,
         type: 'compoff_granted_for_report',
@@ -655,7 +695,7 @@ export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
         body: `${actor.full_name} added ${total} comp-off day(s) for ${employee.full_name}.`,
         link_url: '/',
         slackDm: true,
-        slackText: `*Comp-off added for ${employee.full_name}*\n${actor.full_name} added:\n${lines}`,
+        slackText: `Comp-off record updated for ${employeeMention}\n> *Earned for working:*\n${compoffDays}\n> Added by ${adderMention}`,
       })
     }
   }

@@ -889,9 +889,15 @@ function PendingApprovalsCard({
   const [isPending, startTransition] = useTransition()
 
   function decide(grantId: string, decision: 'approved' | 'rejected') {
+    let reason: string | undefined
+    if (decision === 'rejected') {
+      const input = window.prompt('Reason for rejection (optional — the employee sees this on Slack):')
+      if (input === null) return // cancelled
+      reason = input.trim() || undefined
+    }
     startTransition(async () => {
       try {
-        await decideCompoff(grantId, decision)
+        await decideCompoff(grantId, decision, reason)
         pushToast({
           title: decision === 'approved' ? 'Comp-off approved' : 'Comp-off rejected',
           variant: decision === 'approved' ? 'success' : 'info',

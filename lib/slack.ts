@@ -47,9 +47,18 @@ export async function slackApi(
   }
 }
 
+/**
+ * The channel for whereabouts posts. SLACK_TEST_CHANNEL (if set) overrides the
+ * real channel so testing never posts to the live #whereabouts. Unset in
+ * production => normal behaviour.
+ */
+export function whereaboutsChannel(): string {
+  return (process.env.SLACK_TEST_CHANNEL || process.env.SLACK_WHEREABOUTS_CHANNEL || '').trim()
+}
+
 /** Post a message to the #whereabouts channel. No-op without bot token/channel. */
 export async function postToWhereabouts(text: string): Promise<void> {
-  const channel = process.env.SLACK_WHEREABOUTS_CHANNEL
+  const channel = whereaboutsChannel()
   if (!botToken() || !channel) return
   await slackApi('chat.postMessage', { channel, text, unfurl_links: false })
 }
@@ -122,6 +131,20 @@ export async function slackMention(
   return id ? `<@${id}>` : `*${user.full_name}*`
 }
 
+/**
+ * Mention a user by id, loading the fields slackMention needs. Convenient when
+ * the caller only has a user id (or a partial row without email / slack id).
+ */
+export async function slackMentionById(admin: AdminClient, userId: string): Promise<string> {
+  const { data } = await admin
+    .from('users')
+    .select('id, full_name, email, slack_user_id')
+    .eq('id', userId)
+    .maybeSingle()
+  if (!data) return 'someone'
+  return slackMention(admin, data)
+}
+
 /** DM a user. Resolves their Slack id (email fallback), opens an IM, posts. */
 export async function dmSlackUser(
   admin: AdminClient,
@@ -129,7 +152,25 @@ export async function dmSlackUser(
   text: string
 ): Promise<void> {
   if (!botToken()) return
-  const slackId = await resolveSlackUserId(admin, user)
+
+  // TEST MODE: SLACK_TEST_DM_TO (a Slack user id) redirects EVERY DM to that one
+  // person, labeled with the intended recipient — so testing never pings real
+  // employees. Unset in production => normal per-recipient DMs.
+  const testTo = (process.env.SLACK_TEST_DM_TO || '').trim()
+  let slackId: string | null
+  let outText = text
+  if (testTo) {
+    slackId = testTo
+    const { data } = await admin
+      .from('users')
+      .select('full_name, email')
+      .eq('id', user.id)
+      .maybeSingle()
+    const who = data?.full_name ?? user.email ?? user.id
+    outText = `🧪 *[TEST DM → ${who}]*\n${text}`
+  } else {
+    slackId = await resolveSlackUserId(admin, user)
+  }
   if (!slackId) return
 
   const opened = await slackApi('conversations.open', { users: slackId })
@@ -139,5 +180,5 @@ export async function dmSlackUser(
       : undefined
   if (!channelId) return
 
-  await slackApi('chat.postMessage', { channel: channelId, text, unfurl_links: false })
+  await slackApi('chat.postMessage', { channel: channelId, text: outText, unfurl_links: false })
 }

@@ -19,8 +19,10 @@ export async function notifyUser(input: {
   /** Also send this as a Slack DM (opt-in; used for leave-lifecycle events). */
   slackDm?: boolean
   /** Richer text for the Slack DM only (e.g. a per-day breakdown). Falls back
-   *  to the in-app title/body when omitted. The approval link is appended. */
+   *  to the in-app title/body when omitted. The Orbit link is appended. */
   slackText?: string
+  /** Label for the appended Orbit link in the Slack DM. Defaults to "View in Orbit". */
+  slackLinkLabel?: string
 }): Promise<void> {
   const adminClient = createAdminClient()
 
@@ -55,7 +57,9 @@ export async function notifyUser(input: {
       .single()
     if (target) {
       const base = (process.env.APP_BASE_URL ?? '').replace(/\/$/, '')
-      const link = base ? `${base}${input.link_url ?? ''}` : null
+      const url = base ? `${base}${input.link_url ?? ''}` : null
+      // Tidy labeled link, e.g. <https://orbit…|View in Orbit>
+      const link = url ? `<${url}|${input.slackLinkLabel ?? 'View in Orbit'}>` : null
       const text = input.slackText
         ? [input.slackText, link].filter(Boolean).join('\n')
         : [`*${input.title}*`, input.body, link].filter(Boolean).join('\n')

@@ -72,6 +72,14 @@ export function ApprovalCard({
 
   function decide(decision: 'approve' | 'reject') {
     setConfirmOverride(null)
+    // Optional reason when rejecting a leave (not a deletion request). The
+    // employee sees it in the rejection Slack DM.
+    let reason: string | undefined
+    if (decision === 'reject' && !isDeleteRequest) {
+      const input = window.prompt('Reason for rejection (optional — the employee sees this on Slack):')
+      if (input === null) return // cancelled
+      reason = input.trim() || undefined
+    }
     startTransition(async () => {
       try {
         if (decision === 'approve' && isDeleteRequest) {
@@ -84,7 +92,7 @@ export function ApprovalCard({
           await approveLeave(request.decision_leave_id)
           pushToast({ title: 'Request approved', variant: 'success' })
         } else {
-          await rejectLeave(request.decision_leave_id)
+          await rejectLeave(request.decision_leave_id, reason)
           pushToast({ title: 'Request rejected', variant: 'info' })
         }
         onDecided(request.id)
