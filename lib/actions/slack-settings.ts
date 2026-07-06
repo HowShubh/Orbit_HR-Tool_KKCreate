@@ -3,7 +3,7 @@
 import { ActionError } from './errors'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireCapability, writeAudit, revalidateHR } from './_helpers'
-import { slackApi, whereaboutsChannel } from '@/lib/slack'
+import { slackApi } from '@/lib/slack'
 
 const TOGGLE_KEYS = [
   'slack_dm_enabled',
@@ -123,7 +123,7 @@ export async function syncSlackIdsByEmail() {
 /** Post a one-off test message to the configured channel so HR can confirm wiring. */
 export async function sendSlackTestMessage() {
   await requireCapability('manage_users')
-  const channel = whereaboutsChannel()
+  const channel = process.env.SLACK_WHEREABOUTS_CHANNEL
   if (!process.env.SLACK_BOT_TOKEN) throw new ActionError('Slack bot token is not configured.')
   if (!channel) throw new ActionError('Slack channel (SLACK_WHEREABOUTS_CHANNEL) is not configured.')
 

@@ -47,18 +47,9 @@ export async function slackApi(
   }
 }
 
-/**
- * The channel for whereabouts posts. SLACK_TEST_CHANNEL (if set) overrides the
- * real channel so testing never posts to the live #whereabouts. Unset in
- * production => normal behaviour.
- */
-export function whereaboutsChannel(): string {
-  return (process.env.SLACK_TEST_CHANNEL || process.env.SLACK_WHEREABOUTS_CHANNEL || '').trim()
-}
-
 /** Post a message to the #whereabouts channel. No-op without bot token/channel. */
 export async function postToWhereabouts(text: string): Promise<void> {
-  const channel = whereaboutsChannel()
+  const channel = process.env.SLACK_WHEREABOUTS_CHANNEL
   if (!botToken() || !channel) return
   await slackApi('chat.postMessage', { channel, text, unfurl_links: false })
 }
