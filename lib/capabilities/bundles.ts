@@ -9,6 +9,7 @@ export type CapabilityKey =
   | 'manage_users'
   | 'manage_capabilities'
   | 'run_annual_reset'
+  | 'manage_equipment'
 
 export type Role = 'employee' | 'team_lead' | 'hr' | 'founder'
 

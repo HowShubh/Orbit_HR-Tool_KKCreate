@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { grantCapability } from '@/lib/actions/capabilities'
+import { MANUALLY_GRANTABLE_CAPABILITIES, PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
 import { useStore } from '@/lib/store'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { UserWithMembership } from '@/lib/queries/users'
@@ -50,6 +51,11 @@ export function GrantCapabilityDialog({
   const [scopeUserIds, setScopeUserIds] = useState<string[]>([])
   const [scopeTeamIds, setScopeTeamIds] = useState<string[]>([])
   const [note, setNote] = useState('')
+
+  // In read-only mode only end-to-end-honored capabilities can be granted.
+  const grantableCapabilities = PERMISSIONS_READ_ONLY
+    ? capabilities.filter((c) => MANUALLY_GRANTABLE_CAPABILITIES.includes(c.key))
+    : capabilities
 
   const selectedCap = capabilities.find((c) => c.key === capKey)
 
@@ -135,7 +141,7 @@ export function GrantCapabilityDialog({
                 <SelectValue placeholder="Select capability…" />
               </SelectTrigger>
               <SelectContent>
-                {capabilities.map((c) => (
+                {grantableCapabilities.map((c) => (
                   <SelectItem key={c.key} value={c.key}>
                     <span className="font-mono text-xs">{c.key}</span>
                     {c.is_write && <span className="ml-1 text-xs text-amber-600">(write)</span>}

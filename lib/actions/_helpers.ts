@@ -1,24 +1,17 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getCurrentUser } from '@/lib/auth/get-current-user'
 import type { Database, Tables } from '@/lib/supabase/database.types'
 import { revalidatePath } from 'next/cache'
 import { ActionError } from './errors'
 
 export async function requireUser(): Promise<Tables<'users'>> {
-  const supabase = createClient()
-  const { data: { user: authUser } } = await supabase.auth.getUser()
-  if (!authUser) throw new ActionError('Not authenticated', 'unauthenticated')
-
-  const adminClient = createAdminClient()
-  const { data: user } = await adminClient
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .single()
-
-  if (!user) throw new ActionError('User row not found', 'no_user_row')
+  // Delegates to the React.cache-wrapped getCurrentUser so the layout and the
+  // page share ONE auth round trip + users fetch per request, instead of each
+  // paying their own (this used to cost an extra ~2 network calls per page).
+  const user = await getCurrentUser()
+  if (!user) throw new ActionError('Not authenticated', 'unauthenticated')
   if (user.status === 'exited') throw new ActionError('Account exited', 'exited')
   return user
 }
@@ -30,7 +23,7 @@ export async function requireCapability(
     | 'approve_compoff'
     | 'manage_holidays' | 'view_audit_log'
     | 'manage_users' | 'manage_capabilities'
-    | 'run_annual_reset',
+    | 'run_annual_reset' | 'manage_equipment',
   targetUserId?: string
 ): Promise<Tables<'users'>> {
   const user = await requireUser()
@@ -42,6 +35,20 @@ export async function requireCapability(
   if (capability === 'manage_capabilities') {
     if (!isFounder) throw new ActionError('Founders only', 'forbidden')
     return user
+  }
+  if (capability === 'manage_equipment') {
+    // Global, but individually grantable (the Tech Lead is not HR), so unlike
+    // the role-only branches below this one also honors user_capabilities rows.
+    if (isFounder || isHR) return user
+    const adminClient = createAdminClient()
+    const { data: grants } = await adminClient
+      .from('user_capabilities')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('capability_key', 'manage_equipment')
+      .limit(1)
+    if (grants && grants.length > 0) return user
+    throw new ActionError('Equipment manager, HR or founder only', 'forbidden')
   }
   if (
     capability === 'manage_holidays' ||

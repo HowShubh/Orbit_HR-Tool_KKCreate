@@ -17,6 +17,18 @@ export async function listBundles(): Promise<Tables<'capability_bundles'>[]> {
   return data ?? []
 }
 
+/** Capability keys individually granted to one user (any source). Used by the
+ *  app layout to let client-side `can` helpers honor non-role grants
+ *  (e.g. manage_equipment for the Tech Lead). */
+export async function listMyCapabilityKeys(userId: string): Promise<string[]> {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient
+    .from('user_capabilities')
+    .select('capability_key')
+    .eq('user_id', userId)
+  return Array.from(new Set((data ?? []).map((r) => r.capability_key)))
+}
+
 export async function listUserCapabilities(): Promise<
   (Tables<'user_capabilities'> & { user_full_name: string; user_email: string })[]
 > {

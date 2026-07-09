@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/post-whereabouts",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/equipment-sweep",
+      "schedule": "0 5 * * *"
     }
   ]
 }

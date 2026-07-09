@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { siteFromHost } from '@/lib/lockup/site'
 import {
   getCurrentUser,
   getCurrentUserTeamContext,
 } from '@/lib/auth/get-current-user'
 import { listMyNotifications } from '@/lib/queries/notifications'
 import { countCompoffPendingForApprover } from '@/lib/queries/compoff'
+import { listMyCapabilityKeys } from '@/lib/queries/capabilities'
 import { AppShell } from '@/components/layout/app-shell'
 
 export default async function AppLayout({
@@ -36,19 +39,23 @@ export default async function AppLayout({
     redirect('/login?error=account_exited')
   }
 
-  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount] = await Promise.all([
-    getCurrentUserTeamContext(user.id),
-    listMyNotifications(user.id, 20),
-    countCompoffPendingForApprover(user.id),
-  ])
+  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount, grantedCapabilityKeys] =
+    await Promise.all([
+      getCurrentUserTeamContext(user.id),
+      listMyNotifications(user.id, 20),
+      countCompoffPendingForApprover(user.id),
+      listMyCapabilityKeys(user.id),
+    ])
 
   return (
     <AppShell
       currentUser={user}
       ledTeamIds={ledTeamIds}
       membersByTeam={membersByTeam}
+      grantedCapabilityKeys={grantedCapabilityKeys}
       notifications={notifications}
       pendingCompoffCount={pendingCompoffCount}
+      site={siteFromHost(headers().get('host'))}
     >
       {children}
     </AppShell>

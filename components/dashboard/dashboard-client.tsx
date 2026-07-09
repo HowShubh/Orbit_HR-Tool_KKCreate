@@ -499,11 +499,12 @@ function EmployeeQuickActionsCard() {
               Org Tree
             </Button>
           </Link>
-          <Button variant="outline" className="w-full justify-start" disabled>
-            <Laptop className="h-4 w-4" />
-            Device With Me
-            <span className="ml-auto text-[11px]">V2</span>
-          </Button>
+          <Link href="/lockup?tab=mine" className="block">
+            <Button variant="outline" className="w-full justify-start">
+              <Laptop className="h-4 w-4" />
+              Device With Me
+            </Button>
+          </Link>
         </div>
       </CardContent>
     </Card>

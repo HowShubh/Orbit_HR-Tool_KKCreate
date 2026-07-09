@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireCapability, writeAudit } from './_helpers'
-import { PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
+import { MANUALLY_GRANTABLE_CAPABILITIES, PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
 
 const READ_ONLY_MESSAGE =
   'Permission management is read-only. Access is managed by roles — change a user’s role in HR Console → Users.'
@@ -21,9 +21,13 @@ const GrantSchema = z.object({
 })
 
 export async function grantCapability(input: z.infer<typeof GrantSchema>) {
-  if (PERMISSIONS_READ_ONLY) throw new ActionError(READ_ONLY_MESSAGE)
-  const actor = await requireCapability('manage_capabilities')
   const parsed = GrantSchema.parse(input)
+  // Read-only mode blocks manual grants EXCEPT for capabilities the app honors
+  // end-to-end (see MANUALLY_GRANTABLE_CAPABILITIES in permissions-config).
+  if (PERMISSIONS_READ_ONLY && !MANUALLY_GRANTABLE_CAPABILITIES.includes(parsed.capability_key)) {
+    throw new ActionError(READ_ONLY_MESSAGE)
+  }
+  const actor = await requireCapability('manage_capabilities')
 
   const adminClient = createAdminClient()
   const { data, error } = await adminClient
@@ -51,7 +55,6 @@ export async function grantCapability(input: z.infer<typeof GrantSchema>) {
 }
 
 export async function revokeCapability(id: string) {
-  if (PERMISSIONS_READ_ONLY) throw new ActionError(READ_ONLY_MESSAGE)
   const actor = await requireCapability('manage_capabilities')
   const adminClient = createAdminClient()
 
@@ -62,6 +65,9 @@ export async function revokeCapability(id: string) {
     .single()
 
   if (!before) throw new ActionError('Capability grant not found')
+  if (PERMISSIONS_READ_ONLY && !MANUALLY_GRANTABLE_CAPABILITIES.includes(before.capability_key)) {
+    throw new ActionError(READ_ONLY_MESSAGE)
+  }
   if (before.source === 'role') {
     throw new ActionError("Cannot revoke role-derived capabilities directly. Change the user's role instead.")
   }

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Box,
   CalendarDays,
   ClipboardList,
   History,
@@ -14,22 +15,41 @@ import {
   Sparkles,
   UserCog,
   Users,
+  Wrench,
   X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
+import { useCapabilities } from "@/hooks/use-capabilities";
+import { useSite } from "@/lib/contexts/site-context";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 
-const NAV = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles?: string[];
+  /** shown only when can.manageEquipment() */
+  equipmentManager?: boolean;
+  desktopOnly?: boolean;
+};
+
+const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/leaves", label: "My Leaves", icon: ClipboardList },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/org", label: "Organization", icon: Network },
+  { href: "/lockup", label: "Lockup", icon: Box },
   { href: "/team", label: "My Team", icon: Users, roles: ["team_lead", "hr", "founder"] },
+  // Tech Console stays available on mobile — gear management happens at the shelf.
+  { href: "/tech", label: "Tech Console", icon: Wrench, equipmentManager: true },
   // HR Console & Audit Log are dense, admin-heavy screens — desktop only.
   { href: "/hr", label: "HR Console", icon: UserCog, roles: ["hr", "founder"], desktopOnly: true },
   { href: "/audit", label: "Audit Log", icon: History, roles: ["hr", "founder", "team_lead"], desktopOnly: true },
 ];
+
+// The standalone Lockup site shows only the gear surface.
+const LOCKUP_SITE_NAV_HREFS = ["/lockup", "/tech"];
 
 export function MobileNav({
   open,
@@ -40,6 +60,8 @@ export function MobileNav({
 }) {
   const pathname = usePathname();
   const { currentUser } = useStore();
+  const { can } = useCapabilities();
+  const site = useSite();
   const [notice, setNotice] = useState<string | null>(null);
 
   function close() {
@@ -48,7 +70,11 @@ export function MobileNav({
   }
 
   if (!open || typeof document === "undefined") return null;
-  const visibleNav = NAV.filter((n) => !n.roles || n.roles.includes(currentUser.role));
+  const visibleNav = NAV.filter((n) => {
+    if (site === "lockup" && !LOCKUP_SITE_NAV_HREFS.includes(n.href)) return false;
+    if (n.equipmentManager) return can.manageEquipment();
+    return !n.roles || n.roles.includes(currentUser.role);
+  });
 
   // Render via a portal to <body> so the fixed overlay is positioned against the
   // viewport. Otherwise the sticky topbar's `backdrop-blur` establishes a
@@ -62,12 +88,22 @@ export function MobileNav({
       <aside className="relative h-full w-[280px] bg-sidebar text-sidebar-foreground p-5 flex flex-col">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-lg">
-              <Sparkles className="h-4 w-4 text-white" />
-            </div>
+            {site === "lockup" ? (
+              <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 grid place-items-center shadow-lg">
+                <Box className="h-4 w-4 text-white" />
+              </div>
+            ) : (
+              <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-lg">
+                <Sparkles className="h-4 w-4 text-white" />
+              </div>
+            )}
             <div className="leading-tight">
-              <div className="text-[15px] font-semibold text-white">Orbit HR</div>
-              <div className="text-[11px] text-sidebar-foreground/60">KK Create</div>
+              <div className="text-[15px] font-semibold text-white">
+                {site === "lockup" ? "Lockup" : "Orbit HR"}
+              </div>
+              <div className="text-[11px] text-sidebar-foreground/60">
+                {site === "lockup" ? "KK Create · Gear" : "KK Create"}
+              </div>
             </div>
           </div>
           <button

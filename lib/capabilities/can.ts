@@ -11,6 +11,7 @@ export interface CanHelpers {
   manageUsers(): boolean
   manageCapabilities(): boolean
   runAnnualReset(): boolean
+  manageEquipment(): boolean
   isHROrAbove: boolean
   hasTeamAccess: boolean
 }
@@ -19,7 +20,11 @@ export function buildCanFromRole(
   userId: string,
   role: Role,
   ledTeamIds: string[],
-  membersByTeam: Record<string, string[]>
+  membersByTeam: Record<string, string[]>,
+  // Individually granted capability keys (any source). Role checks stay
+  // hardcoded above; this only widens access for grants like the Tech Lead's
+  // manage_equipment.
+  grantedCapabilityKeys: string[] = []
 ): CanHelpers {
   const isFounder = role === 'founder'
   const isHR = role === 'hr'
@@ -59,6 +64,8 @@ export function buildCanFromRole(
     manageUsers: () => isFounder || isHR,
     manageCapabilities: () => isFounder,
     runAnnualReset: () => isFounder || isHR,
+    manageEquipment: () =>
+      isFounder || isHR || grantedCapabilityKeys.includes('manage_equipment'),
     isHROrAbove: isFounder || isHR,
     hasTeamAccess: isFounder || isHR || isTeamLead,
   }

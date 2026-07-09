@@ -17,6 +17,7 @@ interface CapabilityProviderProps {
   role: Role
   ledTeamIds: string[]
   membersByTeam: Record<string, string[]>
+  grantedCapabilityKeys?: string[]
   children: ReactNode
 }
 
@@ -25,11 +26,12 @@ export function CapabilityProvider({
   role,
   ledTeamIds,
   membersByTeam,
+  grantedCapabilityKeys = [],
   children,
 }: CapabilityProviderProps) {
   const can = useMemo(
-    () => buildCanFromRole(userId, role, ledTeamIds, membersByTeam),
-    [userId, role, ledTeamIds, membersByTeam]
+    () => buildCanFromRole(userId, role, ledTeamIds, membersByTeam, grantedCapabilityKeys),
+    [userId, role, ledTeamIds, membersByTeam, grantedCapabilityKeys]
   )
 
   const value = useMemo(

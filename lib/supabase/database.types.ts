@@ -116,6 +116,268 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['compoff_grants']['Insert']>
         Relationships: []
       }
+      equipment_locations: {
+        Row: {
+          id: string
+          label: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          label: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_locations']['Insert']>
+        Relationships: []
+      }
+      equipment_shoots: {
+        Row: {
+          id: string
+          name: string
+          location: string | null
+          starts_at: string
+          ends_at: string
+          owner_id: string
+          status: 'planned' | 'active' | 'done' | 'cancelled'
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          location?: string | null
+          starts_at: string
+          ends_at: string
+          owner_id: string
+          status?: 'planned' | 'active' | 'done' | 'cancelled'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_shoots']['Insert']>
+        Relationships: []
+      }
+      equipment_items: {
+        Row: {
+          id: string
+          code: string
+          name: string
+          category:
+            | 'camera' | 'lens' | 'light' | 'audio' | 'grip' | 'drone'
+            | 'battery' | 'storage' | 'computer' | 'cable_adapter'
+            | 'accessory' | 'other'
+          brand_model: string | null
+          serial_number: string | null
+          photo_url: string | null
+          home_location_id: string | null
+          current_location_id: string | null
+          kind: 'pooled' | 'assigned'
+          assignee_id: string | null
+          status: 'available' | 'checked_out' | 'in_repair' | 'retired' | 'lost'
+          current_holder_id: string | null
+          current_checkout_id: string | null
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          code: string
+          name: string
+          category:
+            | 'camera' | 'lens' | 'light' | 'audio' | 'grip' | 'drone'
+            | 'battery' | 'storage' | 'computer' | 'cable_adapter'
+            | 'accessory' | 'other'
+          brand_model?: string | null
+          serial_number?: string | null
+          photo_url?: string | null
+          home_location_id?: string | null
+          current_location_id?: string | null
+          kind?: 'pooled' | 'assigned'
+          assignee_id?: string | null
+          status?: 'available' | 'checked_out' | 'in_repair' | 'retired' | 'lost'
+          current_holder_id?: string | null
+          current_checkout_id?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_items']['Insert']>
+        Relationships: []
+      }
+      equipment_checkouts: {
+        Row: {
+          id: string
+          item_id: string
+          holder_id: string
+          checked_out_at: string
+          due_at: string | null
+          returned_at: string | null
+          returned_location_id: string | null
+          transferred_from_checkout_id: string | null
+          shoot_id: string | null
+          notes: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          item_id: string
+          holder_id: string
+          checked_out_at?: string
+          due_at?: string | null
+          returned_at?: string | null
+          returned_location_id?: string | null
+          transferred_from_checkout_id?: string | null
+          shoot_id?: string | null
+          notes?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_checkouts']['Insert']>
+        Relationships: []
+      }
+      equipment_reservations: {
+        Row: {
+          id: string
+          item_id: string
+          shoot_id: string
+          reserved_by: string
+          status: 'active' | 'picked_up' | 'expired' | 'cancelled'
+          created_at: string
+          resolved_at: string | null
+        }
+        Insert: {
+          id?: string
+          item_id: string
+          shoot_id: string
+          reserved_by: string
+          status?: 'active' | 'picked_up' | 'expired' | 'cancelled'
+          created_at?: string
+          resolved_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['equipment_reservations']['Insert']>
+        Relationships: []
+      }
+      equipment_studios: {
+        Row: {
+          id: string
+          name: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_studios']['Insert']>
+        Relationships: []
+      }
+      equipment_studio_blocks: {
+        Row: {
+          id: string
+          studio_id: string
+          shoot_id: string
+          starts_at: string
+          ends_at: string
+          created_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          studio_id: string
+          shoot_id: string
+          starts_at: string
+          ends_at: string
+          created_by: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_studio_blocks']['Insert']>
+        Relationships: []
+      }
+      equipment_shoot_editors: {
+        Row: {
+          id: string
+          shoot_id: string
+          user_id: string
+          added_by: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          shoot_id: string
+          user_id: string
+          added_by: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_shoot_editors']['Insert']>
+        Relationships: []
+      }
+      equipment_repairs: {
+        Row: {
+          id: string
+          item_id: string
+          sent_by: string
+          sent_at: string
+          expected_back_on: string | null
+          vendor: string | null
+          notes: string | null
+          returned_at: string | null
+        }
+        Insert: {
+          id?: string
+          item_id: string
+          sent_by: string
+          sent_at?: string
+          expected_back_on?: string | null
+          vendor?: string | null
+          notes?: string | null
+          returned_at?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['equipment_repairs']['Insert']>
+        Relationships: []
+      }
+      equipment_issues: {
+        Row: {
+          id: string
+          item_id: string
+          reported_by: string
+          checkout_id: string | null
+          note: string
+          status: 'open' | 'resolved'
+          resolved_by: string | null
+          resolved_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          item_id: string
+          reported_by: string
+          checkout_id?: string | null
+          note: string
+          status?: 'open' | 'resolved'
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_issues']['Insert']>
+        Relationships: []
+      }
+      equipment_private: {
+        Row: {
+          item_id: string
+          purchase_date: string | null
+          purchase_price_inr: number | null
+          purchase_notes: string | null
+        }
+        Insert: {
+          item_id: string
+          purchase_date?: string | null
+          purchase_price_inr?: number | null
+          purchase_notes?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['equipment_private']['Insert']>
+        Relationships: []
+      }
       holidays: {
         Row: {
           id: string

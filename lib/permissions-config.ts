@@ -12,3 +12,15 @@
  * (CapabilityProvider) so grants actually take effect. See docs/MAINTENANCE_NOTES.md.
  */
 export const PERMISSIONS_READ_ONLY = true
+
+/**
+ * Exception to the read-only rule: capabilities that ARE wired end-to-end
+ * (checked from `user_capabilities` in `requireCapability` on the server and in
+ * the client `can` helpers via CapabilityProvider), so a manual grant genuinely
+ * takes effect. These can be granted/revoked from the Permissions UI even while
+ * PERMISSIONS_READ_ONLY is true.
+ *
+ * `manage_equipment`: Lockup's Tech Lead (Gaurav) is not HR, so his access can
+ * only come from an individual grant.
+ */
+export const MANUALLY_GRANTABLE_CAPABILITIES: string[] = ['manage_equipment']

@@ -10,7 +10,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useCapabilities } from '@/hooks/use-capabilities'
 import { revokeCapability } from '@/lib/actions/capabilities'
-import { PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
+import { MANUALLY_GRANTABLE_CAPABILITIES, PERMISSIONS_READ_ONLY } from '@/lib/permissions-config'
 import { useStore } from '@/lib/store'
 import { GrantCapabilityDialog } from './grant-capability-dialog'
 import { ApplyBundleDialog } from './apply-bundle-dialog'
@@ -157,7 +157,7 @@ export function PermissionsClient({
               <Package className="h-4 w-4" />
               Apply Bundle
             </Button>
-            <Button disabled={PERMISSIONS_READ_ONLY} onClick={() => openGrantForUser(undefined)}>
+            <Button onClick={() => openGrantForUser(undefined)}>
               <Shield className="h-4 w-4" />
               Grant Capability
             </Button>
@@ -168,10 +168,11 @@ export function PermissionsClient({
           <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
             <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              <strong className="text-foreground">Read-only.</strong> Access is managed by
+              <strong className="text-foreground">Mostly read-only.</strong> Access is managed by
               role — to change what someone can do, update their role in{' '}
-              <strong>HR Console → Users</strong>. This view shows who has which capabilities,
-              their source (role / bundle / manual), and scope.
+              <strong>HR Console → Users</strong>. The exception is{' '}
+              <strong className="font-mono text-foreground">manage_equipment</strong> (Lockup),
+              which can be granted and revoked here because it is honored end to end.
             </span>
           </div>
         )}
@@ -222,7 +223,7 @@ export function PermissionsClient({
                                     {uc.source === 'manual' && (
                                       <button
                                         onClick={() => handleRevoke(uc.id)}
-                                        disabled={isPending || PERMISSIONS_READ_ONLY}
+                                        disabled={isPending || (PERMISSIONS_READ_ONLY && !MANUALLY_GRANTABLE_CAPABILITIES.includes(uc.capability_key))}
                                         className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
                                         title="Revoke"
                                       >
@@ -241,7 +242,6 @@ export function PermissionsClient({
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={PERMISSIONS_READ_ONLY}
                             onClick={() => openGrantForUser(user.id)}
                             className="shrink-0"
                           >
@@ -299,7 +299,7 @@ export function PermissionsClient({
                                     {uc.source === 'manual' && (
                                       <button
                                         onClick={() => handleRevoke(uc.id)}
-                                        disabled={isPending || PERMISSIONS_READ_ONLY}
+                                        disabled={isPending || (PERMISSIONS_READ_ONLY && !MANUALLY_GRANTABLE_CAPABILITIES.includes(uc.capability_key))}
                                         className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
                                         title="Revoke"
                                       >

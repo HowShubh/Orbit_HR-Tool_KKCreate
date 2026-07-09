@@ -31,6 +31,10 @@ The app expects these env vars (no `.env.example` is committed — get values fr
 - `SLACK_BOT_TOKEN` — optional; Slack bot token (`xoxb-…`) for #whereabouts posts + approval DMs (`lib/slack.ts`). When unset, the whole Slack integration silently no-ops.
 - `SLACK_WHEREABOUTS_CHANNEL` — optional; channel for the bot to post to (e.g. `#whereabouts` or a channel ID). The bot must be invited to it.
 - `APP_BASE_URL` — optional; absolute site URL (e.g. `https://orbit.kkc.…`) used to build links inside Slack DMs.
+- `LOCKUP_QR_BASE_URL` — optional; Lockup's permanent domain, encoded inside every QR sticker (e.g. `https://kklockup.com`). Label downloads in the Tech Console stay disabled until set — stickers are printed once and must never carry a throwaway URL.
+- `LOCKUP_HOST` — optional; hostname of the standalone Lockup website (same deployment + database). When a request arrives on this host, middleware serves only the Lockup surface and the shell is branded Lockup.
+- `LOCKUP_SLACK_BOT_TOKEN` — optional; the **separate** Lockup Slack bot (`xoxb-…`, distinct from `SLACK_BOT_TOKEN`). All Lockup DMs (overdue, conflicts, repairs) silently no-op without it (`lib/slack-lockup.ts`).
+- `LOCKUP_SLACK_CHANNEL` — optional; public Lockup activity feed channel (off by default).
 
 ## Tech stack
 
@@ -104,6 +108,19 @@ Most domain folders pair a server-fetching `page.tsx` with a client `*-client.ts
 - **Audit on every write.** Server actions call `writeAudit(actorId, action, entity, entityId, { before?, after? })` from `_helpers.ts`.
 - **`revalidatePath('/', 'layout')` after mutations** so all downstream caches refresh.
 - **Notifications via `notifyUser({ user_id, type, title, body, link_url?, related_entity_type?, related_entity_id? })`** from `lib/actions/notifications.ts`.
+
+## Lockup (equipment tracker module)
+
+Lockup is the self-contained gear-tracking module (spec: `docs/superpowers/specs/2026-07-08-equipment-tracker-design.md`, plan: `docs/superpowers/plans/2026-07-08-lockup-implementation.md`). Rules that keep it self-contained:
+
+- All tables are prefixed `equipment_` (migration `023_equipment.sql`); the only outward FKs point at `users(id)`. No pre-existing table gained a column.
+- All code lives in `app/(app)/lockup/`, `app/(app)/tech/` (Tech Console), `app/e/[code]/` (QR landing), `components/lockup/`, `lib/lockup/`, `lib/queries/lockup.ts`, `lib/actions/lockup.ts`, `lib/slack-lockup.ts`.
+- One capability: `manage_equipment` (in `hr_admin`/`founder_full` bundles; granted individually to the Tech Lead). Everything else (browse, checkout, return, transfer, shoots, reservations, issue reports) is any-active-employee behavior.
+- Two item **kinds** (`equipment_items.kind`): `pooled` gear (cupboard + shoot checkout) and `assigned` devices (laptops/phones/SSDs that rest with `assignee_id`; loans have a NULL `equipment_checkouts.due_at`, no reminders). Devices have their own tab in `/lockup` + `/tech`, are never reservable, and the dashboard "Device With Me" button opens `/lockup?tab=mine`.
+- QR stickers encode `{LOCKUP_QR_BASE_URL}/e/{code}` (6-char codes, unambiguous alphabet). `/e/[code]` is intentionally outside the `(app)` shell.
+- Daily cron `/api/cron/equipment-sweep`: overdue DMs + manager digest, 24h reservation auto-expiry, repair due-back reminders.
+- Standalone-website mode: the same deployment answers on `LOCKUP_HOST` with only the Lockup surface (host gating in `middleware.ts`, branding via `lib/contexts/site-context.tsx`).
+- Dropping the module = drop the `equipment_*` tables + delete the folders above + remove nav entries and the cron entry.
 
 ## Superpowers brainstorm artifacts
 

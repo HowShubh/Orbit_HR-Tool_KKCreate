@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  Box,
   CalendarDays,
   ClipboardList,
   History,
@@ -15,11 +16,13 @@ import {
   Sparkles,
   UserCog,
   Users,
+  Wrench,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
 import { useCapabilities } from "@/hooks/use-capabilities";
+import { useSite } from "@/lib/contexts/site-context";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -27,17 +30,23 @@ const NAV = [
   { href: "/leaves",      label: "My Leaves",    icon: ClipboardList,   always: true },
   { href: "/calendar",    label: "Calendar",     icon: CalendarDays,    always: true },
   { href: "/org",         label: "Organization", icon: Network,         always: true },
+  { href: "/lockup",      label: "Lockup",       icon: Box,             always: true },
   { href: "/team",        label: "My Team",      icon: Users,           cap: "hasTeamAccess" as const },
   { href: "/hr",          label: "HR Console",   icon: UserCog,         cap: "isHROrAbove" as const },
+  { href: "/tech",        label: "Tech Console", icon: Wrench,          cap: "manageEquipment" as const },
   { href: "/audit",       label: "Audit Log",    icon: History,         cap: "viewAuditLog" as const },
   { href: "/permissions", label: "Permissions",  icon: UserCog,         cap: "manageCapabilities" as const },
 ] as const;
+
+// The standalone Lockup site shows only the gear surface.
+const LOCKUP_SITE_NAV_HREFS = ["/lockup", "/tech"];
 
 export function Sidebar({ pendingCompoffCount = 0 }: { pendingCompoffCount?: number }) {
   const pathname = usePathname();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const { currentUser } = useStore();
   const { can } = useCapabilities();
+  const site = useSite();
 
   useEffect(() => {
     setPendingHref(null);
@@ -53,6 +62,7 @@ export function Sidebar({ pendingCompoffCount = 0 }: { pendingCompoffCount?: num
   };
 
   const visibleNav = NAV.filter((n) => {
+    if (site === 'lockup' && !LOCKUP_SITE_NAV_HREFS.includes(n.href)) return false
     if ('always' in n && n.always) return true
     if ('cap' in n) {
       const capKey = n.cap
@@ -60,6 +70,7 @@ export function Sidebar({ pendingCompoffCount = 0 }: { pendingCompoffCount?: num
       if (capKey === 'isHROrAbove')         return can.isHROrAbove
       if (capKey === 'viewAuditLog')        return can.viewAuditLog()
       if (capKey === 'manageCapabilities')  return can.manageCapabilities()
+      if (capKey === 'manageEquipment')     return can.manageEquipment()
     }
     return false
   });
@@ -69,12 +80,22 @@ export function Sidebar({ pendingCompoffCount = 0 }: { pendingCompoffCount?: num
     <aside className="hidden lg:flex h-screen sticky top-0 w-[252px] flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
       {/* Logo */}
       <div className="px-5 pt-6 pb-5 flex items-center gap-3">
-        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-lg">
-          <Sparkles className="h-4 w-4 text-white" />
-        </div>
+        {site === 'lockup' ? (
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 grid place-items-center shadow-lg">
+            <Box className="h-4 w-4 text-white" />
+          </div>
+        ) : (
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 grid place-items-center shadow-lg">
+            <Sparkles className="h-4 w-4 text-white" />
+          </div>
+        )}
         <div className="leading-tight">
-          <div className="text-[15px] font-semibold text-white">Orbit HR</div>
-          <div className="text-[11px] text-sidebar-foreground/60">KK Create</div>
+          <div className="text-[15px] font-semibold text-white">
+            {site === 'lockup' ? 'Lockup' : 'Orbit HR'}
+          </div>
+          <div className="text-[11px] text-sidebar-foreground/60">
+            {site === 'lockup' ? 'KK Create · Gear' : 'KK Create'}
+          </div>
         </div>
       </div>
 
