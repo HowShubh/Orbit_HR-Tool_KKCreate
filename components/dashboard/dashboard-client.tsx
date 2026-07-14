@@ -463,6 +463,16 @@ function EmployeeScheduleCard({
   )
 }
 
+// Two-line quick-action label: a bold title plus a plain-language nudge.
+function QuickActionLabel({ title, hint }: { title: string; hint: string }) {
+  return (
+    <span className="flex min-w-0 flex-col items-start text-left leading-tight">
+      <span className="text-[13px] font-medium">{title}</span>
+      <span className="truncate text-[11px] font-normal opacity-70">{hint}</span>
+    </span>
+  )
+}
+
 function EmployeeQuickActionsCard() {
   return (
     <Card>
@@ -473,36 +483,36 @@ function EmployeeQuickActionsCard() {
         <div className="space-y-2">
           <LeaveFormDialog
             trigger={
-              <Button className="w-full justify-start">
-                <Plus className="h-4 w-4" />
-                Apply Leave
+              <Button className="h-auto w-full justify-start gap-3 py-2.5">
+                <Plus className="h-4 w-4 shrink-0" />
+                <QuickActionLabel title="Apply Leave" hint="Take leave or work from home" />
               </Button>
             }
           />
           <CompoffRequestDialog
             trigger={
-              <Button variant="outline" className="w-full justify-start">
-                <Sparkles className="h-4 w-4" />
-                Apply Comp-off
+              <Button variant="outline" className="h-auto w-full justify-start gap-3 py-2.5">
+                <Sparkles className="h-4 w-4 shrink-0" />
+                <QuickActionLabel title="Apply Comp-off" hint="Earn a credit for extra work" />
               </Button>
             }
           />
           <Link href="/calendar" className="block">
-            <Button variant="outline" className="w-full justify-start">
-              <CalendarDays className="h-4 w-4" />
-              Calendar
+            <Button variant="outline" className="h-auto w-full justify-start gap-3 py-2.5">
+              <CalendarDays className="h-4 w-4 shrink-0" />
+              <QuickActionLabel title="Calendar" hint="See who's away and upcoming holidays" />
             </Button>
           </Link>
           <Link href="/org" className="block">
-            <Button variant="outline" className="w-full justify-start">
-              <Network className="h-4 w-4" />
-              Org Tree
+            <Button variant="outline" className="h-auto w-full justify-start gap-3 py-2.5">
+              <Network className="h-4 w-4 shrink-0" />
+              <QuickActionLabel title="Org Tree" hint="See who reports to whom" />
             </Button>
           </Link>
           <Link href="/lockup?tab=mine" className="block">
-            <Button variant="outline" className="w-full justify-start">
-              <Laptop className="h-4 w-4" />
-              Device With Me
+            <Button variant="outline" className="h-auto w-full justify-start gap-3 py-2.5">
+              <Laptop className="h-4 w-4 shrink-0" />
+              <QuickActionLabel title="Device With Me" hint="Gear checked out to you" />
             </Button>
           </Link>
         </div>
@@ -778,15 +788,22 @@ function MyBalancesCard({
             const bal = allBalances.find((b) => b.type === type.key)
             const allocated = bal?.allocated ?? 0
             const used = bal?.used ?? 0
-            const remaining = Math.max(0, allocated - used)
-            const pct = allocated > 0 ? Math.min(100, (remaining / allocated) * 100) : 0
+            // Show the true remaining, even if negative (an over-drawn balance is
+            // useful to see). Only the progress bar is clamped to 0-100%.
+            const remaining = allocated - used
+            const pct = allocated > 0 ? Math.min(100, Math.max(0, (remaining / allocated) * 100)) : 0
 
             return (
               <div key={type.key} className="rounded-lg border border-border/60 p-3">
                 <div className="text-[11px] font-medium text-muted-foreground truncate">
                   {type.name}
                 </div>
-                <div className="mt-1 text-[20px] font-semibold tabular-nums">
+                <div
+                  className={cn(
+                    'mt-1 text-[20px] font-semibold tabular-nums',
+                    remaining < 0 && 'text-rose-600'
+                  )}
+                >
                   {formatDays(remaining)}
                 </div>
                 <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
