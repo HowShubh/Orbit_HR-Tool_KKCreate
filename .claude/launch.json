@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kkcreate-hr",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "-H", "0.0.0.0"],
+      "port": 3000
+    },
+    {
+      "name": "kkcreate-hr-demo",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["NEXT_PUBLIC_DEMO_MODE=true", "npm", "run", "dev", "--", "-H", "0.0.0.0"],
+      "port": 3000
+    }
+  ]
+}
