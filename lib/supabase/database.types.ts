@@ -216,6 +216,8 @@ export type Database = {
           checked_out_at: string
           due_at: string | null
           returned_at: string | null
+          /** Shelf it was taken from; null when unknown. */
+          picked_up_location_id: string | null
           returned_location_id: string | null
           transferred_from_checkout_id: string | null
           shoot_id: string | null
@@ -229,6 +231,7 @@ export type Database = {
           checked_out_at?: string
           due_at?: string | null
           returned_at?: string | null
+          picked_up_location_id?: string | null
           returned_location_id?: string | null
           transferred_from_checkout_id?: string | null
           shoot_id?: string | null

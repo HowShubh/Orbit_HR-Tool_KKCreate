@@ -22,6 +22,7 @@ import { MyDevices as MyDevicesView } from './my-devices'
 import { ShootCards } from './shoot-cards'
 import { StudioTab } from './studio-tab'
 import { CartSheet } from './cart-sheet'
+import { ScanStation } from './scan-station'
 
 export type LockupTab = 'gear' | 'studio' | 'shoots' | 'mine'
 
@@ -64,6 +65,7 @@ export function LockupClient({
   const router = useRouter()
   const [tab, setTab] = useState<string>(initialTab)
   const [cartOpen, setCartOpen] = useState(Boolean(openCartInitially))
+  const [scanOpen, setScanOpen] = useState(false)
 
   const overdueCount = myGear.filter((g) => g.overdue).length
   const mineCount =
@@ -155,11 +157,17 @@ export function LockupClient({
           </TabsContent>
         </Tabs>
 
-        <p className="flex items-center justify-center gap-2 pt-2 text-[12.5px] text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => setScanOpen(true)}
+          className="mx-auto flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
           <QrCode className="h-4 w-4" />
-          Holding an item? Scan its sticker to take or return it.
-        </p>
+          Scan an item to take or return it
+        </button>
       </div>
+
+      <ScanStation open={scanOpen} onOpenChange={setScanOpen} locations={locations} />
 
       <CartSheet
         open={cartOpen}

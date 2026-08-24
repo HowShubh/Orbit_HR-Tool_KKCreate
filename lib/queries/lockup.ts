@@ -1702,3 +1702,226 @@ export async function getOverdueGear(): Promise<OverdueGearRow[]> {
     ]
   })
 }
+
+// ============================================================
+// Scan station: what should happen when this code is scanned?
+// ============================================================
+
+export type ScanRow = {
+  item_id: string
+  code: string
+  name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  /** Why it cannot be taken/returned right now, if it cannot. */
+  blocked_reason: string | null
+  requires_approval: boolean
+  home_location_label: string | null
+  home_location_id: string | null
+}
+
+export type ScanCheckoutRow = ScanRow & { in_shoot: boolean }
+
+export type ScanReturnRow = ScanRow & {
+  checkout_id: string
+  due_at: string | null
+  overdue: boolean
+  shoot_name: string | null
+  /** Shelf it was taken from; drives the "you took it from L1" warning. */
+  picked_up_location_id: string | null
+  picked_up_location_label: string | null
+  /** Assigned devices go back to a person, not a shelf. */
+  is_device: boolean
+  device_owner_name: string | null
+}
+
+export type ScanContext =
+  | { kind: 'not_found'; code: string }
+  /** Held by the person scanning: they are bringing things back. */
+  | { kind: 'return'; scanned: ScanReturnRow; alsoWithYou: ScanReturnRow[] }
+  /** Reserved for a shoot happening now: offer the whole shoot's gear. */
+  | { kind: 'pickup'; scanned: ScanCheckoutRow; shoot: { id: string; name: string; starts_at: string; ends_at: string }; alsoReserved: ScanCheckoutRow[] }
+  /** Nothing special: plain take-it-now, keep scanning to add more. */
+  | { kind: 'checkout'; scanned: ScanCheckoutRow; kit: { id: string; name: string; items: ScanCheckoutRow[] } | null }
+  /** Someone else has it, it is in repair, retired, etc. */
+  | { kind: 'unavailable'; scanned: ScanRow; detail: string }
+
+function scanBase(
+  item: EquipmentItemRow,
+  locations: Map<string, string>
+): ScanRow {
+  return {
+    item_id: item.id,
+    code: item.code,
+    name: item.name,
+    category: item.category,
+    photo_url: item.photo_url,
+    blocked_reason: null,
+    requires_approval: item.requires_approval,
+    home_location_label: item.home_location_id
+      ? locations.get(item.home_location_id) ?? null
+      : null,
+    home_location_id: item.home_location_id,
+  }
+}
+
+/**
+ * One scan, one answer. Decides which flow the person is in from the state of
+ * the item they just scanned, rather than making them choose a mode up front:
+ *   - they are holding it            -> return, with everything else they hold
+ *   - it is reserved for a live shoot -> pickup, with the rest of that shoot
+ *   - it is free                      -> plain checkout, plus its kit if any
+ */
+export async function getScanContext(code: string, userId: string): Promise<ScanContext> {
+  const adminClient = createAdminClient()
+  const item = await getItemByCode(code.trim().toUpperCase())
+  const locations = await locationMap()
+  if (!item) return { kind: 'not_found', code: code.trim().toUpperCase() }
+
+  const base = scanBase(item, locations)
+
+  // ---- Are they holding it? Then this is a return run. ----
+  if (item.status === 'checked_out' && item.current_holder_id === userId) {
+    const { data: mine } = await adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .eq('holder_id', userId)
+      .is('returned_at', null)
+    const list = mine ?? []
+    const itemIds = list.map((c) => c.item_id)
+    const [{ data: rows }, { data: shoots }] = await Promise.all([
+      itemIds.length
+        ? adminClient
+            .from('equipment_items')
+            .select('id, code, name, category, photo_url, home_location_id, requires_approval, kind, assignee_id')
+            .in('id', itemIds)
+        : Promise.resolve({ data: [] as never[] }),
+      Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    ])
+    void shoots
+    const shootIds = Array.from(new Set(list.flatMap((c) => (c.shoot_id ? [c.shoot_id] : []))))
+    const { data: shootRows } = shootIds.length
+      ? await adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : { data: [] as { id: string; name: string }[] }
+    const shootName = new Map((shootRows ?? []).map((s) => [s.id, s.name]))
+    const ownerNames = await nameMap(
+      adminClient,
+      (rows ?? []).flatMap((r) => (r.assignee_id ? [r.assignee_id] : []))
+    )
+    const rowById = new Map((rows ?? []).map((r) => [r.id, r]))
+    const now = Date.now()
+
+    const build = (c: (typeof list)[number]): ScanReturnRow | null => {
+      const r = rowById.get(c.item_id)
+      if (!r) return null
+      return {
+        item_id: r.id,
+        code: r.code,
+        name: r.name,
+        category: r.category,
+        photo_url: r.photo_url,
+        blocked_reason: null,
+        requires_approval: r.requires_approval,
+        home_location_label: r.home_location_id ? locations.get(r.home_location_id) ?? null : null,
+        home_location_id: r.home_location_id,
+        checkout_id: c.id,
+        due_at: c.due_at,
+        overdue: Boolean(c.due_at && new Date(c.due_at).getTime() < now),
+        shoot_name: c.shoot_id ? shootName.get(c.shoot_id) ?? null : null,
+        picked_up_location_id: c.picked_up_location_id,
+        picked_up_location_label: c.picked_up_location_id
+          ? locations.get(c.picked_up_location_id) ?? null
+          : null,
+        is_device: r.kind === 'assigned',
+        device_owner_name: r.assignee_id ? ownerNames.get(r.assignee_id) ?? null : null,
+      }
+    }
+
+    const all = list.flatMap((c) => { const b = build(c); return b ? [b] : [] })
+    const scanned = all.find((r) => r.item_id === item.id)
+    if (scanned) {
+      return { kind: 'return', scanned, alsoWithYou: all.filter((r) => r.item_id !== item.id) }
+    }
+  }
+
+  // ---- Someone else has it, or it cannot leave the shelf ----
+  if (item.status !== 'available') {
+    const detail =
+      item.status === 'checked_out'
+        ? `${item.holder_name ?? 'Someone'} has it${item.due_at ? `, due back ${formatDayTime(item.due_at)}` : ''}.`
+        : item.status === 'in_repair'
+          ? `It is in repair${item.repair_expected_back_on ? `, expected back ${formatDay(item.repair_expected_back_on)}` : ''}.`
+          : `It is marked ${item.status}.`
+    return { kind: 'unavailable', scanned: base, detail }
+  }
+
+  // ---- Reserved for a shoot that is live (or starts within 24h)? ----
+  const now = Date.now()
+  const live = item.active_reservations.find((r) => {
+    if (r.status !== 'active') return false
+    return (
+      now >= new Date(r.shoot_starts_at).getTime() - 24 * 60 * 60 * 1000 &&
+      now <= new Date(r.shoot_ends_at).getTime()
+    )
+  })
+
+  const toCheckoutRow = async (ids: string[], inShoot: boolean): Promise<ScanCheckoutRow[]> => {
+    if (ids.length === 0) return []
+    const all = await listEquipment()
+    return all
+      .filter((i) => ids.includes(i.id))
+      .map((i) => ({
+        ...scanBase(i, locations),
+        in_shoot: inShoot,
+        blocked_reason:
+          i.status === 'available'
+            ? null
+            : i.status === 'checked_out'
+              ? `${i.holder_name ?? 'someone'} already took it`
+              : i.status === 'in_repair'
+                ? 'in repair'
+                : `marked ${i.status}`,
+      }))
+  }
+
+  if (live) {
+    const { data: sibs } = await adminClient
+      .from('equipment_reservations')
+      .select('item_id')
+      .eq('shoot_id', live.shoot_id)
+      .in('status', ['active'] as unknown as 'active'[])
+    const otherIds = (sibs ?? []).map((r) => r.item_id).filter((id) => id !== item.id)
+    return {
+      kind: 'pickup',
+      scanned: { ...base, in_shoot: true },
+      shoot: {
+        id: live.shoot_id,
+        name: live.shoot_name,
+        starts_at: live.shoot_starts_at,
+        ends_at: live.shoot_ends_at,
+      },
+      alsoReserved: await toCheckoutRow(otherIds, true),
+    }
+  }
+
+  // ---- Plain checkout. Offer the rest of its kit, same tick-list idea. ----
+  const { data: kitLinks } = await adminClient
+    .from('equipment_kit_items')
+    .select('kit_id')
+    .eq('item_id', item.id)
+    .limit(1)
+  let kit: { id: string; name: string; items: ScanCheckoutRow[] } | null = null
+  if (kitLinks && kitLinks.length > 0) {
+    const kitId = kitLinks[0].kit_id
+    const [{ data: kitRow }, { data: members }] = await Promise.all([
+      adminClient.from('equipment_kits').select('id, name').eq('id', kitId).maybeSingle(),
+      adminClient.from('equipment_kit_items').select('item_id').eq('kit_id', kitId),
+    ])
+    if (kitRow) {
+      const otherIds = (members ?? []).map((m) => m.item_id).filter((id) => id !== item.id)
+      kit = { id: kitRow.id, name: kitRow.name, items: await toCheckoutRow(otherIds, false) }
+    }
+  }
+
+  return { kind: 'checkout', scanned: { ...base, in_shoot: false }, kit }
+}

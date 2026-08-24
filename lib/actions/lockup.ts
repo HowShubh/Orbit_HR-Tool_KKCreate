@@ -17,6 +17,7 @@ import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/const
 import {
   getAvailabilityForWindow,
   getItemByCode,
+  getScanContext,
   getItemHistory,
   type AvailabilityRow,
   type EquipmentItemRow,
@@ -298,6 +299,8 @@ export async function checkoutItems(input: {
         holder_id: user.id,
         due_at: dueAt.toISOString(),
         shoot_id: input.shootId ?? null,
+        // Where it was standing, so return can notice if it goes back elsewhere.
+        picked_up_location_id: item.current_location_id ?? item.home_location_id ?? null,
       })
       .select('id')
       .single()
@@ -562,7 +565,12 @@ export async function borrowDevice(itemId: string): Promise<void> {
 
   const { data: checkout, error } = await admin
     .from('equipment_checkouts')
-    .insert({ item_id: item.id, holder_id: user.id, due_at: null })
+    .insert({
+      item_id: item.id,
+      holder_id: user.id,
+      due_at: null,
+      picked_up_location_id: item.current_location_id ?? item.home_location_id ?? null,
+    })
     .select('id')
     .single()
   if (error || !checkout) throw new ActionError(error?.message ?? 'Could not borrow the device.')
@@ -2789,4 +2797,56 @@ export async function updateOverdueEscalation(input: {
     },
   })
   await revalidateHR()
+}
+
+/**
+ * Bring several items back in one go: each row carries its own shelf and its
+ * own optional problem note, because a mixed armful rarely goes back to one
+ * place and only one item is usually the broken one.
+ */
+export async function checkinItems(input: {
+  items: { itemId: string; locationId: string; issueNote?: string }[]
+}): Promise<{ returned: number; issues: number }> {
+  const user = await requireUser()
+  if (input.items.length === 0) throw new ActionError('Nothing selected.')
+
+  let returned = 0
+  let issues = 0
+  const failures: string[] = []
+
+  for (const row of input.items) {
+    try {
+      await checkinItem({
+        itemId: row.itemId,
+        locationId: row.locationId,
+        issueNote: row.issueNote?.trim() || undefined,
+      })
+      returned++
+      if (row.issueNote?.trim()) issues++
+    } catch (err) {
+      // One stubborn item must not strand the rest of the armful.
+      failures.push(err instanceof Error ? err.message : 'unknown error')
+    }
+  }
+
+  if (returned === 0) {
+    throw new ActionError(failures[0] ?? 'None of those could be checked in.')
+  }
+  if (failures.length > 0) {
+    await writeAudit(
+      user.id,
+      'equipment.checkin_partial',
+      'equipment_item',
+      input.items[0].itemId,
+      null,
+      `${user.full_name} checked in ${returned} of ${input.items.length}; ${failures.length} failed`
+    )
+  }
+  return { returned, issues }
+}
+
+/** Server lookup behind the scan station. */
+export async function resolveScan(code: string) {
+  const user = await requireUser()
+  return getScanContext(code, user.id)
 }
