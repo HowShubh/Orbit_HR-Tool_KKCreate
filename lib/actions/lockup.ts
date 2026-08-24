@@ -748,6 +748,8 @@ export async function createShoot(input: {
 }
 
 export type ShootPlanInput = {
+  /** Per-item hold windows; items not listed get the whole shoot. */
+  gearWindows?: GearWindow[]
   name: string
   location?: string
   notes?: string
@@ -911,7 +913,7 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
     let reserved = 0
     let pendingCount = 0
     if (itemIds.length > 0) {
-      const result = await insertReservationsForShoot(admin, user, shoot, itemIds)
+      const result = await insertReservationsForShoot(admin, user, shoot, itemIds, input.gearWindows)
       reserved = result.reserved
       pendingCount = result.pending.length
     }
@@ -1203,11 +1205,15 @@ export async function deleteShoot(shootId: string): Promise<void> {
  *  (managers reserving for themselves skip the queue) and the equipment
  *  managers get asked to approve; everything else is 'active'. Shared by
  *  reserveItems (detail page) and createShootPlan (wizard). */
+/** A per-item hold window. Omit an item to give it the whole shoot. */
+export type GearWindow = { itemId: string; startsAt: string; endsAt: string }
+
 async function insertReservationsForShoot(
   admin: Admin,
   user: Tables<'users'>,
   shoot: Tables<'equipment_shoots'>,
-  itemIds: string[]
+  itemIds: string[],
+  windows: GearWindow[] = []
 ): Promise<{ reserved: number; pending: Tables<'equipment_items'>[] }> {
   const { data: items } = await admin.from('equipment_items').select('*').in('id', itemIds)
   const itemList = (items ?? []).filter(
@@ -1225,15 +1231,38 @@ async function insertReservationsForShoot(
   const fresh = itemList.filter((i) => !alreadyReserved.has(i.id))
   if (fresh.length === 0) return { reserved: 0, pending: [] }
 
+  // A custom window must sit inside the shoot; anything else is a planning
+  // mistake, and silently widening the shoot would surprise everyone else.
+  const shootStart = new Date(shoot.starts_at)
+  const shootEnd = new Date(shoot.ends_at)
+  const windowFor = new Map<string, { startsAt: string; endsAt: string }>()
+  for (const w of windows) {
+    const from = new Date(w.startsAt)
+    const to = new Date(w.endsAt)
+    if (isNaN(from.getTime()) || isNaN(to.getTime()) || to <= from) {
+      throw new ActionError('A gear window has an invalid start or end time.')
+    }
+    if (from < shootStart || to > shootEnd) {
+      throw new ActionError('Gear windows have to sit inside the shoot window.')
+    }
+    windowFor.set(w.itemId, { startsAt: from.toISOString(), endsAt: to.toISOString() })
+  }
+
   const actorIsManager = await isEquipmentManager(admin, user)
-  const toInsert = fresh.map((i) => ({
-    item_id: i.id,
-    shoot_id: shoot.id,
-    reserved_by: user.id,
-    status: (i.requires_approval && !actorIsManager ? 'pending' : 'active') as
-      | 'pending'
-      | 'active',
-  }))
+  const toInsert = fresh.map((i) => {
+    const w = windowFor.get(i.id)
+    return {
+      item_id: i.id,
+      shoot_id: shoot.id,
+      reserved_by: user.id,
+      // Null/null means "the whole shoot" — the pre-window behaviour.
+      starts_at: w?.startsAt ?? null,
+      ends_at: w?.endsAt ?? null,
+      status: (i.requires_approval && !actorIsManager ? 'pending' : 'active') as
+        | 'pending'
+        | 'active',
+    }
+  })
   const { error } = await admin.from('equipment_reservations').insert(toInsert)
   if (error) throw new ActionError(error.message)
 
@@ -1252,6 +1281,7 @@ async function insertReservationsForShoot(
 export async function reserveItems(input: {
   shootId: string
   itemIds: string[]
+  gearWindows?: GearWindow[]
 }): Promise<void> {
   const user = await requireUser()
   const admin = createAdminClient()
@@ -1271,7 +1301,8 @@ export async function reserveItems(input: {
     admin,
     user,
     shoot,
-    input.itemIds
+    input.itemIds,
+    input.gearWindows
   )
   if (reserved === 0) return
 

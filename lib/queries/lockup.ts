@@ -12,8 +12,15 @@ export type ReservationBadge = {
   id: string
   shoot_id: string
   shoot_name: string
+  /** The shoot's own window, for display ("for X, 25 to 26 Aug"). */
   shoot_starts_at: string
   shoot_ends_at: string
+  /** What the item is ACTUALLY held for: the reservation's own window when it
+   *  has one, otherwise the shoot's. This is what conflicts compare. */
+  holds_from: string
+  holds_to: string
+  /** True when this hold is narrower than the shoot it belongs to. */
+  custom_window: boolean
   reserved_by: string
   reserved_by_name: string
   /** 'pending' = flagged item awaiting manager approval; still real intent. */
@@ -316,12 +323,15 @@ function effectiveShootStatus(shoot: Tables<'equipment_shoots'>): ShootStatus {
 function computeConflict(args: {
   itemStatus: EquipmentStatus
   dueAt: string | null
+  /** Who physically has it — named in the message so you know who to ask. */
+  holderName?: string | null
   repairBackOn: string | null
   shootStartsAt: string
   shootEndsAt: string
   otherReservations: ReservationBadge[]
 }): ShootConflict | null {
-  const { itemStatus, dueAt, repairBackOn, shootStartsAt, shootEndsAt, otherReservations } = args
+  const { itemStatus, dueAt, holderName, repairBackOn, shootStartsAt, shootEndsAt, otherReservations } =
+    args
 
   if (itemStatus === 'retired' || itemStatus === 'lost') {
     return { kind: 'unavailable', message: `Item is marked ${itemStatus}`, short: itemStatus }
@@ -345,18 +355,25 @@ function computeConflict(args: {
   if (itemStatus === 'checked_out' && dueAt && new Date(dueAt) > new Date(shootStartsAt)) {
     return {
       kind: 'still_out',
-      message: `Checked out until ${formatDayTime(dueAt)}`,
-      short: `out til ${formatDay(dueAt)}`,
+      message: holderName
+        ? `${holderName} has it until ${formatDayTime(dueAt)}`
+        : `Checked out until ${formatDayTime(dueAt)}`,
+      short: holderName ? `${holderName} til ${formatDay(dueAt)}` : `out til ${formatDay(dueAt)}`,
     }
   }
   const clash = otherReservations.find((r) =>
-    shootWindowOverlaps(shootStartsAt, shootEndsAt, r.shoot_starts_at, r.shoot_ends_at)
+    shootWindowOverlaps(shootStartsAt, shootEndsAt, r.holds_from, r.holds_to)
   )
   if (clash) {
+    // A narrow hold is stated to the minute, so people can see the gap they
+    // could still use; a whole-shoot hold reads by day.
+    const when = clash.custom_window
+      ? `${formatDayTime(clash.holds_from)} to ${formatDayTime(clash.holds_to)}`
+      : `${formatDay(clash.holds_from)} to ${formatDay(clash.holds_to)}`
     return {
       kind: 'double_reserved',
-      message: `Also reserved for ${clash.shoot_name} (${formatDay(clash.shoot_starts_at)} to ${formatDay(clash.shoot_ends_at)})`,
-      short: `reserved: ${clash.shoot_name}`,
+      message: `${clash.reserved_by_name} has it for ${clash.shoot_name} (${when})`,
+      short: `${clash.reserved_by_name}: ${clash.shoot_name}`,
     }
   }
   return null
@@ -388,7 +405,7 @@ const activeReservationsByItem = cache(async (): Promise<Map<string, Reservation
   const adminClient = createAdminClient()
   const { data: reservations } = await adminClient
     .from('equipment_reservations')
-    .select('id, item_id, shoot_id, reserved_by, status')
+    .select('id, item_id, shoot_id, reserved_by, status, starts_at, ends_at')
     .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   if (!reservations || reservations.length === 0) return new Map()
 
@@ -411,6 +428,9 @@ const activeReservationsByItem = cache(async (): Promise<Map<string, Reservation
       shoot_name: shoot.name,
       shoot_starts_at: shoot.starts_at,
       shoot_ends_at: shoot.ends_at,
+      holds_from: r.starts_at ?? shoot.starts_at,
+      holds_to: r.ends_at ?? shoot.ends_at,
+      custom_window: Boolean(r.starts_at && r.ends_at),
       reserved_by: r.reserved_by,
       reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
       status: r.status as 'active' | 'pending',
@@ -745,6 +765,7 @@ async function buildShootReservations(
         : computeConflict({
             itemStatus: item.status,
             dueAt: checkout?.due_at ?? null,
+            holderName: item.current_holder_id ? names.get(item.current_holder_id) : null,
             repairBackOn: repair?.expected_back_on ?? null,
             shootStartsAt: shoot.starts_at,
             shootEndsAt: shoot.ends_at,
@@ -832,6 +853,7 @@ export async function listShoots(): Promise<ShootSummary[]> {
       const conflict = computeConflict({
         itemStatus: item.status,
         dueAt: checkout?.due_at ?? null,
+        holderName: item.current_holder_id ? names.get(item.current_holder_id) : null,
         repairBackOn: repair?.expected_back_on ?? null,
         shootStartsAt: shoot.starts_at,
         shootEndsAt: shoot.ends_at,
@@ -926,6 +948,7 @@ export async function getAvailabilityForWindow(
       const conflict = computeConflict({
         itemStatus: item.status,
         dueAt: item.due_at,
+        holderName: item.holder_name,
         repairBackOn: item.repair_expected_back_on,
         shootStartsAt: startsAt,
         shootEndsAt: endsAt,

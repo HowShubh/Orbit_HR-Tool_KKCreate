@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/lib/store'
-import { createShootPlan, fetchWindowAvailability } from '@/lib/actions/lockup'
+import { createShootPlan, fetchWindowAvailability, type GearWindow } from '@/lib/actions/lockup'
 import type { AvailabilityRow, KitRow, StudioScheduleEntry } from '@/lib/queries/lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import { cn } from '@/lib/utils'
@@ -209,7 +209,7 @@ export function ShootWizard({
 
   const canSubmit = name.trim().length > 0 && windowValid && !busy
 
-  async function submit() {
+  async function submit(gearWindows: GearWindow[] = []) {
     if (!canSubmit) return
     setBusy(true)
     try {
@@ -226,6 +226,7 @@ export function ShootWizard({
           endsAt: new Date(`${sl.date}T${sl.endHM}`).toISOString(),
         })),
         itemIds: selectedIds,
+        gearWindows,
       })
       const bits: string[] = []
       if (slots.length > 0)
@@ -363,7 +364,7 @@ export function ShootWizard({
           footer as "Review your plan", so it is not offered twice. */}
       {step < 3 && (
         <>
-          <Button type="button" className="w-full" disabled={!canSubmit} onClick={submit}>
+          <Button type="button" className="w-full" disabled={!canSubmit} onClick={() => submit()}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Create shoot now
           </Button>
@@ -494,9 +495,16 @@ export function ShootWizard({
             (sl) =>
               `${studioNameOf(sl.studioId)} · ${dayLabel(sl.date)}, ${slotLabel(sl.startHM)} to ${slotLabel(sl.endHM)}`
           )}
+        studioSpans={slots.map((sl) => ({
+          label: `${studioNameOf(sl.studioId)} · ${dayLabel(sl.date)}`,
+          startsAt: new Date(`${sl.date}T${sl.startHM}`).toISOString(),
+          endsAt: new Date(`${sl.date}T${sl.endHM}`).toISOString(),
+        }))}
+        shootStartsAt={startsAtIso}
+        shootEndsAt={endsAtIso}
         gear={(availability ?? []).filter((r) => selectedIds.includes(r.item_id))}
         busy={busy}
-        onConfirm={submit}
+        onConfirm={(windows) => submit(windows)}
       />
     </div>
   )

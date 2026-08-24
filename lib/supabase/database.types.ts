@@ -243,6 +243,9 @@ export type Database = {
           id: string
           item_id: string
           shoot_id: string
+          /** Custom hold window; null/null means the whole shoot. */
+          starts_at: string | null
+          ends_at: string | null
           reserved_by: string
           status: 'active' | 'pending' | 'rejected' | 'picked_up' | 'expired' | 'cancelled'
           created_at: string
@@ -252,6 +255,8 @@ export type Database = {
           id?: string
           item_id: string
           shoot_id: string
+          starts_at?: string | null
+          ends_at?: string | null
           reserved_by: string
           status?: 'active' | 'pending' | 'rejected' | 'picked_up' | 'expired' | 'cancelled'
           created_at?: string
