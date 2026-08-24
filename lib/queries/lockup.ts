@@ -798,17 +798,18 @@ async function buildShootReservations(
 
 export async function listShoots(): Promise<ShootSummary[]> {
   const adminClient = createAdminClient()
-  // Auto-archive: shoots vanish from the list one week after their last day.
-  // Nothing is deleted; the detail page still opens via a direct link, and
-  // checkout history keeps its shoot names.
-  const archiveCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  // Finished shoots stay browsable for three months, so "what did we shoot
+  // last month, and who had what" is answerable in the app rather than only
+  // through a direct link someone saved. Older than that, the detail page
+  // still opens by URL and item timelines keep their shoot names forever.
+  const archiveCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
   const { data: shoots } = await adminClient
     .from('equipment_shoots')
     .select('*')
     .neq('status', 'cancelled')
     .gte('ends_at', archiveCutoff)
     .order('starts_at', { ascending: false })
-    .limit(50)
+    .limit(120)
   const list = shoots ?? []
   if (list.length === 0) return []
 
@@ -1257,15 +1258,24 @@ export async function listStudios(): Promise<Tables<'equipment_studios'>[]> {
 /** Upcoming studio bookings (running or future), for the schedule view on the
  *  shoots tab. Cancelled shoots free their studio (blocks are deleted), so no
  *  filtering is needed here beyond time. */
+/**
+ * Studio bookings around today. The Studio tab pages backwards as well as
+ * forwards, so this deliberately reaches into the PAST: it used to return only
+ * `ends_at >= now`, which meant paging back a week showed an empty grid even
+ * though the room had been booked solid.
+ */
 export async function getStudioSchedule(): Promise<StudioScheduleEntry[]> {
   const adminClient = createAdminClient()
+  const from = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString() // 8 weeks back
+  const to = new Date(Date.now() + 84 * 24 * 60 * 60 * 1000).toISOString() // 12 weeks on
   const [{ data: blocks }, studios] = await Promise.all([
     adminClient
       .from('equipment_studio_blocks')
       .select('*')
-      .gte('ends_at', new Date().toISOString())
+      .lt('starts_at', to)
+      .gt('ends_at', from)
       .order('starts_at')
-      .limit(60),
+      .limit(400),
     studioMap(),
   ])
   const list = blocks ?? []

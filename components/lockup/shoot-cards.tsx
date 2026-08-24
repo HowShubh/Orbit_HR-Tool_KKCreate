@@ -1,5 +1,8 @@
 'use client'
 
+import { useState } from 'react'
+import { cn } from '@/lib/utils'
+
 import Link from 'next/link'
 import {
   AlertTriangle,
@@ -31,54 +34,93 @@ export function ShootCards({
   shoots: ShootSummary[]
   currentUserId: string
 }) {
-  const visible = shoots.filter(
-    (s) => s.effective_status !== 'done' || s.owner_id === currentUserId
-  )
-  const upcoming = visible.filter((s) => s.effective_status !== 'done')
-  const past = visible.filter((s) => s.effective_status === 'done').slice(0, 6)
+  const [view, setView] = useState<'upcoming' | 'past' | 'mine'>('upcoming')
+
+  // Finished shoots are NOT owner-only any more: knowing what was shot last
+  // week, and who had the gear, is exactly what people were missing.
+  const upcoming = shoots.filter((s) => s.effective_status !== 'done')
+  const past = shoots.filter((s) => s.effective_status === 'done')
+  const mine = shoots.filter(
+    (s) => s.owner_id === currentUserId || s.effective_status !== 'done'
+  ).filter((s) => s.owner_id === currentUserId)
+
+  const shown = view === 'upcoming' ? upcoming : view === 'past' ? past : mine
 
   return (
     <div className="space-y-3">
-      <div className="text-[12.5px] text-muted-foreground">
-        {upcoming.length} shoot{upcoming.length === 1 ? '' : 's'}
+      <div className="flex flex-wrap items-center gap-2">
+        <Tab active={view === 'upcoming'} onClick={() => setView('upcoming')} count={upcoming.length}>
+          Upcoming
+        </Tab>
+        <Tab active={view === 'mine'} onClick={() => setView('mine')} count={mine.length}>
+          Mine
+        </Tab>
+        <Tab active={view === 'past'} onClick={() => setView('past')} count={past.length}>
+          Finished
+        </Tab>
       </div>
 
-      {upcoming.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border px-5 py-12 text-center space-y-2">
+      {shown.length === 0 && (
+        <div className="space-y-2 rounded-xl border border-dashed border-border px-5 py-12 text-center">
           <Clapperboard className="mx-auto h-8 w-8 text-muted-foreground" />
-          <div className="text-[14px] font-medium">No upcoming shoots</div>
+          <div className="text-[14px] font-medium">
+            {view === 'past'
+              ? 'Nothing finished in the last three months'
+              : view === 'mine'
+                ? 'You have not planned a shoot yet'
+                : 'No upcoming shoots'}
+          </div>
           <p className="text-[12.5px] text-muted-foreground">
-            Create a shoot and reserve gear against it; anything double-booked or in repair gets
-            flagged here before the shoot day.
+            {view === 'past'
+              ? 'Finished shoots stay here for three months. Older ones keep their gear history on each item page.'
+              : 'Create a shoot and reserve gear against it; anything double-booked or in repair gets flagged here before the shoot day.'}
           </p>
         </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {upcoming.map((shoot) => (
+        {shown.map((shoot) => (
           <ShootCard key={shoot.id} shoot={shoot} />
         ))}
       </div>
 
-      {past.length > 0 && (
-        <>
-          <div className="pt-2 flex items-baseline gap-2">
-            <span className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Recently finished
-            </span>
-            <span className="text-[11px] text-muted-foreground">
-              auto-archived a week after the last day
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {past.map((shoot) => (
-              <ShootCard key={shoot.id} shoot={shoot} />
-            ))}
-          </div>
-        </>
+      {view === 'past' && past.length > 0 && (
+        <p className="pt-1 text-center text-[11.5px] text-muted-foreground">
+          Showing the last three months. Anything older is still reachable from an item&apos;s
+          timeline.
+        </p>
       )}
-
     </div>
+  )
+}
+
+function Tab({
+  active,
+  onClick,
+  count,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  count: number
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+        active
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-input bg-card hover:bg-accent'
+      )}
+    >
+      {children}
+      <span className={cn('text-[12px]', active ? 'opacity-80' : 'text-muted-foreground')}>
+        {count}
+      </span>
+    </button>
   )
 }
 
