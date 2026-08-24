@@ -755,7 +755,9 @@ export type ShootPlanInput = {
   endsAt: string
   /** Extra people who may plan this shoot (owner is implicit). */
   editorIds?: string[]
-  studio?: { studioId: string; startsAt: string; endsAt: string }
+  /** Zero or more studio blocks: several rooms, several days, or several
+   *  slots on one day are all allowed for a single shoot. */
+  studios?: { studioId: string; startsAt: string; endsAt: string }[]
   itemIds?: string[]
 }
 
@@ -780,31 +782,44 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
   if (isNaN(starts.getTime()) || isNaN(ends.getTime())) throw new ActionError('Invalid dates.')
   if (ends <= starts) throw new ActionError('The shoot must end after it starts.')
 
-  // ---- validate the studio slot up front (friendly named-clash error) ----
-  let studio: Tables<'equipment_studios'> | null = null
-  let blockStarts: Date | null = null
-  let blockEnds: Date | null = null
-  if (input.studio) {
-    blockStarts = new Date(input.studio.startsAt)
-    blockEnds = new Date(input.studio.endsAt)
+  // ---- validate every studio slot up front (friendly named-clash errors) ----
+  type PlannedBlock = {
+    studio: Tables<'equipment_studios'>
+    starts: Date
+    ends: Date
+  }
+  const plannedBlocks: PlannedBlock[] = []
+  for (const wanted of input.studios ?? []) {
+    const blockStarts = new Date(wanted.startsAt)
+    const blockEnds = new Date(wanted.endsAt)
     if (isNaN(blockStarts.getTime()) || isNaN(blockEnds.getTime())) {
       throw new ActionError('Invalid studio times.')
     }
-    if (blockEnds <= blockStarts) throw new ActionError('The studio booking must end after it starts.')
-    if (blockEnds <= new Date()) throw new ActionError('That studio time is already in the past.')
+    if (blockEnds <= blockStarts) throw new ActionError('A studio booking must end after it starts.')
+    if (blockEnds <= new Date()) throw new ActionError('One of those studio times is already in the past.')
 
     const { data: studioRow } = await admin
       .from('equipment_studios')
       .select('*')
-      .eq('id', input.studio.studioId)
+      .eq('id', wanted.studioId)
       .maybeSingle()
     if (!studioRow) throw new ActionError('Pick a studio.')
-    studio = studioRow
+
+    // Against slots already in this same plan, so two of your own blocks
+    // cannot collide before the database ever sees them.
+    const selfClash = plannedBlocks.find(
+      (b) => b.studio.id === studioRow.id && b.starts < blockEnds && b.ends > blockStarts
+    )
+    if (selfClash) {
+      throw new ActionError(
+        `Two of your ${studioRow.name} slots overlap (${fmtDayTime(selfClash.starts.toISOString())} and ${fmtDayTime(blockStarts.toISOString())}). Merge them or move one.`
+      )
+    }
 
     const { data: clashes } = await admin
       .from('equipment_studio_blocks')
       .select('*')
-      .eq('studio_id', studio.id)
+      .eq('studio_id', studioRow.id)
       .lt('starts_at', blockEnds.toISOString())
       .gt('ends_at', blockStarts.toISOString())
       .limit(1)
@@ -815,10 +830,14 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
         : { data: null }
       const holderLabel = holder?.name ?? clash.title?.trim() ?? 'another booking'
       throw new ActionError(
-        `${studio.name} is already booked by ${holderLabel} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
+        `${studioRow.name} is already booked by ${holderLabel} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
       )
     }
+
+    plannedBlocks.push({ studio: studioRow, starts: blockStarts, ends: blockEnds })
   }
+  // The shoot's location defaults to the first room booked.
+  const studio = plannedBlocks[0]?.studio ?? null
 
   // ---- validate the gear list up front ----
   const itemIds = Array.from(new Set(input.itemIds ?? []))
@@ -871,19 +890,19 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
       if (editorError) throw new ActionError(editorError.message)
     }
 
-    if (studio && blockStarts && blockEnds) {
+    for (const b of plannedBlocks) {
       const { error: blockError } = await admin.from('equipment_studio_blocks').insert({
-        studio_id: studio.id,
+        studio_id: b.studio.id,
         shoot_id: shoot.id,
-        starts_at: blockStarts.toISOString(),
-        ends_at: blockEnds.toISOString(),
+        starts_at: b.starts.toISOString(),
+        ends_at: b.ends.toISOString(),
         created_by: user.id,
       })
       if (blockError) {
         // 23P01 = exclusion constraint (someone booked the same slot this instant)
         throw new ActionError(
           blockError.code === '23P01'
-            ? `${studio.name} was just booked by someone else for an overlapping time. Pick a different slot.`
+            ? `${b.studio.name} was just booked by someone else for an overlapping time. Pick a different slot.`
             : blockError.message
         )
       }
@@ -900,9 +919,9 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
     const parts = [
       `${user.full_name} planned shoot ${name} (${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())})`,
     ]
-    if (studio && blockStarts && blockEnds) {
+    for (const b of plannedBlocks) {
       parts.push(
-        `booked ${studio.name} ${fmtDayTime(blockStarts.toISOString())} to ${fmtDayTime(blockEnds.toISOString())}`
+        `booked ${b.studio.name} ${fmtDayTime(b.starts.toISOString())} to ${fmtDayTime(b.ends.toISOString())}`
       )
     }
     if (reserved > 0) {
@@ -916,10 +935,10 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
     }
     await writeAudit(user.id, 'equipment.shoot_plan', 'equipment_shoot', shoot.id, null, parts.join('; '))
 
-    if (studio && blockStarts && blockEnds) {
+    for (const b of plannedBlocks) {
       await postLockupChannel(
         admin,
-        `🎬 ${studio.name} booked for ${name}: ${fmtDayTime(blockStarts.toISOString())} to ${fmtDayTime(blockEnds.toISOString())}`
+        `🎬 ${b.studio.name} booked for ${name}: ${fmtDayTime(b.starts.toISOString())} to ${fmtDayTime(b.ends.toISOString())}`
       )
     }
     await Promise.all(

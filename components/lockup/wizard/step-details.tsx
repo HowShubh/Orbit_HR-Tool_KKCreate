@@ -1,7 +1,6 @@
 'use client'
 
-import { useState } from 'react'
-import { MapPin, Pencil, UserPlus, X } from 'lucide-react'
+import { MapPin, UserPlus, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -17,7 +16,7 @@ import {
   END_SLOTS,
   RangeCalendar,
   START_SLOTS,
-  TimeSlotColumn,
+  TimeSelect,
   isoDay,
   nextRange,
   slotLabel,
@@ -60,7 +59,6 @@ export function StepDetails({
   }) => void
   windowAdoptedFromStudio: boolean
 }) {
-  const [whenOpen, setWhenOpen] = useState(false)
 
   const sameDay = win.startDate === win.endDate
   const endSlots = sameDay ? END_SLOTS.filter((s) => s > win.startTime) : END_SLOTS
@@ -126,61 +124,52 @@ export function StepDetails({
         )}
       </div>
 
-      {/* When: collapsed summary by default so the step stays light */}
+      {/* When: always visible. Hiding it behind a Change button made the
+          calendar appear out of nowhere and hid the thing being edited. */}
       <div className="space-y-1.5">
-        <Label>When</Label>
-        {whenOpen ? (
-          <div className="space-y-3 rounded-xl border border-border p-3">
-            <RangeCalendar
-              start={win.startDate}
-              end={win.endDate}
-              minDay={isoDay(new Date())}
-              onPick={(iso) => {
-                const r = nextRange(win.startDate, win.endDate, iso)
-                onWindowChange({ ...win, startDate: r.start, endDate: r.end })
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <Label>When</Label>
+          <span className="text-[12.5px] font-medium text-primary">
+            {windowLabel}
+            {windowAdoptedFromStudio && (
+              <span className="font-normal text-muted-foreground"> (from your studio slot)</span>
+            )}
+          </span>
+        </div>
+        <div className="space-y-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+          <RangeCalendar
+            start={win.startDate}
+            end={win.endDate}
+            minDay={isoDay(new Date())}
+            onPick={(iso) => {
+              const r = nextRange(win.startDate, win.endDate, iso)
+              onWindowChange({ ...win, startDate: r.start, endDate: r.end })
+            }}
+          />
+          <p className="text-[12px] text-muted-foreground">
+            Tap a day for a one-day shoot; tap a later day to stretch it into a range.
+          </p>
+          <div className="flex gap-3 border-t border-border pt-3">
+            <TimeSelect
+              label={sameDay ? 'Starts at' : `Starts (${dayLabel(win.startDate)})`}
+              slots={START_SLOTS}
+              value={win.startTime}
+              onChange={(hm) => {
+                const next = { ...win, startTime: hm }
+                if (sameDay && next.endTime <= hm) {
+                  next.endTime = END_SLOTS.find((s) => s > hm) ?? '23:59'
+                }
+                onWindowChange(next)
               }}
             />
-            <p className="text-[12px] text-muted-foreground">
-              Tap a day for a one-day shoot; tap a later day to stretch it into a range.
-            </p>
-            <div className="flex gap-3">
-              <TimeSlotColumn
-                label={sameDay ? 'Starts at' : `Starts (${dayLabel(win.startDate)})`}
-                slots={START_SLOTS}
-                value={win.startTime}
-                onChange={(hm) => {
-                  const next = { ...win, startTime: hm }
-                  if (sameDay && next.endTime <= hm) {
-                    next.endTime = END_SLOTS.find((s) => s > hm) ?? '23:59'
-                  }
-                  onWindowChange(next)
-                }}
-              />
-              <TimeSlotColumn
-                label={sameDay ? 'Ends at' : `Ends (${dayLabel(win.endDate)})`}
-                slots={endSlots}
-                value={win.endTime}
-                onChange={(hm) => onWindowChange({ ...win, endTime: hm })}
-              />
-            </div>
+            <TimeSelect
+              label={sameDay ? 'Ends at' : `Ends (${dayLabel(win.endDate)})`}
+              slots={endSlots}
+              value={win.endTime}
+              onChange={(hm) => onWindowChange({ ...win, endTime: hm })}
+            />
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setWhenOpen(true)}
-            className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2.5 text-left text-[13px] hover:bg-muted"
-          >
-            <span>
-              {windowLabel}{' '}
-              <span className="text-muted-foreground">
-                {windowAdoptedFromStudio ? '(from your studio slot)' : ''}
-              </span>
-            </span>
-            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
-              <Pencil className="h-3.5 w-3.5" /> Change
-            </span>
-          </button>
-        )}
+        </div>
         <p className="text-[12px] text-muted-foreground">
           This window is what blocks the gear: reservations expire against it and due dates
           default to its end.

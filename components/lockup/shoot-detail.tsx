@@ -167,7 +167,7 @@ export function ShootDetailClient({
   return (
     <div>
       <PageHeader title={shoot.name} subtitle="Shoot gear plan" />
-      <div className="px-5 lg:px-8 py-5 max-w-3xl space-y-4">
+      <div className="space-y-4 px-5 py-5 lg:px-8">
         <Link
           href="/lockup?tab=shoots"
           className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
@@ -175,363 +175,373 @@ export function ShootDetailClient({
           <ArrowLeft className="h-3.5 w-3.5" /> All shoots
         </Link>
 
-        {/* Header card */}
-        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <CalendarDays className="h-4 w-4" />
-                {fmtShootWindow(shoot.starts_at, shoot.ends_at)}
-              </span>
-              {shoot.location && (
-                <span className="flex items-center gap-1.5">
-                  <MapPin className="h-4 w-4" /> {shoot.location}
-                </span>
-              )}
-              <span className="flex items-center gap-1.5">
-                <User className="h-4 w-4" /> {shoot.owner_name}
-              </span>
-            </div>
-            <Badge
-              variant={
-                shoot.effective_status === 'active'
-                  ? 'success'
-                  : shoot.effective_status === 'planned'
-                    ? 'info'
-                    : shoot.effective_status === 'cancelled'
-                      ? 'danger'
-                      : 'muted'
-              }
-            >
-              {SHOOT_STATUS_LABELS[shoot.effective_status]}
-            </Badge>
-          </div>
-
-          {/* Who can plan this shoot */}
-          <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-            <Users className="h-3.5 w-3.5" />
-            <span className="rounded-full bg-muted px-2 py-0.5">
-              {shoot.owner_name} (owner)
-            </span>
-            {shoot.editors.map((e) => (
-              <span
-                key={e.editor_row_id}
-                className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"
-              >
-                {e.full_name}
-                {canEdit && !closed && (
-                  <button
-                    type="button"
-                    title={`Remove ${e.full_name}`}
-                    className="text-muted-foreground hover:text-rose-600"
-                    onClick={async () => {
-                      try {
-                        await removeShootEditor(e.editor_row_id)
-                        pushToast({ title: `${e.full_name} removed`, variant: 'success' })
-                        router.refresh()
-                      } catch (err) {
-                        pushToast({
-                          title: err instanceof Error ? err.message : 'Failed',
-                          variant: 'error',
-                        })
-                      }
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </span>
-            ))}
-            {canEdit && !closed && (
-              <button
-                type="button"
-                onClick={() => setEditorsOpen(true)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 hover:bg-accent"
-              >
-                <UserPlus className="h-3 w-3" /> Add editor
-              </button>
-            )}
-          </div>
-
-          {/* Studio bookings (hard-held for this shoot) */}
-          {(shoot.studio_blocks.length > 0 || (canEdit && !closed && studios.length > 0)) && (
-            <div className="space-y-1.5 border-t border-border pt-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[12.5px] font-semibold">
-                  <Clapperboard className="h-3.5 w-3.5 text-muted-foreground" /> Studio
-                </div>
-                {canEdit && !closed && studios.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setStudioOpen(true)}
-                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent"
-                  >
-                    <Plus className="h-3 w-3" /> Block a studio
-                  </button>
-                )}
+        {/* Two columns on desktop: the gear list earns the width, while the
+            shoot's facts and its destructive actions sit in a sticky rail —
+            one narrow column left half the screen empty. */}
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="order-2 space-y-4 lg:order-1">
+          {/* Conflicts, loud */}
+          {conflicts.length > 0 && !closed && (
+            <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-[14px] font-semibold text-rose-700">
+                <AlertTriangle className="h-5 w-5" />
+                {conflicts.length} item{conflicts.length === 1 ? ' needs' : 's need'} attention
               </div>
-              {shoot.studio_blocks.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">
-                  No studio held. Shooting outside? Then nothing to do here.
-                </p>
-              ) : (
-                <ul className="space-y-1">
-                  {shoot.studio_blocks.map((b) => (
-                    <li
-                      key={b.id}
-                      className="flex items-center gap-2 text-[12.5px]"
+              <ul className="space-y-1 text-[13px] text-rose-700">
+                {conflicts.map((r) => (
+                  <li key={r.id}>
+                    <span className="font-medium">{r.item.name}</span>: {r.conflict?.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Reserved gear */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold">
+                Reserved gear ({shoot.reservations.length})
+              </h2>
+              {!closed && canEdit && (
+                <Button size="sm" onClick={() => setPickerOpen(true)}>
+                  <Plus className="h-4 w-4" /> Add gear
+                </Button>
+              )}
+            </div>
+
+            {shoot.reservations.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
+                Nothing reserved yet.
+                {canEdit
+                  ? ' Add the gear this shoot needs so conflicts surface early.'
+                  : ' Only the owner, its editors, or the tech lead can reserve gear for this shoot.'}
+              </div>
+            )}
+
+            <ul className="space-y-2">
+              {shoot.reservations.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex items-center gap-3.5 rounded-xl border border-border bg-card px-3.5 py-3"
+                >
+                  <CategoryIcon category={r.item.category} photoUrl={r.item.photo_url} />
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/e/${r.item.code}?src=app`}
+                      className="flex items-center gap-2 hover:underline"
                     >
-                      <span className="font-medium">{b.studio_name}</span>
-                      <span className="text-muted-foreground">
-                        {fmtDay(b.starts_at)}, {fmtTime(b.starts_at)} to {fmtTime(b.ends_at)}
-                      </span>
-                      {canEdit && !closed && (
+                      <span className="truncate text-[14px] font-semibold">{r.item.name}</span>
+                      <CodeChip code={r.item.code} />
+                    </Link>
+                    <div className="truncate text-[12.5px] text-muted-foreground">
+                      {r.status === 'picked_up'
+                        ? `Picked up · ${itemStatusLine(r.item)}`
+                        : itemStatusLine(r.item)}
+                      {' · reserved by '}
+                      {r.reserved_by === currentUserId ? 'you' : r.reserved_by_name}
+                    </div>
+                    {r.conflict && (
+                      <div className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-rose-600">
+                        <AlertTriangle className="h-3 w-3 shrink-0" /> {r.conflict.message}
+                      </div>
+                    )}
+                  </div>
+
+                  {r.status === 'picked_up' ? (
+                    <Badge variant="success">Picked up</Badge>
+                  ) : r.status === 'pending' ? (
+                    <>
+                      <Badge variant="warning">Awaiting approval</Badge>
+                      {!closed && canManageEquipment && (
+                        <div className="flex gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={decidingId === r.id}
+                            onClick={() => decideReservation(r.id, false, r.item.name)}
+                          >
+                            Decline
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={decidingId === r.id}
+                            onClick={() => decideReservation(r.id, true, r.item.name)}
+                          >
+                            {decidingId === r.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                            Approve
+                          </Button>
+                        </div>
+                      )}
+                      {!closed && (r.reserved_by === currentUserId || canEdit) && (
                         <button
                           type="button"
-                          title="Release this booking"
+                          aria-label={`Remove ${r.item.name}`}
                           className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
-                          disabled={releasingBlockId === b.id}
-                          onClick={async () => {
-                            setReleasingBlockId(b.id)
-                            try {
-                              await removeStudioBlock(b.id)
-                              pushToast({
-                                title: `${b.studio_name} released`,
-                                variant: 'success',
-                              })
-                              router.refresh()
-                            } catch (err) {
-                              pushToast({
-                                title: err instanceof Error ? err.message : 'Failed',
-                                variant: 'error',
-                              })
-                            } finally {
-                              setReleasingBlockId(null)
-                            }
-                          }}
+                          disabled={removingId === r.id}
+                          onClick={() => removeReservation(r.id, r.item.name)}
                         >
-                          {releasingBlockId === b.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                          {removingId === r.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
-                            <X className="h-3 w-3" />
+                            <Trash2 className="h-4 w-4" />
                           )}
                         </button>
                       )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {pickupOpen && !closed && shoot.reservations.some((r) => r.status === 'active') && (
-            <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-[12.5px] text-blue-800">
-              <ScanLine className="h-4 w-4 shrink-0" />
-              Pickup is open: scan each item&apos;s QR at the shelf to convert reservations into
-              checkouts. Unpicked reservations expire 24 hours after the shoot starts.
-            </div>
-          )}
-        </div>
-
-        {/* Conflicts, loud */}
-        {conflicts.length > 0 && !closed && (
-          <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 space-y-2">
-            <div className="flex items-center gap-2 text-[14px] font-semibold text-rose-700">
-              <AlertTriangle className="h-5 w-5" />
-              {conflicts.length} item{conflicts.length === 1 ? ' needs' : 's need'} attention
-            </div>
-            <ul className="space-y-1 text-[13px] text-rose-700">
-              {conflicts.map((r) => (
-                <li key={r.id}>
-                  <span className="font-medium">{r.item.name}</span>: {r.conflict?.message}
+                    </>
+                  ) : (
+                    <>
+                      <StatusBadge status={r.item.status} className="hidden sm:inline-flex" />
+                      {!closed && pickupOpen && r.item.status === 'available' && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            startPickup({
+                              id: r.item.id,
+                              code: r.item.code,
+                              name: r.item.name,
+                              category: r.item.category,
+                              photo_url: r.item.photo_url,
+                              status: r.item.status,
+                            })
+                          }
+                        >
+                          Pick up
+                        </Button>
+                      )}
+                      {!closed && (r.reserved_by === currentUserId || canEdit) && (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${r.item.name}`}
+                          className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
+                          disabled={removingId === r.id}
+                          onClick={() => removeReservation(r.id, r.item.name)}
+                        >
+                          {removingId === r.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
           </div>
-        )}
 
-        {/* Reserved gear */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[14px] font-semibold">
-              Reserved gear ({shoot.reservations.length})
-            </h2>
-            {!closed && canEdit && (
-              <Button size="sm" onClick={() => setPickerOpen(true)}>
-                <Plus className="h-4 w-4" /> Add gear
-              </Button>
+          </div>
+
+          <aside className="order-1 space-y-4 lg:order-2 lg:sticky lg:top-4">
+          {/* Header card */}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <CalendarDays className="h-4 w-4" />
+                  {fmtShootWindow(shoot.starts_at, shoot.ends_at)}
+                </span>
+                {shoot.location && (
+                  <span className="flex items-center gap-1.5">
+                    <MapPin className="h-4 w-4" /> {shoot.location}
+                  </span>
+                )}
+                <span className="flex items-center gap-1.5">
+                  <User className="h-4 w-4" /> {shoot.owner_name}
+                </span>
+              </div>
+              <Badge
+                variant={
+                  shoot.effective_status === 'active'
+                    ? 'success'
+                    : shoot.effective_status === 'planned'
+                      ? 'info'
+                      : shoot.effective_status === 'cancelled'
+                        ? 'danger'
+                        : 'muted'
+                }
+              >
+                {SHOOT_STATUS_LABELS[shoot.effective_status]}
+              </Badge>
+            </div>
+
+            {/* Who can plan this shoot */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+              <Users className="h-3.5 w-3.5" />
+              <span className="rounded-full bg-muted px-2 py-0.5">
+                {shoot.owner_name} (owner)
+              </span>
+              {shoot.editors.map((e) => (
+                <span
+                  key={e.editor_row_id}
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"
+                >
+                  {e.full_name}
+                  {canEdit && !closed && (
+                    <button
+                      type="button"
+                      title={`Remove ${e.full_name}`}
+                      className="text-muted-foreground hover:text-rose-600"
+                      onClick={async () => {
+                        try {
+                          await removeShootEditor(e.editor_row_id)
+                          pushToast({ title: `${e.full_name} removed`, variant: 'success' })
+                          router.refresh()
+                        } catch (err) {
+                          pushToast({
+                            title: err instanceof Error ? err.message : 'Failed',
+                            variant: 'error',
+                          })
+                        }
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {canEdit && !closed && (
+                <button
+                  type="button"
+                  onClick={() => setEditorsOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 hover:bg-accent"
+                >
+                  <UserPlus className="h-3 w-3" /> Add editor
+                </button>
+              )}
+            </div>
+
+            {/* Studio bookings (hard-held for this shoot) */}
+            {(shoot.studio_blocks.length > 0 || (canEdit && !closed && studios.length > 0)) && (
+              <div className="space-y-1.5 border-t border-border pt-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+                    <Clapperboard className="h-3.5 w-3.5 text-muted-foreground" /> Studio
+                  </div>
+                  {canEdit && !closed && studios.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStudioOpen(true)}
+                      className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent"
+                    >
+                      <Plus className="h-3 w-3" /> Block a studio
+                    </button>
+                  )}
+                </div>
+                {shoot.studio_blocks.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">
+                    No studio held. Shooting outside? Then nothing to do here.
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {shoot.studio_blocks.map((b) => (
+                      <li
+                        key={b.id}
+                        className="flex items-center gap-2 text-[12.5px]"
+                      >
+                        <span className="font-medium">{b.studio_name}</span>
+                        <span className="text-muted-foreground">
+                          {fmtDay(b.starts_at)}, {fmtTime(b.starts_at)} to {fmtTime(b.ends_at)}
+                        </span>
+                        {canEdit && !closed && (
+                          <button
+                            type="button"
+                            title="Release this booking"
+                            className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
+                            disabled={releasingBlockId === b.id}
+                            onClick={async () => {
+                              setReleasingBlockId(b.id)
+                              try {
+                                await removeStudioBlock(b.id)
+                                pushToast({
+                                  title: `${b.studio_name} released`,
+                                  variant: 'success',
+                                })
+                                router.refresh()
+                              } catch (err) {
+                                pushToast({
+                                  title: err instanceof Error ? err.message : 'Failed',
+                                  variant: 'error',
+                                })
+                              } finally {
+                                setReleasingBlockId(null)
+                              }
+                            }}
+                          >
+                            {releasingBlockId === b.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <X className="h-3 w-3" />
+                            )}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {pickupOpen && !closed && shoot.reservations.some((r) => r.status === 'active') && (
+              <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-[12.5px] text-blue-800">
+                <ScanLine className="h-4 w-4 shrink-0" />
+                Pickup is open: scan each item&apos;s QR at the shelf to convert reservations into
+                checkouts. Unpicked reservations expire 24 hours after the shoot starts.
+              </div>
             )}
           </div>
 
-          {shoot.reservations.length === 0 && (
-            <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
-              Nothing reserved yet.
-              {canEdit
-                ? ' Add the gear this shoot needs so conflicts surface early.'
-                : ' Only the owner, its editors, or the tech lead can reserve gear for this shoot.'}
-            </div>
-          )}
-
-          <ul className="space-y-2">
-            {shoot.reservations.map((r) => (
-              <li
-                key={r.id}
-                className="flex items-center gap-3.5 rounded-xl border border-border bg-card px-3.5 py-3"
-              >
-                <CategoryIcon category={r.item.category} photoUrl={r.item.photo_url} />
-                <div className="min-w-0 flex-1">
-                  <Link
-                    href={`/e/${r.item.code}?src=app`}
-                    className="flex items-center gap-2 hover:underline"
-                  >
-                    <span className="truncate text-[14px] font-semibold">{r.item.name}</span>
-                    <CodeChip code={r.item.code} />
-                  </Link>
-                  <div className="truncate text-[12.5px] text-muted-foreground">
-                    {r.status === 'picked_up'
-                      ? `Picked up · ${itemStatusLine(r.item)}`
-                      : itemStatusLine(r.item)}
-                    {' · reserved by '}
-                    {r.reserved_by === currentUserId ? 'you' : r.reserved_by_name}
-                  </div>
-                  {r.conflict && (
-                    <div className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-rose-600">
-                      <AlertTriangle className="h-3 w-3 shrink-0" /> {r.conflict.message}
-                    </div>
-                  )}
-                </div>
-
-                {r.status === 'picked_up' ? (
-                  <Badge variant="success">Picked up</Badge>
-                ) : r.status === 'pending' ? (
-                  <>
-                    <Badge variant="warning">Awaiting approval</Badge>
-                    {!closed && canManageEquipment && (
-                      <div className="flex gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={decidingId === r.id}
-                          onClick={() => decideReservation(r.id, false, r.item.name)}
-                        >
-                          Decline
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={decidingId === r.id}
-                          onClick={() => decideReservation(r.id, true, r.item.name)}
-                        >
-                          {decidingId === r.id && <Loader2 className="h-4 w-4 animate-spin" />}
-                          Approve
-                        </Button>
-                      </div>
-                    )}
-                    {!closed && (r.reserved_by === currentUserId || canEdit) && (
-                      <button
-                        type="button"
-                        aria-label={`Remove ${r.item.name}`}
-                        className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
-                        disabled={removingId === r.id}
-                        onClick={() => removeReservation(r.id, r.item.name)}
-                      >
-                        {removingId === r.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <StatusBadge status={r.item.status} className="hidden sm:inline-flex" />
-                    {!closed && pickupOpen && r.item.status === 'available' && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          startPickup({
-                            id: r.item.id,
-                            code: r.item.code,
-                            name: r.item.name,
-                            category: r.item.category,
-                            photo_url: r.item.photo_url,
-                            status: r.item.status,
-                          })
-                        }
-                      >
-                        Pick up
-                      </Button>
-                    )}
-                    {!closed && (r.reserved_by === currentUserId || canEdit) && (
-                      <button
-                        type="button"
-                        aria-label={`Remove ${r.item.name}`}
-                        className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
-                        disabled={removingId === r.id}
-                        onClick={() => removeReservation(r.id, r.item.name)}
-                      >
-                        {removingId === r.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
-                    )}
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Danger zone */}
-        {canCancel && (
-          <div className="pt-2 flex flex-wrap gap-2">
-            {!closed && (
+          {/* Danger zone */}
+          {canCancel && (
+            <div className="pt-2 flex flex-wrap gap-2">
+              {!closed && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                  disabled={cancelling || deleting}
+                  onClick={doCancelShoot}
+                >
+                  {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  Cancel this shoot
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
                 className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                 disabled={cancelling || deleting}
-                onClick={doCancelShoot}
-              >
-                {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                Cancel this shoot
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-              disabled={cancelling || deleting}
-              onClick={async () => {
-                if (
-                  !window.confirm(
-                    `Delete ${shoot.name} permanently? Its reservations, studio bookings and editor list are removed too. This cannot be undone.`
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      `Delete ${shoot.name} permanently? Its reservations, studio bookings and editor list are removed too. This cannot be undone.`
+                    )
                   )
-                )
-                  return
-                setDeleting(true)
-                try {
-                  await deleteShoot(shoot.id)
-                  pushToast({ title: `${shoot.name} deleted`, variant: 'success' })
-                  router.push('/lockup?tab=shoots')
-                  router.refresh()
-                } catch (err) {
-                  pushToast({
-                    title: err instanceof Error ? err.message : 'Could not delete the shoot',
-                    variant: 'error',
-                  })
-                  setDeleting(false)
-                }
-              }}
-            >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Delete this shoot
-            </Button>
-          </div>
-        )}
+                    return
+                  setDeleting(true)
+                  try {
+                    await deleteShoot(shoot.id)
+                    pushToast({ title: `${shoot.name} deleted`, variant: 'success' })
+                    router.push('/lockup?tab=shoots')
+                    router.refresh()
+                  } catch (err) {
+                    pushToast({
+                      title: err instanceof Error ? err.message : 'Could not delete the shoot',
+                      variant: 'error',
+                    })
+                    setDeleting(false)
+                  }
+                }}
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete this shoot
+              </Button>
+            </div>
+          )}
+          </aside>
+        </div>
       </div>
 
       <ReservationPicker

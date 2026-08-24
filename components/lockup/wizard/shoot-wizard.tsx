@@ -83,7 +83,9 @@ export function ShootWizard({
   const windowTouched = useRef(false)
 
   // ---- step 2: studio ----
-  const [slot, setSlot] = useState<StudioSlot | null>(null)
+  // A shoot may hold several slots: different rooms, different days, or more
+  // than one window on the same day.
+  const [slots, setSlots] = useState<StudioSlot[]>([])
 
   // ---- step 3: gear ----
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -95,20 +97,27 @@ export function ShootWizard({
   const endsAtIso = new Date(`${endDate}T${endTime}`).toISOString()
   const windowValid = new Date(endsAtIso) > new Date(startsAtIso)
 
-  function handleSlotChange(next: StudioSlot | null) {
-    setSlot(next)
-    if (next) {
-      // The shoot window adopts the studio slot unless the user set it themselves.
-      if (!windowTouched.current) {
-        setStartDate(next.date)
-        setEndDate(next.date)
-        setStartTime(next.startHM)
-        setEndTime(next.endHM === '23:59' ? '23:59' : next.endHM)
-      }
-      // The Book-studio doorway names the shoot after the slot until edited.
-      if (autoNamed.current && (name.trim() === '' || name.startsWith('Studio hold'))) {
-        setName(`Studio hold - ${dayLabel(next.date)}`)
-      }
+  function handleSlotsChange(next: StudioSlot[]) {
+    setSlots(next)
+    if (next.length === 0) return
+
+    // The shoot window spans every slot, unless the user set it themselves.
+    if (!windowTouched.current) {
+      const sorted = [...next].sort((a, b) =>
+        `${a.date}T${a.startHM}`.localeCompare(`${b.date}T${b.startHM}`)
+      )
+      const first = sorted[0]
+      const last = sorted.reduce((acc, s) =>
+        `${s.date}T${s.endHM}` > `${acc.date}T${acc.endHM}` ? s : acc
+      )
+      setStartDate(first.date)
+      setStartTime(first.startHM)
+      setEndDate(last.date)
+      setEndTime(last.endHM)
+    }
+    // The Book-studio doorway names the shoot after the first slot until edited.
+    if (autoNamed.current && (name.trim() === '' || name.startsWith('Studio hold'))) {
+      setName(`Studio hold - ${dayLabel(next[0].date)}`)
     }
   }
 
@@ -209,17 +218,16 @@ export function ShootWizard({
         startsAt: startsAtIso,
         endsAt: endsAtIso,
         editorIds,
-        studio: slot
-          ? {
-              studioId: slot.studioId,
-              startsAt: new Date(`${slot.date}T${slot.startHM}`).toISOString(),
-              endsAt: new Date(`${slot.date}T${slot.endHM}`).toISOString(),
-            }
-          : undefined,
+        studios: slots.map((sl) => ({
+          studioId: sl.studioId,
+          startsAt: new Date(`${sl.date}T${sl.startHM}`).toISOString(),
+          endsAt: new Date(`${sl.date}T${sl.endHM}`).toISOString(),
+        })),
         itemIds: selectedIds,
       })
       const bits: string[] = []
-      if (slot) bits.push('studio booked')
+      if (slots.length > 0)
+        bits.push(slots.length === 1 ? 'studio booked' : `${slots.length} studio slots booked`)
       if (result.reserved > 0) bits.push(`${result.reserved} item(s) reserved`)
       if (result.pendingApproval > 0)
         bits.push(`${result.pendingApproval} awaiting tech lead approval`)
@@ -243,7 +251,105 @@ export function ShootWizard({
     startDate === endDate
       ? `${dayLabel(startDate)}, ${slotLabel(startTime)} to ${slotLabel(endTime)}`
       : `${dayLabel(startDate)}, ${slotLabel(startTime)} to ${dayLabel(endDate)}, ${slotLabel(endTime)}`
-  const studioName = slot ? studios.find((s) => s.id === slot.studioId)?.name ?? 'Studio' : null
+  const studioNameOf = (studioId: string) =>
+    studios.find((s) => s.id === studioId)?.name ?? 'Studio'
+
+  const stepNav = (
+    <div className="flex items-center justify-between gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={step === 1 || busy}
+        onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+      >
+        <ArrowLeft className="h-4 w-4" /> Back
+      </Button>
+      {step < 3 ? (
+        <Button type="button" disabled={busy} onClick={() => setStep((s) => (s === 1 ? 2 : 3))}>
+          Next: {step === 1 ? 'Studio' : 'Gear'} <ArrowRight className="h-4 w-4" />
+        </Button>
+      ) : (
+        <Button type="button" disabled={!canSubmit} onClick={submit}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          Create shoot
+        </Button>
+      )}
+    </div>
+  )
+
+  const planSummary = (
+    <>
+      <div className="mt-2 space-y-1.5 text-[13px]">
+        <div className="font-medium">{name.trim() || 'Unnamed shoot'}</div>
+        <div className="text-muted-foreground">{windowLabel}</div>
+        {slots.map((sl, i) => (
+          <div key={`${sl.studioId}-${sl.date}-${sl.startHM}-${i}`} className="text-muted-foreground">
+            {studioNameOf(sl.studioId)} · {dayLabel(sl.date)}, {slotLabel(sl.startHM)} to{' '}
+            {slotLabel(sl.endHM)}
+          </div>
+        ))}
+        {locationType === 'outside' && outsideAddress.trim() && (
+          <div className="text-muted-foreground">Outside: {outsideAddress.trim()}</div>
+        )}
+      </div>
+
+      {step === 3 &&
+        (selectedGroups.length > 0 ? (
+          <ul className="mt-3 space-y-1.5">
+            {selectedGroups.map((g) => (
+              <li
+                key={g.key}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[13px]"
+              >
+                <span className="truncate">
+                  {g.name}
+                  {g.units.length > 1 && (
+                    <span className="ml-1 font-semibold text-muted-foreground">
+                      ×{g.units.length}
+                    </span>
+                  )}
+                  {g.requires_approval && (
+                    <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600">
+                      approval
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${g.name}`}
+                  onClick={() =>
+                    setSelectedIds((prev) =>
+                      prev.filter((id) => !g.units.some((u) => u.item_id === id))
+                    )
+                  }
+                  className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-2 text-[12.5px] text-muted-foreground">
+            no gear yet
+          </div>
+        ))}
+
+      {step === 3 && approvalCount > 0 && (
+        <div className="mt-3 rounded-lg bg-amber-500/15 px-3 py-1.5 text-[12.5px] font-medium text-amber-600">
+          {approvalCount} approval{approvalCount > 1 ? 's' : ''} needed
+        </div>
+      )}
+
+      <Button type="button" className="mt-4 w-full" disabled={!canSubmit} onClick={submit}>
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+        Create shoot
+      </Button>
+      <p className="mt-2 text-center text-[11.5px] text-muted-foreground">
+        {name.trim() ? 'Submit any time; skip what you like.' : 'Name the shoot to submit.'}
+      </p>
+    </>
+  )
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -266,7 +372,7 @@ export function ShootWizard({
           {STEPS.map((s) => {
             const done =
               (s.n === 1 && name.trim().length > 0 && step > 1) ||
-              (s.n === 2 && !!slot && step > 2)
+              (s.n === 2 && slots.length > 0 && step > 2)
             return (
               <button
                 key={s.n}
@@ -287,144 +393,65 @@ export function ShootWizard({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_270px]">
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4">
-            {step === 1 && (
-              <StepDetails
-                name={name}
-                onNameChange={(v) => {
-                  autoNamed.current = false
-                  setName(v)
-                }}
-                locationType={locationType}
-                onLocationTypeChange={setLocationType}
-                outsideAddress={outsideAddress}
-                onOutsideAddressChange={setOutsideAddress}
-                notes={notes}
-                onNotesChange={setNotes}
-                editorIds={editorIds}
-                onEditorIdsChange={setEditorIds}
-                people={people}
-                window={{ startDate, startTime, endDate, endTime }}
-                onWindowChange={handleWindowChange}
-                windowAdoptedFromStudio={!windowTouched.current && !!slot}
-              />
-            )}
-            {step === 2 && (
-              <StepStudio studios={studios} blocks={blocks} slot={slot} onSlotChange={handleSlotChange} />
-            )}
-            {step === 3 && (
-              <StepGear
-                availability={availability}
-                loading={availabilityLoading}
-                kits={kits}
-                selectedIds={selectedIds}
-                onToggle={toggleItem}
-                onAddKit={addKit}
-              />
-            )}
+      {/* Steps 1 and 2 keep a rail beside the form. Step 3 hands the same
+          summary to the gear picker, so gear selection looks identical to
+          browsing Lockup: type, gear, and what you picked, all at once. */}
+      {step === 3 ? (
+        <StepGear
+          availability={availability}
+          loading={availabilityLoading}
+          kits={kits}
+          selectedIds={selectedIds}
+          onToggle={toggleItem}
+          onAddMany={(ids) =>
+            setSelectedIds((prev) => Array.from(new Set([...prev, ...ids])))
+          }
+          asideCount={selectedGroups.length}
+          aside={planSummary}
+          footer={stepNav}
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_270px]">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-card p-4">
+              {step === 1 && (
+                <StepDetails
+                  name={name}
+                  onNameChange={setName}
+                  locationType={locationType}
+                  onLocationTypeChange={setLocationType}
+                  outsideAddress={outsideAddress}
+                  onOutsideAddressChange={setOutsideAddress}
+                  notes={notes}
+                  onNotesChange={setNotes}
+                  editorIds={editorIds}
+                  onEditorIdsChange={setEditorIds}
+                  people={people}
+                  window={{ startDate, startTime, endDate, endTime }}
+                  onWindowChange={handleWindowChange}
+                  windowAdoptedFromStudio={!windowTouched.current && slots.length > 0}
+                />
+              )}
+              {step === 2 && (
+                <StepStudio
+                  studios={studios}
+                  blocks={blocks}
+                  slots={slots}
+                  onSlotsChange={handleSlotsChange}
+                />
+              )}
+            </div>
+            {stepNav}
           </div>
 
-          {/* Step navigation */}
-          <div className="flex items-center justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={step === 1 || busy}
-              onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
-            >
-              <ArrowLeft className="h-4 w-4" /> Back
-            </Button>
-            {step < 3 ? (
-              <Button type="button" disabled={busy} onClick={() => setStep((s) => (s === 1 ? 2 : 3))}>
-                Next: {step === 1 ? 'Studio' : 'Gear'} <ArrowRight className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button type="button" disabled={!canSubmit} onClick={submit}>
-                {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                Create shoot
-              </Button>
-            )}
-          </div>
+          <aside className="h-fit rounded-xl border border-border bg-card p-4 lg:sticky lg:top-4">
+            <div className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Your plan so far
+            </div>
+            {planSummary}
+          </aside>
         </div>
-
-        {/* Selected rail */}
-        <aside className="h-fit rounded-xl border border-border bg-card p-4 lg:sticky lg:top-4">
-          <div className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {step === 3 ? `Selected (${selectedGroups.length})` : 'Your plan so far'}
-          </div>
-
-          <div className="mt-2 space-y-1.5 text-[13px]">
-            <div className="font-medium">{name.trim() || 'Unnamed shoot'}</div>
-            <div className="text-muted-foreground">{windowLabel}</div>
-            {studioName && slot && (
-              <div className="text-muted-foreground">
-                {studioName} · {dayLabel(slot.date)}, {slotLabel(slot.startHM)} to{' '}
-                {slotLabel(slot.endHM)}
-              </div>
-            )}
-            {locationType === 'outside' && outsideAddress.trim() && (
-              <div className="text-muted-foreground">Outside: {outsideAddress.trim()}</div>
-            )}
-          </div>
-
-          {step === 3 && (selectedGroups.length > 0 ? (
-            <ul className="mt-3 space-y-1.5">
-              {selectedGroups.map((g) => (
-                <li
-                  key={g.key}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[13px]"
-                >
-                  <span className="truncate">
-                    {g.name}
-                    {g.units.length > 1 && (
-                      <span className="ml-1 font-semibold text-muted-foreground">
-                        ×{g.units.length}
-                      </span>
-                    )}
-                    {g.requires_approval && (
-                      <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600">
-                        approval
-                      </span>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${g.name}`}
-                    onClick={() =>
-                      setSelectedIds((prev) =>
-                        prev.filter((id) => !g.units.some((u) => u.item_id === id))
-                      )
-                    }
-                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-2 text-[12.5px] text-muted-foreground">
-              no gear yet
-            </div>
-          ))}
-
-          {step === 3 && approvalCount > 0 && (
-            <div className="mt-3 rounded-lg bg-amber-500/15 px-3 py-1.5 text-[12.5px] font-medium text-amber-600">
-              {approvalCount} approval{approvalCount > 1 ? 's' : ''} needed
-            </div>
-          )}
-
-          <Button type="button" className="mt-4 w-full" disabled={!canSubmit} onClick={submit}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            Create shoot
-          </Button>
-          <p className="mt-2 text-center text-[11.5px] text-muted-foreground">
-            {name.trim() ? 'Submit any time; skip what you like.' : 'Name the shoot to submit.'}
-          </p>
-        </aside>
-      </div>
+      )}
     </div>
   )
 }

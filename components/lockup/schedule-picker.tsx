@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // All days are local 'YYYY-MM-DD' strings; comparisons are plain string compares.
@@ -109,7 +109,7 @@ export function RangeCalendar({
               key={iso}
               className={cn(
                 'flex justify-center',
-                inBand && 'bg-muted',
+                inBand && 'bg-primary/10',
                 inBand && isStart && 'rounded-l-full',
                 inBand && isEnd && 'rounded-r-full'
               )}
@@ -119,8 +119,8 @@ export function RangeCalendar({
                 disabled={past}
                 onClick={() => onPick(iso)}
                 className={cn(
-                  'flex h-9 w-9 items-center justify-center rounded-full text-[13px] tabular-nums transition-colors',
-                  past && 'text-muted-foreground/40 line-through',
+                  'flex h-10 w-10 items-center justify-center rounded-full text-[13.5px] font-medium tabular-nums transition-colors',
+                  past && 'cursor-not-allowed text-muted-foreground/30',
                   !past && outside && 'text-muted-foreground/50',
                   !past && !isStart && !isEnd && 'hover:bg-muted',
                   !past && iso === todayIso && !isStart && !isEnd && 'font-bold text-primary',
@@ -153,6 +153,38 @@ export function slotLabel(hm: string): string {
   const [h, m] = hm.split(':').map(Number)
   const h12 = h % 12 === 0 ? 12 : h % 12
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
+}
+
+export function TimeSelect({
+  label,
+  slots,
+  value,
+  onChange,
+}: {
+  label: string
+  slots: string[]
+  value: string
+  onChange: (hm: string) => void
+}) {
+  return (
+    <label className="min-w-0 flex-1">
+      <span className="mb-1.5 block text-[12px] font-medium text-muted-foreground">{label}</span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-10 w-full appearance-none rounded-xl border border-input bg-card px-3 pr-9 text-[14px] font-semibold tabular-nums outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {slots.map((s) => (
+            <option key={s} value={s}>
+              {slotLabel(s)}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      </div>
+    </label>
+  )
 }
 
 export function TimeSlotColumn({

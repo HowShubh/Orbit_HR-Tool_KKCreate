@@ -50,16 +50,43 @@ type DayBlock = { startMin: number; endMin: number; label: string }
 export function StepStudio({
   studios,
   blocks,
-  slot,
-  onSlotChange,
+  slots,
+  onSlotsChange,
 }: {
   studios: Tables<'equipment_studios'>[]
   blocks: StudioScheduleEntry[]
-  slot: StudioSlot | null
-  onSlotChange: (slot: StudioSlot | null) => void
+  /** A shoot can hold several rooms, several days, or several windows a day. */
+  slots: StudioSlot[]
+  onSlotsChange: (slots: StudioSlot[]) => void
 }) {
   const { pushToast } = useStore()
-  const [studioId, setStudioId] = useState<string>(slot?.studioId ?? studios[0]?.id ?? '')
+  const [studioId, setStudioId] = useState<string>(slots[0]?.studioId ?? studios[0]?.id ?? '')
+
+  const slotKey = (sl: StudioSlot) => `${sl.studioId}|${sl.date}|${sl.startHM}`
+  const replaceSlot = (target: StudioSlot, next: StudioSlot) =>
+    onSlotsChange(slots.map((sl) => (slotKey(sl) === slotKey(target) ? next : sl)))
+  const dropSlot = (target: StudioSlot) =>
+    onSlotsChange(slots.filter((sl) => slotKey(sl) !== slotKey(target)))
+
+  /** Your own slots for one studio+day — several are allowed. */
+  const mySlotsFor = (sId: string, dayIso: string) =>
+    slots.filter((sl) => sl.studioId === sId && sl.date === dayIso)
+
+  /** Would [from,to) collide with another of YOUR slots in the same room? */
+  function overlapsOwnSlot(
+    sId: string,
+    dayIso: string,
+    fromMin: number,
+    toMin: number,
+    ignore?: StudioSlot
+  ): boolean {
+    return mySlotsFor(sId, dayIso).some(
+      (sl) =>
+        (!ignore || slotKey(sl) !== slotKey(ignore)) &&
+        hmToMin(sl.startHM) < toMin &&
+        hmToMin(sl.endHM) > fromMin
+    )
+  }
   const [weekOffset, setWeekOffset] = useState(0)
 
   const days = weekDays(weekOffset)
@@ -117,9 +144,10 @@ export function StepStudio({
     return 'free today'
   }
 
+  // Switching rooms no longer discards what you booked: slots for every studio
+  // are kept, and the grid just shows the room you are looking at.
   function selectStudio(sId: string) {
     setStudioId(sId)
-    if (slot && slot.studioId !== sId) onSlotChange(null)
   }
 
   function cellClick(dayIso: string, min: number) {
@@ -127,54 +155,71 @@ export function StepStudio({
     if (isPast(dayIso, min + STEP)) return
     if (overlapsBlock(studioId, dayIso, min, min + STEP)) return
 
-    const active = slot && slot.studioId === studioId && slot.date === dayIso ? slot : null
-    if (active) {
-      const startMin = hmToMin(active.startHM)
-      if (min === startMin) {
-        onSlotChange(null) // tap the start again = clear
+    const mine = mySlotsFor(studioId, dayIso)
+
+    // Tapping inside one of your own slots edits that one.
+    const hit = mine.find((sl) => hmToMin(sl.startHM) <= min && hmToMin(sl.endHM) > min)
+    if (hit) {
+      if (min === hmToMin(hit.startHM)) {
+        dropSlot(hit) // tap the start again = remove this slot
         return
       }
-      if (min > startMin) {
-        // extend or trim the end
-        const candidate = min + STEP
-        if (overlapsBlock(studioId, dayIso, startMin, candidate)) {
-          pushToast({ title: 'That would run into an existing booking.', variant: 'info' })
-          return
-        }
-        onSlotChange({ ...active, endHM: minToHM(candidate) })
+      // Tapping later inside the slot trims it to end there.
+      const candidate = min + STEP
+      if (overlapsBlock(studioId, dayIso, hmToMin(hit.startHM), candidate)) {
+        pushToast({ title: 'That would run into an existing booking.', variant: 'info' })
         return
       }
+      replaceSlot(hit, { ...hit, endHM: minToHM(candidate) })
+      return
     }
-    // fresh start: default 2h, clamped to the next booking and closing time
+
+    // Fresh slot: default 2h, clamped by the next booking, your next own slot,
+    // and closing time.
     const nextBlock = dayBlocksFor(studioId, dayIso)
       .filter((b) => b.startMin > min)
       .sort((a, b) => a.startMin - b.startMin)[0]
-    const end = Math.min(min + 120, END_MIN, nextBlock ? nextBlock.startMin : Infinity)
-    onSlotChange({
-      studioId,
-      date: dayIso,
-      startHM: minToHM(min),
-      endHM: minToHM(Math.max(end, min + STEP)),
-    })
+    const nextOwn = mine
+      .filter((sl) => hmToMin(sl.startHM) > min)
+      .sort((a, b) => hmToMin(a.startHM) - hmToMin(b.startHM))[0]
+    const end = Math.min(
+      min + 120,
+      END_MIN,
+      nextBlock ? nextBlock.startMin : Infinity,
+      nextOwn ? hmToMin(nextOwn.startHM) : Infinity
+    )
+    if (end <= min) return
+    onSlotsChange([
+      ...slots,
+      {
+        studioId,
+        date: dayIso,
+        startHM: minToHM(min),
+        endHM: minToHM(Math.max(end, min + STEP)),
+      },
+    ])
   }
 
-  function setSlotTime(kind: 'start' | 'end', hm: string) {
-    if (!slot) return
-    const startMin = kind === 'start' ? hmToMin(hm) : hmToMin(slot.startHM)
-    const endMin = kind === 'end' ? hmToMin(hm) : hmToMin(slot.endHM)
+  function setSlotTime(target: StudioSlot, kind: 'start' | 'end', hm: string) {
+    const startMin = kind === 'start' ? hmToMin(hm) : hmToMin(target.startHM)
+    const endMin = kind === 'end' ? hmToMin(hm) : hmToMin(target.endHM)
     if (endMin <= startMin) {
       pushToast({ title: 'The booking must end after it starts.', variant: 'info' })
       return
     }
-    if (overlapsBlock(slot.studioId, slot.date, startMin, endMin)) {
+    if (overlapsBlock(target.studioId, target.date, startMin, endMin)) {
       pushToast({ title: 'That time runs into an existing booking.', variant: 'info' })
       return
     }
-    if (isPast(slot.date, startMin)) {
+    if (overlapsOwnSlot(target.studioId, target.date, startMin, endMin, target)) {
+      pushToast({ title: 'That overlaps another of your slots in this room.', variant: 'info' })
+      return
+    }
+    if (isPast(target.date, startMin)) {
       pushToast({ title: 'That time is already in the past.', variant: 'info' })
       return
     }
-    onSlotChange({ ...slot, startHM: minToHM(startMin), endHM: minToHM(endMin) })
+    replaceSlot(target, { ...target, startHM: minToHM(startMin), endHM: minToHM(endMin) })
   }
 
   if (studios.length === 0) {
@@ -291,8 +336,7 @@ export function StepStudio({
 
             {days.map((d) => {
               const dayBlocks = studioId ? dayBlocksFor(studioId, d) : []
-              const daySlot =
-                slot && slot.studioId === studioId && slot.date === d ? slot : null
+              const daySlots = studioId ? mySlotsFor(studioId, d) : []
               return (
                 <div
                   key={d}
@@ -335,22 +379,20 @@ export function StepStudio({
                     </div>
                   ))}
 
-                  {daySlot && (
+                  {daySlots.map((sl) => (
                     <div
+                      key={slotKey(sl)}
                       className="pointer-events-none absolute inset-x-0.5 overflow-hidden rounded-md bg-primary px-1.5 py-0.5 text-[10.5px] font-semibold leading-tight text-primary-foreground"
                       style={{
-                        top:
-                          ((hmToMin(daySlot.startHM) - START_MIN) / (END_MIN - START_MIN)) *
-                          GRID_PX,
+                        top: ((hmToMin(sl.startHM) - START_MIN) / (END_MIN - START_MIN)) * GRID_PX,
                         height:
-                          ((hmToMin(daySlot.endHM) - hmToMin(daySlot.startHM)) /
-                            (END_MIN - START_MIN)) *
+                          ((hmToMin(sl.endHM) - hmToMin(sl.startHM)) / (END_MIN - START_MIN)) *
                           GRID_PX,
                       }}
                     >
-                      {slotLabel(daySlot.startHM)} to {slotLabel(daySlot.endHM)}
+                      {slotLabel(sl.startHM)} to {slotLabel(sl.endHM)}
                     </div>
-                  )}
+                  ))}
                 </div>
               )
             })}
@@ -359,53 +401,80 @@ export function StepStudio({
       </div>
 
       <p className="text-[12px] text-muted-foreground">
-        Tap a free slot to book about 2 hours; tap a later slot to stretch or shrink the end; tap
-        the start again to clear. Fine-tune below.
+        Tap any free time to add a 2-hour slot; tap inside a slot to trim its end, or tap its
+        start again to remove it. Book as many as you need: different rooms, different days, or
+        several windows in one day. Fine-tune the exact times below.
       </p>
 
-      {/* Fine-tune row */}
-      {slot && slot.studioId === studioId ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex items-center gap-1.5 text-[13px] font-medium">
-            <Clapperboard className="h-4 w-4 text-primary" />
-            {dayLabel(slot.date)}
-          </span>
-          <Select value={slot.startHM} onValueChange={(v) => setSlotTime('start', v)}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fifteenSteps.slice(0, -1).map((hm) => (
-                <SelectItem key={hm} value={hm}>
-                  {slotLabel(hm)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-[13px] text-muted-foreground">to</span>
-          <Select value={slot.endHM} onValueChange={(v) => setSlotTime('end', v)}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fifteenSteps.slice(1).map((hm) => (
-                <SelectItem key={hm} value={hm}>
-                  {slotLabel(hm)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <button
-            type="button"
-            onClick={() => onSlotChange(null)}
-            className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[12.5px] text-muted-foreground hover:bg-muted"
-          >
-            <X className="h-3 w-3" /> Clear
-          </button>
+      {/* Every slot on this shoot, across all rooms */}
+      {slots.length > 0 ? (
+        <div className="space-y-2">
+          <div className="text-[11.5px] font-bold uppercase tracking-wider text-muted-foreground">
+            Studio slots on this shoot ({slots.length})
+          </div>
+          <ul className="space-y-2">
+            {[...slots]
+              .sort((a, b) =>
+                `${a.date}T${a.startHM}`.localeCompare(`${b.date}T${b.startHM}`)
+              )
+              .map((sl) => {
+                const room = studios.find((st) => st.id === sl.studioId)
+                return (
+                  <li
+                    key={slotKey(sl)}
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2"
+                  >
+                    <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+                      <Clapperboard className="h-4 w-4 shrink-0 text-primary" />
+                      {room?.name ?? 'Studio'}
+                    </span>
+                    <span className="text-[13px] text-muted-foreground">{dayLabel(sl.date)}</span>
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                      <Select
+                        value={sl.startHM}
+                        onValueChange={(v) => setSlotTime(sl, 'start', v)}
+                      >
+                        <SelectTrigger className="h-9 w-[116px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fifteenSteps.slice(0, -1).map((hm) => (
+                            <SelectItem key={hm} value={hm}>
+                              {slotLabel(hm)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-[13px] text-muted-foreground">to</span>
+                      <Select value={sl.endHM} onValueChange={(v) => setSlotTime(sl, 'end', v)}>
+                        <SelectTrigger className="h-9 w-[116px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fifteenSteps.slice(1).map((hm) => (
+                            <SelectItem key={hm} value={hm}>
+                              {slotLabel(hm)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <button
+                        type="button"
+                        aria-label="Remove this slot"
+                        onClick={() => dropSlot(sl)}
+                        className="rounded-full border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-rose-600"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+          </ul>
         </div>
       ) : (
         <p className="text-[13px] text-muted-foreground">
-          No studio slot selected. That is fine: outdoor shoots skip this step entirely.
+          No studio slot yet. That is fine: outdoor shoots skip this step entirely.
         </p>
       )}
     </div>
