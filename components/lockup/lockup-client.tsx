@@ -43,6 +43,7 @@ export function LockupClient({
   canManageEquipment,
   initialTab,
   openCartInitially,
+  myOverdue,
 }: {
   items: EquipmentItemRow[]
   kits: KitRow[]
@@ -57,6 +58,8 @@ export function LockupClient({
   initialTab: LockupTab
   /** Set when arriving from the cart bar on another Lockup route. */
   openCartInitially?: boolean
+  /** What the viewer already owes back; warned about at checkout. */
+  myOverdue?: { item_name: string; days_late: number }[]
 }) {
   const router = useRouter()
   const [tab, setTab] = useState<string>(initialTab)
@@ -114,6 +117,7 @@ export function LockupClient({
               kits={kits}
               shoots={shoots}
               currentUserId={currentUserId}
+              myOverdue={myOverdue}
             />
           </TabsContent>
 
@@ -163,6 +167,7 @@ export function LockupClient({
         items={items}
         shoots={shoots}
         currentUserId={currentUserId}
+        myOverdue={myOverdue}
       />
     </div>
   )

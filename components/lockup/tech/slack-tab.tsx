@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/lib/store'
 import {
+  updateOverdueEscalation,
   updateLockupSlackSetting,
   sendLockupSlackTest,
   syncLockupSlackIds,
@@ -39,7 +40,13 @@ function errMsg(err: unknown) {
   return err instanceof Error ? err.message : 'Something went wrong'
 }
 
-export function LockupSlackTab({ settings }: { settings: LockupSlackSettings }) {
+export function LockupSlackTab({
+  settings,
+  people,
+}: {
+  settings: LockupSlackSettings
+  people: { id: string; full_name: string }[]
+}) {
   const { pushToast } = useStore()
   const router = useRouter()
   const [, startTransition] = useTransition()
@@ -52,7 +59,27 @@ export function LockupSlackTab({ settings }: { settings: LockupSlackSettings }) 
 
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getLockupSlackStatus>> | null>(null)
   const [checking, setChecking] = useState(true)
-  const [busy, setBusy] = useState<'sync' | 'test' | null>(null)
+  const [busy, setBusy] = useState<'sync' | 'test' | 'escalation' | null>(null)
+  const [leadId, setLeadId] = useState(settings.techLeadUserId ?? '')
+  const [leadDays, setLeadDays] = useState(settings.escalateToLeadsAfterDays)
+  const [channelDays, setChannelDays] = useState(settings.escalateToChannelAfterDays)
+
+  async function saveEscalation() {
+    setBusy('escalation')
+    try {
+      await updateOverdueEscalation({
+        techLeadUserId: leadId || null,
+        leadsAfterDays: leadDays,
+        channelAfterDays: channelDays,
+      })
+      pushToast({ title: 'Escalation saved', variant: 'success' })
+      router.refresh()
+    } catch (err) {
+      pushToast({ title: 'Could not save', body: errMsg(err), variant: 'error' })
+    } finally {
+      setBusy(null)
+    }
+  }
 
   useEffect(() => {
     getLockupSlackStatus()
@@ -179,6 +206,79 @@ export function LockupSlackTab({ settings }: { settings: LockupSlackSettings }) 
             These switches turn features on and off instantly. The bot also stays fully off whenever
             its Slack token is missing. In-app notifications are not affected.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* Overdue escalation */}
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div>
+            <div className="text-sm font-semibold">When gear goes overdue</div>
+            <p className="text-[12px] text-muted-foreground">
+              The holder is reminded every day regardless. These are the extra steps.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[12.5px] font-medium" htmlFor="tech-lead">
+              Tech lead
+            </label>
+            <select
+              id="tech-lead"
+              value={leadId}
+              onChange={(e) => setLeadId(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-card px-3 text-[13.5px]"
+            >
+              <option value="">Every equipment manager</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.full_name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11.5px] text-muted-foreground">
+              They get the first escalation. Leave unset and it goes to everyone with
+              manage_equipment instead.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <label className="flex-1 space-y-1.5">
+              <span className="block text-[12.5px] font-medium">
+                Tell the lead and the holder&apos;s manager after
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={leadDays}
+                  onChange={(e) => setLeadDays(Number(e.target.value))}
+                  className="h-10 w-20 rounded-lg border border-input bg-card px-3 text-[13.5px]"
+                />
+                <span className="text-[12.5px] text-muted-foreground">days late</span>
+              </div>
+            </label>
+            <label className="flex-1 space-y-1.5">
+              <span className="block text-[12.5px] font-medium">Post to the Lockup channel after</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={channelDays}
+                  onChange={(e) => setChannelDays(Number(e.target.value))}
+                  className="h-10 w-20 rounded-lg border border-input bg-card px-3 text-[13.5px]"
+                />
+                <span className="text-[12.5px] text-muted-foreground">days late</span>
+              </div>
+            </label>
+          </div>
+
+          <Button size="sm" disabled={busy !== null} onClick={saveEscalation}>
+            {busy === 'escalation' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Save escalation
+          </Button>
         </CardContent>
       </Card>
 

@@ -2742,3 +2742,51 @@ export async function nudgeOverdueHolder(checkoutId: string): Promise<{ holder: 
   )
   return { holder: holder.full_name }
 }
+
+/** Who hears about overdue gear first, and how soon escalation kicks in. */
+export async function updateOverdueEscalation(input: {
+  techLeadUserId: string | null
+  leadsAfterDays: number
+  channelAfterDays: number
+}): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+
+  if (input.leadsAfterDays < 1 || input.leadsAfterDays > 30) {
+    throw new ActionError('Escalate to the tech lead somewhere between 1 and 30 days.')
+  }
+  if (input.channelAfterDays < 1 || input.channelAfterDays > 60) {
+    throw new ActionError('Escalate to the channel somewhere between 1 and 60 days.')
+  }
+  if (input.channelAfterDays < input.leadsAfterDays) {
+    throw new ActionError(
+      'The channel is the louder step, so it cannot come before the tech lead hears about it.'
+    )
+  }
+  if (input.techLeadUserId) {
+    const { data: lead } = await admin
+      .from('users')
+      .select('id, status')
+      .eq('id', input.techLeadUserId)
+      .maybeSingle()
+    if (!lead || lead.status !== 'active') throw new ActionError('Pick an active person.')
+  }
+
+  const { error } = await admin.from('equipment_settings').upsert({
+    id: 1,
+    tech_lead_user_id: input.techLeadUserId,
+    escalate_to_leads_after_days: input.leadsAfterDays,
+    escalate_to_channel_after_days: input.channelAfterDays,
+    updated_at: new Date().toISOString(),
+  })
+  if (error) throw new ActionError(error.message)
+
+  await writeAudit(user.id, 'equipment.escalation_update', 'equipment_settings', '1', {
+    after: {
+      tech_lead_user_id: input.techLeadUserId,
+      leads_after_days: input.leadsAfterDays,
+      channel_after_days: input.channelAfterDays,
+    },
+  })
+  await revalidateHR()
+}

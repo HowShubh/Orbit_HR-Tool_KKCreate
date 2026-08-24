@@ -21,11 +21,14 @@ export function CartPanel({
   items,
   shoots,
   currentUserId,
+  myOverdue = [],
   onDone,
 }: {
   items: EquipmentItemRow[]
   shoots: ShootSummary[]
   currentUserId: string
+  /** What this person already owes back. Warned about, never blocking. */
+  myOverdue?: { item_name: string; days_late: number }[]
   /** Lets the sheet close itself after a successful checkout. */
   onDone?: () => void
 }) {
@@ -125,6 +128,26 @@ export function CartPanel({
 
   return (
     <div className="flex flex-col gap-3">
+      {myOverdue.length > 0 && (
+        <div className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
+          <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-800">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            You still have {myOverdue.length} item{myOverdue.length === 1 ? '' : 's'} out
+          </div>
+          <ul className="text-[11.5px] text-amber-800">
+            {myOverdue.slice(0, 3).map((o, i) => (
+              <li key={i}>
+                {o.item_name} · {o.days_late} day{o.days_late === 1 ? '' : 's'} late
+              </li>
+            ))}
+            {myOverdue.length > 3 && <li>and {myOverdue.length - 3} more</li>}
+          </ul>
+          <p className="text-[11px] text-amber-700">
+            Take what you need, but please drop these back today.
+          </p>
+        </div>
+      )}
+
       <ul className="space-y-1.5">
         {rows.map((row) => (
           <li

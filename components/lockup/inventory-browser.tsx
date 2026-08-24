@@ -14,11 +14,13 @@ export function InventoryBrowser({
   kits,
   shoots,
   currentUserId,
+  myOverdue,
 }: {
   items: EquipmentItemRow[]
   kits: KitRow[]
   shoots: ShootSummary[]
   currentUserId: string
+  myOverdue?: { item_name: string; days_late: number }[]
 }) {
   const cart = useCart()
 
@@ -81,7 +83,14 @@ export function InventoryBrowser({
       onAddMany={(ids) => cart.add(ids)}
       asideTitle="Selected"
       asideCount={cart.count}
-      aside={<CartPanel items={items} shoots={shoots} currentUserId={currentUserId} />}
+      aside={
+        <CartPanel
+          items={items}
+          shoots={shoots}
+          currentUserId={currentUserId}
+          myOverdue={myOverdue}
+        />
+      }
     />
   )
 }

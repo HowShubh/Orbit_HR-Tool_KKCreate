@@ -430,6 +430,11 @@ export type Database = {
           slack_dm_enabled: boolean
           slack_reminders_enabled: boolean
           slack_channel_feed: boolean
+          /** Who hears about overdue gear first; null falls back to every
+           *  manage_equipment holder. */
+          tech_lead_user_id: string | null
+          escalate_to_leads_after_days: number
+          escalate_to_channel_after_days: number
           updated_at: string
         }
         Insert: {
@@ -437,6 +442,9 @@ export type Database = {
           slack_dm_enabled?: boolean
           slack_reminders_enabled?: boolean
           slack_channel_feed?: boolean
+          tech_lead_user_id?: string | null
+          escalate_to_leads_after_days?: number
+          escalate_to_channel_after_days?: number
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['equipment_settings']['Insert']>

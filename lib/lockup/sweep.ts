@@ -1,7 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/database.types'
 import { notifyUser } from '@/lib/actions/notifications'
-import { dmLockupUser, lockupLink } from '@/lib/slack-lockup'
+import {
+  dmLockupUser,
+  getLockupSlackSettings,
+  lockupLink,
+  postLockupChannelUrgent,
+} from '@/lib/slack-lockup'
 
 type AdminClient = SupabaseClient<Database>
 
@@ -76,6 +81,10 @@ export type SweepResult = {
   shoots_deleted: number
   /** Past retention but skipped: their gear is still out. */
   shoots_kept_gear_out: number
+  /** Overdue items escalated to the tech lead and the holder's manager. */
+  escalated_to_leads: number
+  /** True when the overdue list was posted to the Lockup channel today. */
+  posted_to_channel: boolean
 }
 
 export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
@@ -89,6 +98,8 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     shoots_archived: 0,
     shoots_deleted: 0,
     shoots_kept_gear_out: 0,
+    escalated_to_leads: 0,
+    posted_to_channel: false,
   }
 
   // ---------- 0a: archive shoots as soon as they finish ----------
@@ -206,6 +217,92 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
       link_url: '/lockup?tab=mine',
     })
     result.overdue_reminders++
+  }
+
+  // ---------- 2b: escalate ----------
+  // Day N: the tech lead (set in the Tech Console Slack tab) and the holder's
+  // own manager hear about it. Day M: it goes to the Lockup channel. The daily
+  // DM to the holder keeps running underneath either way.
+  if (overdue.length > 0) {
+    const settings = await getLockupSlackSettings(admin)
+    const daysLate = (dueAt: string) =>
+      Math.floor((now.getTime() - new Date(dueAt).getTime()) / 86400000)
+
+    const forLeads = overdue.filter((c) => daysLate(c.due_at) >= settings.escalateToLeadsAfterDays)
+    if (forLeads.length > 0) {
+      const holderIds = Array.from(new Set(forLeads.map((c) => c.holder_id)))
+      const { data: holderRows } = await admin
+        .from('users')
+        .select('id, full_name, manager_id')
+        .in('id', holderIds)
+      const holderById = new Map((holderRows ?? []).map((h) => [h.id, h]))
+
+      // Each recipient gets ONE message about everything they need to chase,
+      // not one per item.
+      const linesFor = (list: typeof forLeads) =>
+        list
+          .map(
+            (c) =>
+              `${label(c.item_id)}: with ${holderById.get(c.holder_id)?.full_name ?? 'someone'}, ${daysLate(c.due_at)} day(s) late (due ${fmtDayTime(c.due_at)})`
+          )
+          .join('\n')
+
+      // The tech lead, if one is named; otherwise every equipment manager.
+      const leadIds = settings.techLeadUserId
+        ? [settings.techLeadUserId]
+        : await equipmentManagerIds(admin)
+      for (const leadId of leadIds) {
+        await notify(admin, {
+          user_id: leadId,
+          type: 'lockup_overdue_escalation',
+          title: `${forLeads.length} overdue item(s) need chasing`,
+          body: linesFor(forLeads),
+          link_url: '/tech?tab=overdue',
+        })
+        result.escalated_to_leads++
+      }
+
+      // Each holder's own manager, about their reports only.
+      const byManager = new Map<string, typeof forLeads>()
+      for (const c of forLeads) {
+        const managerId = holderById.get(c.holder_id)?.manager_id
+        if (!managerId || managerId === c.holder_id) continue
+        byManager.set(managerId, [...(byManager.get(managerId) ?? []), c])
+      }
+      for (const [managerId, list] of byManager) {
+        // A lead who is also someone's manager already got the full list.
+        if (leadIds.includes(managerId)) continue
+        await notify(admin, {
+          user_id: managerId,
+          type: 'lockup_overdue_escalation',
+          title: `Someone on your team has overdue gear`,
+          body: linesFor(list),
+          link_url: '/tech?tab=overdue',
+        })
+        result.escalated_to_leads++
+      }
+    }
+
+    const forChannel = overdue.filter(
+      (c) => daysLate(c.due_at) >= settings.escalateToChannelAfterDays
+    )
+    if (forChannel.length > 0) {
+      const { data: chHolders } = await admin
+        .from('users')
+        .select('id, full_name')
+        .in('id', Array.from(new Set(forChannel.map((c) => c.holder_id))))
+      const chName = new Map((chHolders ?? []).map((h) => [h.id, h.full_name]))
+      const lines = forChannel
+        .map(
+          (c) =>
+            `• ${label(c.item_id)} — ${chName.get(c.holder_id) ?? 'someone'}, ${daysLate(c.due_at)} day(s) late`
+        )
+        .join('\n')
+      await postLockupChannelUrgent(
+        `⏰ *Gear that is more than ${settings.escalateToChannelAfterDays} day(s) overdue*\n${lines}\n\nIf you have one of these, please drop it back in the cupboard.`
+      )
+      result.posted_to_channel = true
+    }
   }
 
   if (overdue.length > 0) {

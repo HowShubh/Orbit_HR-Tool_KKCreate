@@ -2,6 +2,7 @@ import { requireUser } from '@/lib/actions/_helpers'
 import {
   getMyDevices,
   getMyGear,
+  getOverdueGear,
   getStudioSchedule,
   listEquipment,
   listKits,
@@ -20,7 +21,7 @@ export default async function LockupPage({
   searchParams?: { tab?: string; cart?: string }
 }) {
   const me = await requireUser()
-  const [items, kits, myGear, myDevices, shoots, studios, locations, studioSchedule, myCapabilities] =
+  const [items, kits, myGear, myDevices, shoots, studios, locations, studioSchedule, myCapabilities, overdueAll] =
     await Promise.all([
       listEquipment(),
       listKits(),
@@ -31,6 +32,7 @@ export default async function LockupPage({
       listLockupLocations(),
       getStudioSchedule(),
       listMyCapabilityKeys(me.id),
+      getOverdueGear(),
     ])
 
   // Gear is the landing tab: no tab param means gear.
@@ -53,6 +55,9 @@ export default async function LockupPage({
       currentUserId={me.id}
       canManageEquipment={canManageEquipment}
       initialTab={tab}
+      myOverdue={overdueAll
+        .filter((o) => o.holder_id === me.id)
+        .map((o) => ({ item_name: o.name, days_late: o.days_late }))}
       openCartInitially={searchParams?.cart === '1'}
     />
   )

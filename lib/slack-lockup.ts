@@ -63,6 +63,10 @@ export type LockupSlackSettings = {
   dmEnabled: boolean
   remindersEnabled: boolean
   channelFeed: boolean
+  /** Who hears about overdue gear first. Null = every equipment manager. */
+  techLeadUserId: string | null
+  escalateToLeadsAfterDays: number
+  escalateToChannelAfterDays: number
 }
 
 /**
@@ -73,13 +77,18 @@ export type LockupSlackSettings = {
 export async function getLockupSlackSettings(admin: AdminClient): Promise<LockupSlackSettings> {
   const { data } = await admin
     .from('equipment_settings')
-    .select('slack_dm_enabled, slack_reminders_enabled, slack_channel_feed')
+    .select(
+      'slack_dm_enabled, slack_reminders_enabled, slack_channel_feed, tech_lead_user_id, escalate_to_leads_after_days, escalate_to_channel_after_days'
+    )
     .eq('id', 1)
     .maybeSingle()
   return {
     dmEnabled: data?.slack_dm_enabled ?? true,
     remindersEnabled: data?.slack_reminders_enabled ?? true,
     channelFeed: data?.slack_channel_feed ?? true,
+    techLeadUserId: data?.tech_lead_user_id ?? null,
+    escalateToLeadsAfterDays: data?.escalate_to_leads_after_days ?? 1,
+    escalateToChannelAfterDays: data?.escalate_to_channel_after_days ?? 3,
   }
 }
 
@@ -148,6 +157,17 @@ export async function dmLockupUser(
     text: outText,
     unfurl_links: false,
   })
+}
+
+/**
+ * Post to the Lockup channel regardless of the activity-feed toggle. Used for
+ * escalation only: that toggle silences routine checkout chatter, and silencing
+ * "this camera is a week late" along with it would defeat the point.
+ */
+export async function postLockupChannelUrgent(text: string): Promise<void> {
+  const channel = process.env.LOCKUP_SLACK_CHANNEL
+  if (!botToken() || !channel) return
+  await lockupSlackApi('chat.postMessage', { channel, text, unfurl_links: false })
 }
 
 /** Optional public activity feed. No-op unless LOCKUP_SLACK_CHANNEL is set

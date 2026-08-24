@@ -620,7 +620,7 @@ export function TechConsoleClient({
 
           {/* -------- Slack bot controls -------- */}
           <TabsContent value="slack" className="mt-4">
-            <LockupSlackTab settings={slackSettings} />
+            <LockupSlackTab settings={slackSettings} people={people} />
           </TabsContent>
         </Tabs>
       </div>

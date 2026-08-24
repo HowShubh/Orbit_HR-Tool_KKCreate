@@ -18,12 +18,14 @@ export function CartSheet({
   items,
   shoots,
   currentUserId,
+  myOverdue,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   items: EquipmentItemRow[]
   shoots: ShootSummary[]
   currentUserId: string
+  myOverdue?: { item_name: string; days_late: number }[]
 }) {
   const cart = useCart()
   return (
@@ -40,6 +42,7 @@ export function CartSheet({
           items={items}
           shoots={shoots}
           currentUserId={currentUserId}
+          myOverdue={myOverdue}
           onDone={() => onOpenChange(false)}
         />
       </DialogContent>
