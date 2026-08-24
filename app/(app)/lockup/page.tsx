@@ -4,12 +4,14 @@ import {
   getMyGear,
   getStudioSchedule,
   listEquipment,
+  listKits,
   listLockupLocations,
   listShoots,
 } from '@/lib/queries/lockup'
 import { listMyCapabilityKeys } from '@/lib/queries/capabilities'
 import { listUsers } from '@/lib/queries/users'
 import { LockupClient } from '@/components/lockup/lockup-client'
+import { LockupHome } from '@/components/lockup/lockup-home'
 
 const TABS = ['gear', 'devices', 'mine', 'shoots'] as const
 
@@ -19,7 +21,15 @@ export default async function LockupPage({
   searchParams?: { tab?: string }
 }) {
   const me = await requireUser()
-  const [items, myGear, myDevices, shoots, locations, myCapabilities, studioSchedule, users] =
+
+  // No tab = the entry fork (Get equipment / Plan a shoot). The tab surfaces
+  // stay reachable at /lockup?tab=… for deep links (dashboard, notifications).
+  if (!(TABS as readonly string[]).includes(searchParams?.tab ?? '')) {
+    return <LockupHome />
+  }
+  const tab = searchParams!.tab as (typeof TABS)[number]
+
+  const [items, myGear, myDevices, shoots, locations, myCapabilities, studioSchedule, users, kits] =
     await Promise.all([
       listEquipment(),
       getMyGear(me.id),
@@ -29,11 +39,9 @@ export default async function LockupPage({
       listMyCapabilityKeys(me.id),
       getStudioSchedule(),
       listUsers(),
+      listKits(),
     ])
 
-  const tab = (TABS as readonly string[]).includes(searchParams?.tab ?? '')
-    ? (searchParams!.tab as (typeof TABS)[number])
-    : 'gear'
   const canManageEquipment =
     me.role === 'hr' || me.role === 'founder' || myCapabilities.includes('manage_equipment')
   const people = users
@@ -43,6 +51,7 @@ export default async function LockupPage({
   return (
     <LockupClient
       items={items}
+      kits={kits}
       myGear={myGear}
       myDevices={myDevices}
       shoots={shoots}

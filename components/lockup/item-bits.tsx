@@ -207,6 +207,39 @@ export function defaultDueLocal(): string {
   const d = new Date()
   d.setDate(d.getDate() + 1)
   d.setHours(19, 0, 0, 0)
+  return toDueLocal(d)
+}
+
+function toDueLocal(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+export type DuePreset = { label: string; sub: string; value: string }
+
+/**
+ * Quick "back by when" choices for checkout: today 7 pm (when still ahead),
+ * tomorrow 7 pm, and end of the work week (Friday 7 pm, when it is not
+ * already one of the first two). Values are datetime-local input strings.
+ */
+export function duePresets(): DuePreset[] {
+  const now = new Date()
+  const at7 = (d: Date) => {
+    const x = new Date(d)
+    x.setHours(19, 0, 0, 0)
+    return x
+  }
+  const presets: DuePreset[] = []
+  const today = at7(now)
+  if (today > now) presets.push({ label: 'Today', sub: '7:00 PM', value: toDueLocal(today) })
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  presets.push({ label: 'Tomorrow', sub: '7:00 PM', value: toDueLocal(at7(tomorrow)) })
+  const friday = new Date(now)
+  friday.setDate(friday.getDate() + ((5 - friday.getDay() + 7) % 7))
+  const fridayDue = at7(friday)
+  if (fridayDue > now && toDueLocal(fridayDue) !== toDueLocal(at7(tomorrow)) && toDueLocal(fridayDue) !== toDueLocal(today)) {
+    presets.push({ label: 'This week', sub: 'Fri 7 PM', value: toDueLocal(fridayDue) })
+  }
+  return presets
 }

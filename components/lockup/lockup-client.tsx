@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import type { Tables } from '@/lib/supabase/database.types'
 import type {
   EquipmentItemRow,
+  KitRow,
   MyDevices,
   MyGearRow,
   ShootSummary,
@@ -21,6 +22,7 @@ import { StudioSchedule } from './studio-schedule'
 
 export function LockupClient({
   items,
+  kits,
   myGear,
   myDevices,
   shoots,
@@ -32,6 +34,7 @@ export function LockupClient({
   initialTab,
 }: {
   items: EquipmentItemRow[]
+  kits: KitRow[]
   myGear: MyGearRow[]
   myDevices: MyDevices
   shoots: ShootSummary[]
@@ -60,7 +63,7 @@ export function LockupClient({
           value={tab}
           onValueChange={(v) => {
             setTab(v)
-            router.replace(v === 'gear' ? '/lockup' : `/lockup?tab=${v}`, { scroll: false })
+            router.replace(`/lockup?tab=${v}`, { scroll: false })
           }}
         >
           <TabsList>
@@ -80,6 +83,7 @@ export function LockupClient({
           <TabsContent value="gear" className="mt-4">
             <InventoryBrowser
               items={items}
+              kits={kits}
               locations={locations}
               currentUserId={currentUserId}
               canManageEquipment={canManageEquipment}

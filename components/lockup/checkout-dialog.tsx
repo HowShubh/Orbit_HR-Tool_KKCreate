@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { useStore } from '@/lib/store'
 import { checkoutItems, lookupItemByCode, type CheckoutWarning } from '@/lib/actions/lockup'
 import type { EquipmentItemRow } from '@/lib/queries/lockup'
-import { CategoryIcon, CodeChip, defaultDueLocal, itemStatusLine } from './item-bits'
+import { CategoryIcon, CodeChip, defaultDueLocal, duePresets, itemStatusLine } from './item-bits'
 import { QrScanner } from './qr-scanner'
 
 export type CartItem = Pick<
@@ -56,6 +56,7 @@ export function CheckoutDialog({
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
+  const presets = useMemo(() => duePresets(), [])
   const [cart, setCart] = useState<CartEntry[]>(initialItems)
   const [scanning, setScanning] = useState(false)
   const [dueLocal, setDueLocal] = useState(defaultDue ?? defaultDueLocal())
@@ -256,6 +257,26 @@ export function CheckoutDialog({
         {/* Due date */}
         <div className="space-y-1.5">
           <Label htmlFor="lockup-due">Return by</Label>
+          <div className="flex gap-2">
+            {presets.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setDueLocal(p.value)
+                  setWarnings(null)
+                }}
+                className={`flex flex-1 flex-col items-center rounded-lg border px-2 py-2 text-[12.5px] font-semibold transition-colors ${
+                  dueLocal === p.value
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-card text-foreground hover:bg-accent'
+                }`}
+              >
+                {p.label}
+                <span className="text-[10.5px] font-normal text-muted-foreground">{p.sub}</span>
+              </button>
+            ))}
+          </div>
           <Input
             id="lockup-due"
             type="datetime-local"
