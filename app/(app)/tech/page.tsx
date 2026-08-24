@@ -1,6 +1,11 @@
 import { redirect } from 'next/navigation'
 import { requireCapability } from '@/lib/actions/_helpers'
-import { getTechConsoleData, listEquipment } from '@/lib/queries/lockup'
+import {
+  getTechConsoleData,
+  listEquipment,
+  listKits,
+  listPendingApprovals,
+} from '@/lib/queries/lockup'
 import { listUsers } from '@/lib/queries/users'
 import { TechConsoleClient } from '@/components/lockup/tech/tech-console-client'
 
@@ -15,10 +20,12 @@ export default async function TechConsolePage({
     redirect('/lockup')
   }
 
-  const [data, items, users] = await Promise.all([
+  const [data, items, users, kits, approvals] = await Promise.all([
     getTechConsoleData(),
     listEquipment(),
     listUsers(),
+    listKits(),
+    listPendingApprovals(),
   ])
   const people = users
     .filter((u) => u.status === 'active')
@@ -29,6 +36,8 @@ export default async function TechConsolePage({
       data={data}
       items={items}
       people={people}
+      kits={kits}
+      approvals={approvals}
       qrBaseUrl={process.env.LOCKUP_QR_BASE_URL ?? null}
       initialTab={searchParams?.tab}
     />

@@ -134,6 +134,11 @@ export function ReservationPicker({
                     <div className="flex items-center gap-2">
                       <span className="truncate text-[13.5px] font-medium">{r.name}</span>
                       <CodeChip code={r.code} />
+                      {r.requires_approval && (
+                        <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600">
+                          approval
+                        </span>
+                      )}
                     </div>
                     {r.conflict ? (
                       <div className="flex items-center gap-1 text-[11.5px] font-medium text-amber-600">

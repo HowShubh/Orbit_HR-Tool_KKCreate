@@ -15,6 +15,8 @@ export type ReservationBadge = {
   shoot_ends_at: string
   reserved_by: string
   reserved_by_name: string
+  /** 'pending' = flagged item awaiting manager approval; still real intent. */
+  status: 'active' | 'pending'
 }
 
 export type EquipmentItemRow = Tables<'equipment_items'> & {
@@ -70,6 +72,8 @@ export type MyDevices = {
 export type ShootConflict = {
   kind: 'in_repair' | 'still_out' | 'double_reserved' | 'unavailable'
   message: string
+  /** Compact badge form of message, e.g. "out til Fri 14" / "reserved: Ep 43". */
+  short: string
 }
 
 export type ShootReservationRow = {
@@ -141,9 +145,44 @@ export type AvailabilityRow = {
   photo_url: string | null
   status: EquipmentStatus
   home_location_label: string | null
+  requires_approval: boolean
   available: boolean
   conflict: ShootConflict | null
   already_reserved_for_shoot: boolean
+}
+
+export type KitRow = {
+  id: string
+  name: string
+  notes: string | null
+  items: {
+    item_id: string
+    code: string
+    name: string
+    category: EquipmentCategory
+    status: EquipmentStatus
+    requires_approval: boolean
+  }[]
+}
+
+export type PendingApprovalRow = {
+  reservation_id: string
+  created_at: string
+  reserved_by: string
+  reserved_by_name: string
+  item: {
+    id: string
+    code: string
+    name: string
+    category: EquipmentCategory
+    photo_url: string | null
+  }
+  shoot: {
+    id: string
+    name: string
+    starts_at: string
+    ends_at: string
+  }
 }
 
 export type ActivityEvent = {
@@ -278,21 +317,30 @@ function computeConflict(args: {
   const { itemStatus, dueAt, repairBackOn, shootStartsAt, shootEndsAt, otherReservations } = args
 
   if (itemStatus === 'retired' || itemStatus === 'lost') {
-    return { kind: 'unavailable', message: `Item is marked ${itemStatus}` }
+    return { kind: 'unavailable', message: `Item is marked ${itemStatus}`, short: itemStatus }
   }
   if (itemStatus === 'in_repair') {
     if (!repairBackOn) {
-      return { kind: 'in_repair', message: 'In repair, no expected return date' }
+      return {
+        kind: 'in_repair',
+        message: 'In repair, no expected return date',
+        short: 'in repair',
+      }
     }
     if (new Date(repairBackOn) >= new Date(shootStartsAt)) {
       return {
         kind: 'in_repair',
         message: `In repair, expected back ${formatDay(repairBackOn)}`,
+        short: `repair til ${formatDay(repairBackOn)}`,
       }
     }
   }
   if (itemStatus === 'checked_out' && dueAt && new Date(dueAt) > new Date(shootStartsAt)) {
-    return { kind: 'still_out', message: `Checked out until ${formatDayTime(dueAt)}` }
+    return {
+      kind: 'still_out',
+      message: `Checked out until ${formatDayTime(dueAt)}`,
+      short: `out til ${formatDay(dueAt)}`,
+    }
   }
   const clash = otherReservations.find((r) =>
     shootWindowOverlaps(shootStartsAt, shootEndsAt, r.shoot_starts_at, r.shoot_ends_at)
@@ -301,6 +349,7 @@ function computeConflict(args: {
     return {
       kind: 'double_reserved',
       message: `Also reserved for ${clash.shoot_name} (${formatDay(clash.shoot_starts_at)} to ${formatDay(clash.shoot_ends_at)})`,
+      short: `reserved: ${clash.shoot_name}`,
     }
   }
   return null
@@ -325,13 +374,15 @@ function formatDayTime(iso: string): string {
   })
 }
 
-/** Active reservations joined with their (not cancelled/done) shoots, grouped by item. */
+/** Live (active + pending-approval) reservations joined with their (not
+ *  cancelled/done) shoots, grouped by item. Pending counts as intent for
+ *  conflict purposes. */
 const activeReservationsByItem = cache(async (): Promise<Map<string, ReservationBadge[]>> => {
   const adminClient = createAdminClient()
   const { data: reservations } = await adminClient
     .from('equipment_reservations')
-    .select('id, item_id, shoot_id, reserved_by')
-    .eq('status', 'active')
+    .select('id, item_id, shoot_id, reserved_by, status')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   if (!reservations || reservations.length === 0) return new Map()
 
   const shootIds = Array.from(new Set(reservations.map((r) => r.shoot_id)))
@@ -355,6 +406,7 @@ const activeReservationsByItem = cache(async (): Promise<Map<string, Reservation
       shoot_ends_at: shoot.ends_at,
       reserved_by: r.reserved_by,
       reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
+      status: r.status as 'active' | 'pending',
     })
     byItem.set(r.item_id, list)
   }
@@ -652,7 +704,11 @@ async function buildShootReservations(
     .from('equipment_reservations')
     .select('*')
     .eq('shoot_id', shoot.id)
-    .in('status', ['active', 'picked_up'] as unknown as ('active' | 'picked_up')[])
+    .in('status', ['active', 'pending', 'picked_up'] as unknown as (
+      | 'active'
+      | 'pending'
+      | 'picked_up'
+    )[])
     .order('created_at')
   const list = reservations ?? []
   if (list.length === 0) return []
@@ -737,7 +793,11 @@ export async function listShoots(): Promise<ShootSummary[]> {
         .from('equipment_reservations')
         .select('*')
         .in('shoot_id', shootIds)
-        .in('status', ['active', 'picked_up'] as unknown as ('active' | 'picked_up')[]),
+        .in('status', ['active', 'pending', 'picked_up'] as unknown as (
+          | 'active'
+          | 'pending'
+          | 'picked_up'
+        )[]),
       activeReservationsByItem(),
       openCheckoutsByItem(),
       openRepairsByItem(),
@@ -837,30 +897,31 @@ export async function getShootDetail(shootId: string): Promise<ShootDetail | nul
   }
 }
 
-/** Every item with its availability against a shoot's window, for the
- *  reservation picker. */
-export async function getAvailabilityForShoot(shootId: string): Promise<AvailabilityRow[]> {
-  const adminClient = createAdminClient()
-  const { data: shoot } = await adminClient
-    .from('equipment_shoots')
-    .select('*')
-    .eq('id', shootId)
-    .maybeSingle()
-  if (!shoot) return []
-
+/** Every reservable item with its availability against an arbitrary time
+ *  window. Backs the wizard's gear step (no shoot exists yet) and, via
+ *  getAvailabilityForShoot, the detail-page reservation picker. */
+export async function getAvailabilityForWindow(
+  startsAt: string,
+  endsAt: string,
+  excludeShootId?: string
+): Promise<AvailabilityRow[]> {
   const items = await listEquipment()
   return items
     // Assigned devices are never reservable for shoots.
     .filter((i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost')
     .map((item) => {
-      const forThisShoot = item.active_reservations.some((r) => r.shoot_id === shootId)
-      const others = item.active_reservations.filter((r) => r.shoot_id !== shootId)
+      const forThisShoot = excludeShootId
+        ? item.active_reservations.some((r) => r.shoot_id === excludeShootId)
+        : false
+      const others = excludeShootId
+        ? item.active_reservations.filter((r) => r.shoot_id !== excludeShootId)
+        : item.active_reservations
       const conflict = computeConflict({
         itemStatus: item.status,
         dueAt: item.due_at,
         repairBackOn: item.repair_expected_back_on,
-        shootStartsAt: shoot.starts_at,
-        shootEndsAt: shoot.ends_at,
+        shootStartsAt: startsAt,
+        shootEndsAt: endsAt,
         otherReservations: others,
       })
       return {
@@ -871,11 +932,137 @@ export async function getAvailabilityForShoot(shootId: string): Promise<Availabi
         photo_url: item.photo_url,
         status: item.status,
         home_location_label: item.home_location_label,
+        requires_approval: item.requires_approval,
         available: !conflict,
         conflict,
         already_reserved_for_shoot: forThisShoot,
       }
     })
+}
+
+/** Every item with its availability against a shoot's window, for the
+ *  reservation picker. */
+export async function getAvailabilityForShoot(shootId: string): Promise<AvailabilityRow[]> {
+  const adminClient = createAdminClient()
+  const { data: shoot } = await adminClient
+    .from('equipment_shoots')
+    .select('*')
+    .eq('id', shootId)
+    .maybeSingle()
+  if (!shoot) return []
+  return getAvailabilityForWindow(shoot.starts_at, shoot.ends_at, shootId)
+}
+
+// ============================================================
+// Kits
+// ============================================================
+
+/** All kits with their member items, alphabetical. Availability against a
+ *  window is derived client-side by joining member item_ids against
+ *  getAvailabilityForWindow rows. */
+export async function listKits(): Promise<KitRow[]> {
+  const adminClient = createAdminClient()
+  const [{ data: kits }, { data: members }] = await Promise.all([
+    adminClient.from('equipment_kits').select('*').order('name'),
+    adminClient.from('equipment_kit_items').select('*'),
+  ])
+  const kitList = kits ?? []
+  if (kitList.length === 0) return []
+
+  const itemIds = Array.from(new Set((members ?? []).map((m) => m.item_id)))
+  const { data: items } = itemIds.length
+    ? await adminClient
+        .from('equipment_items')
+        .select('id, code, name, category, status, requires_approval')
+        .in('id', itemIds)
+    : { data: [] as Pick<
+        Tables<'equipment_items'>,
+        'id' | 'code' | 'name' | 'category' | 'status' | 'requires_approval'
+      >[] }
+  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+
+  return kitList.map((kit) => ({
+    id: kit.id,
+    name: kit.name,
+    notes: kit.notes,
+    items: (members ?? [])
+      .filter((m) => m.kit_id === kit.id)
+      .flatMap((m) => {
+        const item = itemMap.get(m.item_id)
+        if (!item) return []
+        return [
+          {
+            item_id: item.id,
+            code: item.code,
+            name: item.name,
+            category: item.category,
+            status: item.status,
+            requires_approval: item.requires_approval,
+          },
+        ]
+      }),
+  }))
+}
+
+// ============================================================
+// Reservation approvals
+// ============================================================
+
+/** Pending flagged-item requests for the Tech Console queue, oldest first. */
+export async function listPendingApprovals(): Promise<PendingApprovalRow[]> {
+  const adminClient = createAdminClient()
+  const { data: reservations } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at')
+  const list = reservations ?? []
+  if (list.length === 0) return []
+
+  const itemIds = Array.from(new Set(list.map((r) => r.item_id)))
+  const shootIds = Array.from(new Set(list.map((r) => r.shoot_id)))
+  const [{ data: items }, { data: shoots }, names] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url')
+      .in('id', itemIds),
+    adminClient
+      .from('equipment_shoots')
+      .select('id, name, starts_at, ends_at, status')
+      .in('id', shootIds),
+    nameMap(adminClient, list.map((r) => r.reserved_by)),
+  ])
+  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+  const shootMap = new Map((shoots ?? []).map((s) => [s.id, s]))
+
+  return list.flatMap((r) => {
+    const item = itemMap.get(r.item_id)
+    const shoot = shootMap.get(r.shoot_id)
+    // A cancelled/done shoot's pending requests are moot; hide them (the
+    // sweep or shoot cancellation resolves the rows themselves).
+    if (!item || !shoot || shoot.status === 'cancelled' || shoot.status === 'done') return []
+    return [
+      {
+        reservation_id: r.id,
+        created_at: r.created_at,
+        reserved_by: r.reserved_by,
+        reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
+        item: {
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          category: item.category,
+          photo_url: item.photo_url,
+        },
+        shoot: {
+          id: shoot.id,
+          name: shoot.name,
+          starts_at: shoot.starts_at,
+          ends_at: shoot.ends_at,
+        },
+      },
+    ]
+  })
 }
 
 // ============================================================
@@ -1049,6 +1236,46 @@ export async function getStudioSchedule(): Promise<StudioScheduleEntry[]> {
       .gte('ends_at', new Date().toISOString())
       .order('starts_at')
       .limit(60),
+    studioMap(),
+  ])
+  const list = blocks ?? []
+  if (list.length === 0) return []
+
+  const shootIds = Array.from(new Set(list.map((b) => b.shoot_id)))
+  const { data: shoots } = await adminClient
+    .from('equipment_shoots')
+    .select('id, name')
+    .in('id', shootIds)
+  const shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
+
+  return list.map((b) => ({
+    id: b.id,
+    studio_id: b.studio_id,
+    studio_name: studios.get(b.studio_id) ?? 'Studio',
+    starts_at: b.starts_at,
+    ends_at: b.ends_at,
+    shoot_id: b.shoot_id,
+    shoot_name: shootNames.get(b.shoot_id) ?? 'A shoot',
+  }))
+}
+
+/** Studio bookings inside a window (default: last 7 days to +60 days), for
+ *  the wizard's week grid. Wide on purpose so the client can flip weeks
+ *  without refetching. */
+export async function getStudioBlocksRange(
+  fromIso?: string,
+  toIso?: string
+): Promise<StudioScheduleEntry[]> {
+  const adminClient = createAdminClient()
+  const from = fromIso ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const to = toIso ?? new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
+  const [{ data: blocks }, studios] = await Promise.all([
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('*')
+      .lt('starts_at', to)
+      .gt('ends_at', from)
+      .order('starts_at'),
     studioMap(),
   ])
   const list = blocks ?? []

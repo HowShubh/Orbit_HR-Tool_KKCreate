@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -67,6 +68,7 @@ export function ItemDialog({
   const [locationId, setLocationId] = useState(item?.home_location_id ?? locations[0]?.id ?? '')
   const [assigneeId, setAssigneeId] = useState(item?.assignee_id ?? UNASSIGNED)
   const [notes, setNotes] = useState(item?.notes ?? '')
+  const [requiresApproval, setRequiresApproval] = useState(item?.requires_approval ?? false)
   const [purchaseDate, setPurchaseDate] = useState(privateData?.purchase_date ?? '')
   const [price, setPrice] = useState(
     privateData?.purchase_price_inr != null ? String(privateData.purchase_price_inr) : ''
@@ -89,7 +91,7 @@ export function ItemDialog({
         purchaseDate: purchaseDate || undefined,
         purchasePriceInr: price ? Number(price) : undefined,
         purchaseNotes,
-        ...(isAssigned ? { assigneeId: assignee } : {}),
+        ...(isAssigned ? { assigneeId: assignee } : { requiresApproval }),
       }
       if (item) {
         await updateItem({ itemId: item.id, ...fields })
@@ -261,6 +263,19 @@ export function ItemDialog({
               placeholder="Anything useful, e.g. usually lives with the drone bag"
             />
           </div>
+
+          {!isAssigned && (
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <div>
+                <div className="text-[13px] font-medium">Needs approval to reserve</div>
+                <p className="text-[12px] text-muted-foreground">
+                  Reserving it creates a request you approve in the Approvals tab; it cannot be
+                  taken without an approved reservation.
+                </p>
+              </div>
+              <Switch checked={requiresApproval} onCheckedChange={setRequiresApproval} />
+            </div>
+          )}
 
           <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
             <div className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider">

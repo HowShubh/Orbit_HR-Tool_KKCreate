@@ -130,6 +130,26 @@ export function fmtTime(iso: string): string {
   })
 }
 
+function istHM(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Kolkata',
+  })
+}
+
+/** Shoot window with times: "9 Aug, 10:00 am to 6:00 pm" or, across days,
+ *  "9 Aug, 10:00 am to 12 Aug, 6:00 pm". Shoots saved before times existed
+ *  (midnight to 23:59) render as plain day ranges. */
+export function fmtShootWindow(startIso: string, endIso: string): string {
+  const sameDay = fmtDay(startIso) === fmtDay(endIso)
+  const wholeDay = istHM(startIso) === '00:00' && istHM(endIso) === '23:59'
+  if (wholeDay) return sameDay ? fmtDay(startIso) : `${fmtDay(startIso)} to ${fmtDay(endIso)}`
+  if (sameDay) return `${fmtDay(startIso)}, ${fmtTime(startIso)} to ${fmtTime(endIso)}`
+  return `${fmtDayTime(startIso)} to ${fmtDayTime(endIso)}`
+}
+
 export function fmtDayTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
     day: 'numeric',

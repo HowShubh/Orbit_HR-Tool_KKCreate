@@ -182,10 +182,12 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
   }
 
   // ---------- 3: expire stale reservations ----------
+  // Pending (awaiting-approval) reservations expire on the same clock: an
+  // unapproved request is pointless once the pickup window has passed.
   const { data: activeReservations } = await admin
     .from('equipment_reservations')
     .select('*')
-    .eq('status', 'active')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   if (activeReservations && activeReservations.length > 0) {
     const shootIds = Array.from(new Set(activeReservations.map((r) => r.shoot_id)))
     const { data: shoots } = await admin
@@ -211,7 +213,7 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
         .from('equipment_reservations')
         .update({ status: 'expired', resolved_at: now.toISOString() })
         .eq('id', r.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
       result.reservations_expired++
 
       const item = resItemMap.get(r.item_id)

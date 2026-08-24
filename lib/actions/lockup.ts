@@ -9,8 +9,10 @@ import { dmLockupUser, lockupLink, postLockupChannel } from '@/lib/slack-lockup'
 import { generateItemCode } from '@/lib/lockup/codes'
 import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
 import {
+  getAvailabilityForWindow,
   getItemByCode,
   getItemHistory,
+  type AvailabilityRow,
   type EquipmentItemRow,
   type ItemHistoryEvent,
 } from '@/lib/queries/lockup'
@@ -99,6 +101,18 @@ async function notifyManagers(
   )
 }
 
+/** Non-throwing manage_equipment check (requireCapability throws). */
+async function isEquipmentManager(admin: Admin, user: Tables<'users'>): Promise<boolean> {
+  if (user.role === 'founder' || user.role === 'hr') return true
+  const { data: grants } = await admin
+    .from('user_capabilities')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('capability_key', 'manage_equipment')
+    .limit(1)
+  return !!grants && grants.length > 0
+}
+
 async function getItemOrThrow(admin: Admin, itemId: string): Promise<Tables<'equipment_items'>> {
   const { data: item } = await admin
     .from('equipment_items')
@@ -131,6 +145,15 @@ export async function lookupItemByCode(code: string): Promise<EquipmentItemRow |
 
 /** History is loaded lazily (only when someone opens the History section), so
  *  item pages and item sheets render without paying for it. */
+/** Wizard gear step: availability against a window that has no shoot yet. */
+export async function fetchWindowAvailability(
+  startsAt: string,
+  endsAt: string
+): Promise<AvailabilityRow[]> {
+  await requireUser()
+  return getAvailabilityForWindow(startsAt, endsAt)
+}
+
 export async function fetchItemHistory(itemId: string): Promise<ItemHistoryEvent[]> {
   await requireUser()
   return getItemHistory(itemId)
@@ -177,12 +200,13 @@ export async function checkoutItems(input: {
     throw new ActionError('Some items no longer exist.')
   }
 
-  // Active reservations for these items, joined with live shoots
+  // Live (active or pending-approval) reservations for these items, joined
+  // with live shoots. Pending counts as real intent for conflict warnings.
   const { data: reservations } = await admin
     .from('equipment_reservations')
     .select('*')
     .in('item_id', input.itemIds)
-    .eq('status', 'active')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   const shootIds = Array.from(new Set((reservations ?? []).map((r) => r.shoot_id)))
   const { data: shoots } = shootIds.length
     ? await admin.from('equipment_shoots').select('*').in('id', shootIds)
@@ -192,6 +216,7 @@ export async function checkoutItems(input: {
   // Validate each item's takeability + collect foreign-reservation warnings
   const warnings: CheckoutWarning[] = []
   const pickupReservations = new Map<string, Tables<'equipment_reservations'>>()
+  const actorIsManager = await isEquipmentManager(admin, user)
 
   for (const item of itemList) {
     if (item.kind === 'assigned') {
@@ -212,12 +237,31 @@ export async function checkoutItems(input: {
     }
 
     const itemReservations = (reservations ?? []).filter((r) => r.item_id === item.id)
+
+    // Approval gate: a flagged item leaves the cupboard only against an
+    // APPROVED reservation for this checkout's shoot (managers are exempt).
+    // Without this, the approval flag could be bypassed by not reserving.
+    if (item.requires_approval && !actorIsManager) {
+      const mine = input.shootId
+        ? itemReservations.find((r) => r.shoot_id === input.shootId)
+        : undefined
+      if (!mine || mine.status !== 'active') {
+        throw new ActionError(
+          mine?.status === 'pending'
+            ? `${itemLabel(item)} is still awaiting approval. Ask the tech lead to approve it first.`
+            : `${itemLabel(item)} needs tech lead approval. Reserve it through a shoot first.`
+        )
+      }
+    }
+
     for (const r of itemReservations) {
       const shoot = shootMap.get(r.shoot_id)
       if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
       if (input.shootId && r.shoot_id === input.shootId) {
-        // Picking up gear reserved for this very shoot — not a conflict
-        pickupReservations.set(item.id, r)
+        // Picking up gear reserved for this very shoot — not a conflict.
+        // Only an approved reservation flips to picked_up; a pending one
+        // (manager exemption path) stays pending for the approval queue.
+        if (r.status === 'active') pickupReservations.set(item.id, r)
         continue
       }
       // Conflict when the reservation's shoot window overlaps [now, dueAt]
@@ -667,7 +711,7 @@ export async function createShoot(input: {
   const starts = new Date(input.startsAt)
   const ends = new Date(input.endsAt)
   if (isNaN(starts.getTime()) || isNaN(ends.getTime())) throw new ActionError('Invalid dates.')
-  if (ends < starts) throw new ActionError('The shoot cannot end before it starts.')
+  if (ends <= starts) throw new ActionError('The shoot must end after it starts.')
 
   const { data: shoot, error } = await admin
     .from('equipment_shoots')
@@ -689,10 +733,205 @@ export async function createShoot(input: {
     'equipment_shoot',
     shoot.id,
     null,
-    `${user.full_name} created shoot ${name} (${fmtDay(starts.toISOString())} to ${fmtDay(ends.toISOString())})`
+    `${user.full_name} created shoot ${name} (${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())})`
   )
   await revalidateHR()
   return shoot.id
+}
+
+export type ShootPlanInput = {
+  name: string
+  location?: string
+  notes?: string
+  startsAt: string
+  endsAt: string
+  /** Extra people who may plan this shoot (owner is implicit). */
+  editorIds?: string[]
+  studio?: { studioId: string; startsAt: string; endsAt: string }
+  itemIds?: string[]
+}
+
+export type ShootPlanResult = {
+  shootId: string
+  reserved: number
+  pendingApproval: number
+}
+
+/** One-submit wizard action: shoot + optional editors + optional studio block +
+ *  optional reservations. Validates the studio slot and the gear list BEFORE
+ *  creating anything, and rolls the shoot back if a later step fails, so a
+ *  half-created plan never survives. */
+export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanResult> {
+  const user = await requireUser()
+  const admin = createAdminClient()
+
+  const name = input.name.trim()
+  if (!name) throw new ActionError('Give the shoot a name.')
+  const starts = new Date(input.startsAt)
+  const ends = new Date(input.endsAt)
+  if (isNaN(starts.getTime()) || isNaN(ends.getTime())) throw new ActionError('Invalid dates.')
+  if (ends <= starts) throw new ActionError('The shoot must end after it starts.')
+
+  // ---- validate the studio slot up front (friendly named-clash error) ----
+  let studio: Tables<'equipment_studios'> | null = null
+  let blockStarts: Date | null = null
+  let blockEnds: Date | null = null
+  if (input.studio) {
+    blockStarts = new Date(input.studio.startsAt)
+    blockEnds = new Date(input.studio.endsAt)
+    if (isNaN(blockStarts.getTime()) || isNaN(blockEnds.getTime())) {
+      throw new ActionError('Invalid studio times.')
+    }
+    if (blockEnds <= blockStarts) throw new ActionError('The studio booking must end after it starts.')
+    if (blockEnds <= new Date()) throw new ActionError('That studio time is already in the past.')
+
+    const { data: studioRow } = await admin
+      .from('equipment_studios')
+      .select('*')
+      .eq('id', input.studio.studioId)
+      .maybeSingle()
+    if (!studioRow) throw new ActionError('Pick a studio.')
+    studio = studioRow
+
+    const { data: clashes } = await admin
+      .from('equipment_studio_blocks')
+      .select('*')
+      .eq('studio_id', studio.id)
+      .lt('starts_at', blockEnds.toISOString())
+      .gt('ends_at', blockStarts.toISOString())
+      .limit(1)
+    if (clashes && clashes.length > 0) {
+      const clash = clashes[0]
+      const { data: holder } = await admin
+        .from('equipment_shoots')
+        .select('name')
+        .eq('id', clash.shoot_id)
+        .maybeSingle()
+      throw new ActionError(
+        `${studio.name} is already booked by ${holder?.name ?? 'another shoot'} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
+      )
+    }
+  }
+
+  // ---- validate the gear list up front ----
+  const itemIds = Array.from(new Set(input.itemIds ?? []))
+  if (itemIds.length > 0) {
+    const { data: items } = await admin
+      .from('equipment_items')
+      .select('id, kind, status')
+      .in('id', itemIds)
+    const reservable = (items ?? []).filter(
+      (i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost'
+    )
+    if (reservable.length === 0) {
+      throw new ActionError('None of the selected items can be reserved.')
+    }
+  }
+
+  // ---- validate editors up front ----
+  const editorIds = Array.from(new Set(input.editorIds ?? [])).filter((id) => id !== user.id)
+  let editors: { id: string; full_name: string }[] = []
+  if (editorIds.length > 0) {
+    const { data: editorRows } = await admin
+      .from('users')
+      .select('id, full_name, status')
+      .in('id', editorIds)
+    editors = (editorRows ?? []).filter((e) => e.status === 'active')
+  }
+
+  // ---- create the shoot ----
+  const { data: shoot, error } = await admin
+    .from('equipment_shoots')
+    .insert({
+      name,
+      location: input.location?.trim() || (studio ? studio.name : null),
+      starts_at: starts.toISOString(),
+      ends_at: ends.toISOString(),
+      owner_id: user.id,
+      notes: input.notes?.trim() || null,
+    })
+    .select('*')
+    .single()
+  if (error || !shoot) throw new ActionError(error?.message ?? 'Could not create the shoot.')
+
+  // Everything after this point rolls the shoot back on failure (FK cascade
+  // removes editors, blocks, and reservations with it).
+  try {
+    if (editors.length > 0) {
+      const { error: editorError } = await admin.from('equipment_shoot_editors').insert(
+        editors.map((e) => ({ shoot_id: shoot.id, user_id: e.id, added_by: user.id }))
+      )
+      if (editorError) throw new ActionError(editorError.message)
+    }
+
+    if (studio && blockStarts && blockEnds) {
+      const { error: blockError } = await admin.from('equipment_studio_blocks').insert({
+        studio_id: studio.id,
+        shoot_id: shoot.id,
+        starts_at: blockStarts.toISOString(),
+        ends_at: blockEnds.toISOString(),
+        created_by: user.id,
+      })
+      if (blockError) {
+        // 23P01 = exclusion constraint (someone booked the same slot this instant)
+        throw new ActionError(
+          blockError.code === '23P01'
+            ? `${studio.name} was just booked by someone else for an overlapping time. Pick a different slot.`
+            : blockError.message
+        )
+      }
+    }
+
+    let reserved = 0
+    let pendingCount = 0
+    if (itemIds.length > 0) {
+      const result = await insertReservationsForShoot(admin, user, shoot, itemIds)
+      reserved = result.reserved
+      pendingCount = result.pending.length
+    }
+
+    const parts = [
+      `${user.full_name} planned shoot ${name} (${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())})`,
+    ]
+    if (studio && blockStarts && blockEnds) {
+      parts.push(
+        `booked ${studio.name} ${fmtDayTime(blockStarts.toISOString())} to ${fmtDayTime(blockEnds.toISOString())}`
+      )
+    }
+    if (reserved > 0) {
+      parts.push(
+        `reserved ${reserved} item(s)` +
+          (pendingCount > 0 ? ` (${pendingCount} awaiting approval)` : '')
+      )
+    }
+    if (editors.length > 0) {
+      parts.push(`with ${editors.map((e) => e.full_name).join(', ')} as editor(s)`)
+    }
+    await writeAudit(user.id, 'equipment.shoot_plan', 'equipment_shoot', shoot.id, null, parts.join('; '))
+
+    if (studio && blockStarts && blockEnds) {
+      await postLockupChannel(
+        `🎬 ${studio.name} booked for ${name}: ${fmtDayTime(blockStarts.toISOString())} to ${fmtDayTime(blockEnds.toISOString())}`
+      )
+    }
+    await Promise.all(
+      editors.map((e) =>
+        notifyLockup({
+          user_id: e.id,
+          type: 'lockup_shoot_editor',
+          title: 'You can plan a shoot',
+          body: `${user.full_name} added you as an editor of ${name}. You can reserve gear and change its details.`,
+          link_url: `/lockup/shoots/${shoot.id}`,
+        })
+      )
+    )
+
+    await revalidateHR()
+    return { shootId: shoot.id, reserved, pendingApproval: pendingCount }
+  } catch (err) {
+    await admin.from('equipment_shoots').delete().eq('id', shoot.id)
+    throw err
+  }
 }
 
 /** Shoot write access: owner, an added editor, HR/Founder, or manage_equipment. */
@@ -825,7 +1064,7 @@ export async function updateShoot(input: {
 
   const starts = new Date((updates.starts_at as string) ?? shoot.starts_at)
   const ends = new Date((updates.ends_at as string) ?? shoot.ends_at)
-  if (ends < starts) throw new ActionError('The shoot cannot end before it starts.')
+  if (ends <= starts) throw new ActionError('The shoot must end after it starts.')
 
   const { error } = await admin
     .from('equipment_shoots')
@@ -933,6 +1172,56 @@ export async function deleteShoot(shootId: string): Promise<void> {
   await revalidateHR()
 }
 
+/** Insert reservations for a shoot. Approval-flagged items land as 'pending'
+ *  (managers reserving for themselves skip the queue) and the equipment
+ *  managers get asked to approve; everything else is 'active'. Shared by
+ *  reserveItems (detail page) and createShootPlan (wizard). */
+async function insertReservationsForShoot(
+  admin: Admin,
+  user: Tables<'users'>,
+  shoot: Tables<'equipment_shoots'>,
+  itemIds: string[]
+): Promise<{ reserved: number; pending: Tables<'equipment_items'>[] }> {
+  const { data: items } = await admin.from('equipment_items').select('*').in('id', itemIds)
+  const itemList = (items ?? []).filter(
+    (i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost'
+  )
+  if (itemList.length === 0) throw new ActionError('None of the selected items can be reserved.')
+
+  const { data: existing } = await admin
+    .from('equipment_reservations')
+    .select('item_id')
+    .eq('shoot_id', shoot.id)
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+  const alreadyReserved = new Set((existing ?? []).map((r) => r.item_id))
+
+  const fresh = itemList.filter((i) => !alreadyReserved.has(i.id))
+  if (fresh.length === 0) return { reserved: 0, pending: [] }
+
+  const actorIsManager = await isEquipmentManager(admin, user)
+  const toInsert = fresh.map((i) => ({
+    item_id: i.id,
+    shoot_id: shoot.id,
+    reserved_by: user.id,
+    status: (i.requires_approval && !actorIsManager ? 'pending' : 'active') as
+      | 'pending'
+      | 'active',
+  }))
+  const { error } = await admin.from('equipment_reservations').insert(toInsert)
+  if (error) throw new ActionError(error.message)
+
+  const pending = actorIsManager ? [] : fresh.filter((i) => i.requires_approval)
+  if (pending.length > 0) {
+    await notifyManagers(admin, user.id, {
+      type: 'lockup_approval_request',
+      title: 'Gear approval needed',
+      body: `${user.full_name} wants ${pending.map((i) => itemLabel(i)).join(', ')} for ${shoot.name} (${fmtDayTime(shoot.starts_at)} to ${fmtDayTime(shoot.ends_at)}).`,
+      link_url: '/tech?tab=approvals',
+    })
+  }
+  return { reserved: fresh.length, pending }
+}
+
 export async function reserveItems(input: {
   shootId: string
   itemIds: string[]
@@ -951,29 +1240,13 @@ export async function reserveItems(input: {
     throw new ActionError('This shoot has already ended.')
   }
 
-  const { data: items } = await admin
-    .from('equipment_items')
-    .select('*')
-    .in('id', input.itemIds)
-  const itemList = (items ?? []).filter(
-    (i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost'
+  const { reserved, pending } = await insertReservationsForShoot(
+    admin,
+    user,
+    shoot,
+    input.itemIds
   )
-  if (itemList.length === 0) throw new ActionError('None of the selected items can be reserved.')
-
-  const { data: existing } = await admin
-    .from('equipment_reservations')
-    .select('item_id')
-    .eq('shoot_id', shoot.id)
-    .eq('status', 'active')
-  const alreadyReserved = new Set((existing ?? []).map((r) => r.item_id))
-
-  const toInsert = itemList
-    .filter((i) => !alreadyReserved.has(i.id))
-    .map((i) => ({ item_id: i.id, shoot_id: shoot.id, reserved_by: user.id }))
-  if (toInsert.length === 0) return
-
-  const { error } = await admin.from('equipment_reservations').insert(toInsert)
-  if (error) throw new ActionError(error.message)
+  if (reserved === 0) return
 
   await writeAudit(
     user.id,
@@ -981,7 +1254,8 @@ export async function reserveItems(input: {
     'equipment_shoot',
     shoot.id,
     null,
-    `${user.full_name} reserved ${toInsert.length} item(s) for ${shoot.name}`
+    `${user.full_name} reserved ${reserved} item(s) for ${shoot.name}` +
+      (pending.length > 0 ? ` (${pending.length} awaiting approval)` : '')
   )
   await revalidateHR()
 }
@@ -995,7 +1269,9 @@ export async function cancelReservation(reservationId: string): Promise<void> {
     .eq('id', reservationId)
     .maybeSingle()
   if (!reservation) throw new ActionError('Reservation not found.')
-  if (reservation.status !== 'active') throw new ActionError('This reservation is not active.')
+  if (reservation.status !== 'active' && reservation.status !== 'pending') {
+    throw new ActionError('This reservation is not active.')
+  }
 
   // Reserver, shoot owner, or equipment manager
   if (reservation.reserved_by !== user.id) {
@@ -1015,6 +1291,244 @@ export async function cancelReservation(reservationId: string): Promise<void> {
     item.id,
     null,
     `${user.full_name} removed the reservation of ${itemLabel(item)}`
+  )
+  await revalidateHR()
+}
+
+// ============================================================
+// Reservation approvals (flagged items only)
+// ============================================================
+
+async function getPendingReservationOrThrow(
+  admin: Admin,
+  reservationId: string
+): Promise<{
+  reservation: Tables<'equipment_reservations'>
+  item: Tables<'equipment_items'>
+  shoot: Tables<'equipment_shoots'>
+}> {
+  const { data: reservation } = await admin
+    .from('equipment_reservations')
+    .select('*')
+    .eq('id', reservationId)
+    .maybeSingle()
+  if (!reservation) throw new ActionError('Reservation not found.')
+  if (reservation.status !== 'pending') {
+    throw new ActionError('This reservation is not awaiting approval.')
+  }
+  const item = await getItemOrThrow(admin, reservation.item_id)
+  const { data: shoot } = await admin
+    .from('equipment_shoots')
+    .select('*')
+    .eq('id', reservation.shoot_id)
+    .maybeSingle()
+  if (!shoot) throw new ActionError('Shoot not found.')
+  return { reservation, item, shoot }
+}
+
+export async function approveReservation(reservationId: string): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+  const { reservation, item, shoot } = await getPendingReservationOrThrow(admin, reservationId)
+
+  const { error } = await admin
+    .from('equipment_reservations')
+    .update({ status: 'active' })
+    .eq('id', reservation.id)
+    .eq('status', 'pending') // guard against a concurrent decision
+  if (error) throw new ActionError(error.message)
+
+  await writeAudit(
+    user.id,
+    'equipment.reservation_approve',
+    'equipment_item',
+    item.id,
+    null,
+    `${user.full_name} approved ${itemLabel(item)} for ${shoot.name}`
+  )
+  await notifyLockup({
+    user_id: reservation.reserved_by,
+    type: 'lockup_approval_decision',
+    title: 'Gear approved',
+    body: `${user.full_name} approved ${itemLabel(item)} for ${shoot.name}. It is reserved for you.`,
+    link_url: `/lockup/shoots/${shoot.id}`,
+  })
+  await revalidateHR()
+}
+
+export async function rejectReservation(input: {
+  reservationId: string
+  reason?: string
+}): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+  const { reservation, item, shoot } = await getPendingReservationOrThrow(
+    admin,
+    input.reservationId
+  )
+
+  const { error } = await admin
+    .from('equipment_reservations')
+    .update({ status: 'rejected', resolved_at: new Date().toISOString() })
+    .eq('id', reservation.id)
+    .eq('status', 'pending')
+  if (error) throw new ActionError(error.message)
+
+  const reason = input.reason?.trim()
+  await writeAudit(
+    user.id,
+    'equipment.reservation_reject',
+    'equipment_item',
+    item.id,
+    null,
+    `${user.full_name} declined ${itemLabel(item)} for ${shoot.name}` +
+      (reason ? ` (${reason})` : '')
+  )
+  await notifyLockup({
+    user_id: reservation.reserved_by,
+    type: 'lockup_approval_decision',
+    title: 'Gear request declined',
+    body:
+      `${user.full_name} declined ${itemLabel(item)} for ${shoot.name}.` +
+      (reason ? ` Reason: ${reason}` : ''),
+    link_url: `/lockup/shoots/${shoot.id}`,
+  })
+  await revalidateHR()
+}
+
+// ============================================================
+// Kits (selection shortcuts; Tech Console defines them)
+// ============================================================
+
+async function validKitItemIds(admin: Admin, itemIds: string[]): Promise<string[]> {
+  const unique = Array.from(new Set(itemIds))
+  if (unique.length === 0) return []
+  const { data: items } = await admin
+    .from('equipment_items')
+    .select('id, kind, status')
+    .in('id', unique)
+  return (items ?? [])
+    .filter((i) => i.kind === 'pooled' && i.status !== 'retired' && i.status !== 'lost')
+    .map((i) => i.id)
+}
+
+export async function createKit(input: {
+  name: string
+  notes?: string
+  itemIds: string[]
+}): Promise<string> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+
+  const name = input.name.trim()
+  if (!name) throw new ActionError('The kit needs a name.')
+  const memberIds = await validKitItemIds(admin, input.itemIds)
+  if (memberIds.length === 0) {
+    throw new ActionError('Pick at least one pooled item for the kit.')
+  }
+
+  const { data: kit, error } = await admin
+    .from('equipment_kits')
+    .insert({ name, notes: input.notes?.trim() || null, created_by: user.id })
+    .select('id')
+    .single()
+  if (error || !kit) {
+    if (error?.code === '23505') throw new ActionError(`A kit named ${name} already exists.`)
+    throw new ActionError(error?.message ?? 'Could not create the kit.')
+  }
+
+  const { error: memberError } = await admin
+    .from('equipment_kit_items')
+    .insert(memberIds.map((id) => ({ kit_id: kit.id, item_id: id })))
+  if (memberError) throw new ActionError(memberError.message)
+
+  await writeAudit(
+    user.id,
+    'equipment.kit_create',
+    'equipment_kit',
+    kit.id,
+    null,
+    `${user.full_name} created kit ${name} with ${memberIds.length} item(s)`
+  )
+  await revalidateHR()
+  return kit.id
+}
+
+export async function updateKit(input: {
+  kitId: string
+  name?: string
+  notes?: string
+  /** Full replacement of the member list when provided. */
+  itemIds?: string[]
+}): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+
+  const { data: kit } = await admin
+    .from('equipment_kits')
+    .select('*')
+    .eq('id', input.kitId)
+    .maybeSingle()
+  if (!kit) throw new ActionError('Kit not found.')
+
+  const updates: Updates<'equipment_kits'> = {}
+  if (input.name !== undefined) {
+    const name = input.name.trim()
+    if (!name) throw new ActionError('The kit needs a name.')
+    updates.name = name
+  }
+  if (input.notes !== undefined) updates.notes = input.notes.trim() || null
+  if (Object.keys(updates).length > 0) {
+    const { error } = await admin.from('equipment_kits').update(updates).eq('id', kit.id)
+    if (error) {
+      if (error.code === '23505') throw new ActionError('Another kit already has that name.')
+      throw new ActionError(error.message)
+    }
+  }
+
+  if (input.itemIds !== undefined) {
+    const memberIds = await validKitItemIds(admin, input.itemIds)
+    if (memberIds.length === 0) {
+      throw new ActionError('Pick at least one pooled item for the kit.')
+    }
+    await admin.from('equipment_kit_items').delete().eq('kit_id', kit.id)
+    const { error } = await admin
+      .from('equipment_kit_items')
+      .insert(memberIds.map((id) => ({ kit_id: kit.id, item_id: id })))
+    if (error) throw new ActionError(error.message)
+  }
+
+  await writeAudit(
+    user.id,
+    'equipment.kit_update',
+    'equipment_kit',
+    kit.id,
+    null,
+    `${user.full_name} edited kit ${updates.name ?? kit.name}`
+  )
+  await revalidateHR()
+}
+
+export async function deleteKit(kitId: string): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+  const { data: kit } = await admin
+    .from('equipment_kits')
+    .select('*')
+    .eq('id', kitId)
+    .maybeSingle()
+  if (!kit) throw new ActionError('Kit not found.')
+
+  const { error } = await admin.from('equipment_kits').delete().eq('id', kit.id)
+  if (error) throw new ActionError(error.message)
+
+  await writeAudit(
+    user.id,
+    'equipment.kit_delete',
+    'equipment_kit',
+    kit.id,
+    null,
+    `${user.full_name} deleted kit ${kit.name}`
   )
   await revalidateHR()
 }
@@ -1393,6 +1907,7 @@ type ItemFields = {
   purchaseNotes?: string
   kind?: 'pooled' | 'assigned'
   assigneeId?: string | null
+  requiresApproval?: boolean
 }
 
 function validCategory(category: string): category is EquipmentCategory {
@@ -1408,6 +1923,7 @@ type NewItemFields = {
   notes: string | null
   kind?: 'pooled' | 'assigned'
   assignee_id?: string | null
+  requires_approval?: boolean
 }
 
 async function insertItemWithFreshCode(
@@ -1456,6 +1972,7 @@ export async function createItem(input: ItemFields): Promise<string> {
     notes: input.notes?.trim() || null,
     kind,
     assignee_id: kind === 'assigned' ? input.assigneeId ?? null : null,
+    requires_approval: kind === 'pooled' && input.requiresApproval === true,
   })
 
   if (input.purchaseDate || input.purchasePriceInr != null || input.purchaseNotes) {
@@ -1498,6 +2015,9 @@ export async function updateItem(input: { itemId: string } & Partial<ItemFields>
   if (input.serialNumber !== undefined) updates.serial_number = input.serialNumber.trim() || null
   if (input.homeLocationId !== undefined) updates.home_location_id = input.homeLocationId || null
   if (input.notes !== undefined) updates.notes = input.notes.trim() || null
+  if (input.requiresApproval !== undefined && item.kind === 'pooled') {
+    updates.requires_approval = input.requiresApproval
+  }
 
   // Reassigning an owner (assigned devices only). Kind itself is fixed at
   // creation. If the device is resting, its holder follows the new owner.
@@ -1808,3 +2328,4 @@ export async function importEquipmentCsv(rows: ImportRow[]): Promise<ImportResul
   await revalidateHR()
   return { created, errors }
 }
+

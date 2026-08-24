@@ -175,6 +175,7 @@ export type Database = {
           kind: 'pooled' | 'assigned'
           assignee_id: string | null
           status: 'available' | 'checked_out' | 'in_repair' | 'retired' | 'lost'
+          requires_approval: boolean
           current_holder_id: string | null
           current_checkout_id: string | null
           notes: string | null
@@ -197,6 +198,7 @@ export type Database = {
           kind?: 'pooled' | 'assigned'
           assignee_id?: string | null
           status?: 'available' | 'checked_out' | 'in_repair' | 'retired' | 'lost'
+          requires_approval?: boolean
           current_holder_id?: string | null
           current_checkout_id?: string | null
           notes?: string | null
@@ -242,7 +244,7 @@ export type Database = {
           item_id: string
           shoot_id: string
           reserved_by: string
-          status: 'active' | 'picked_up' | 'expired' | 'cancelled'
+          status: 'active' | 'pending' | 'rejected' | 'picked_up' | 'expired' | 'cancelled'
           created_at: string
           resolved_at: string | null
         }
@@ -251,11 +253,47 @@ export type Database = {
           item_id: string
           shoot_id: string
           reserved_by: string
-          status?: 'active' | 'picked_up' | 'expired' | 'cancelled'
+          status?: 'active' | 'pending' | 'rejected' | 'picked_up' | 'expired' | 'cancelled'
           created_at?: string
           resolved_at?: string | null
         }
         Update: Partial<Database['public']['Tables']['equipment_reservations']['Insert']>
+        Relationships: []
+      }
+      equipment_kits: {
+        Row: {
+          id: string
+          name: string
+          notes: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          notes?: string | null
+          created_by: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_kits']['Insert']>
+        Relationships: []
+      }
+      equipment_kit_items: {
+        Row: {
+          id: string
+          kit_id: string
+          item_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          kit_id: string
+          item_id: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_kit_items']['Insert']>
         Relationships: []
       }
       equipment_studios: {

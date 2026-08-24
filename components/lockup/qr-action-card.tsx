@@ -134,18 +134,25 @@ export function QrActionCard({
   // Assigned device resting (available) with nobody actively holding beyond its owner.
   const deviceResting = isAssigned && item.status === 'available'
 
-  // A reservation is "pickable" from 24h before the shoot starts until it ends.
+  // A reservation is "pickable" from 24h before the shoot starts until it
+  // ends. Pending (unapproved) reservations never qualify.
   const pickupReservation = useMemo(() => {
     if (item.status !== 'available') return null
     const now = Date.now()
     return (
       item.active_reservations.find((r) => {
+        if (r.status !== 'active') return false
         const start = new Date(r.shoot_starts_at).getTime()
         const end = new Date(r.shoot_ends_at).getTime()
         return now >= start - 24 * 60 * 60 * 1000 && now <= end
       }) ?? null
     )
   }, [item])
+
+  // Approval-flagged gear leaves the cupboard only against an approved
+  // reservation (the server enforces this; this banner explains it up front).
+  const approvalBlocked =
+    !isAssigned && item.requires_approval && !canManageEquipment && !pickupReservation
 
   return (
     <div className="space-y-4">
@@ -207,6 +214,9 @@ export function QrActionCard({
             <span>
               Reserved for <span className="font-medium text-foreground">{r.shoot_name}</span> by{' '}
               {r.reserved_by_name}, {fmtDay(r.shoot_starts_at)} to {fmtDay(r.shoot_ends_at)}
+              {r.status === 'pending' && (
+                <span className="text-amber-600"> (awaiting approval)</span>
+              )}
             </span>
           </div>
         ))}
@@ -232,7 +242,16 @@ export function QrActionCard({
       )}
 
       {/* Primary action — POOLED gear */}
-      {!isAssigned && item.status === 'available' && (
+      {!isAssigned && item.status === 'available' && approvalBlocked && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
+          <CalendarClock className="h-4 w-4 shrink-0" />
+          <span>
+            This item needs tech lead approval. Reserve it through a shoot first; once approved,
+            you can pick it up here.
+          </span>
+        </div>
+      )}
+      {!isAssigned && item.status === 'available' && !approvalBlocked && (
         <Button
           size="lg"
           className="w-full text-[15px]"

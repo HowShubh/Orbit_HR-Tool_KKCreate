@@ -38,16 +38,18 @@ import {
 import { useStore } from '@/lib/store'
 import {
   addShootEditor,
+  approveReservation,
   cancelReservation,
   cancelShoot,
   deleteShoot,
+  rejectReservation,
   removeShootEditor,
   removeStudioBlock,
 } from '@/lib/actions/lockup'
 import type { AvailabilityRow, ShootDetail } from '@/lib/queries/lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import { SHOOT_STATUS_LABELS } from '@/lib/lockup/constants'
-import { CategoryIcon, CodeChip, StatusBadge, fmtDay, fmtTime, itemStatusLine } from './item-bits'
+import { CategoryIcon, CodeChip, StatusBadge, fmtDay, fmtShootWindow, fmtTime, itemStatusLine } from './item-bits'
 import { ReservationPicker } from './reservation-picker'
 import { CheckoutDialog, type CartItem } from './checkout-dialog'
 import { ScanConfirmDialog } from './scan-confirm-dialog'
@@ -122,6 +124,29 @@ export function ShootDetailClient({
     }
   }
 
+  const [decidingId, setDecidingId] = useState<string | null>(null)
+  async function decideReservation(id: string, approve: boolean, itemName: string) {
+    setDecidingId(id)
+    try {
+      if (approve) {
+        await approveReservation(id)
+        pushToast({ title: `${itemName} approved`, variant: 'success' })
+      } else {
+        const reason = window.prompt(`Why decline ${itemName}? (optional)`) ?? undefined
+        await rejectReservation({ reservationId: id, reason })
+        pushToast({ title: 'Request declined', variant: 'success' })
+      }
+      router.refresh()
+    } catch (err) {
+      pushToast({
+        title: err instanceof Error ? err.message : 'Could not record the decision',
+        variant: 'error',
+      })
+    } finally {
+      setDecidingId(null)
+    }
+  }
+
   async function doCancelShoot() {
     if (!window.confirm(`Cancel ${shoot.name}? All its reservations will be released.`)) return
     setCancelling(true)
@@ -156,8 +181,7 @@ export function ShootDetailClient({
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <CalendarDays className="h-4 w-4" />
-                {fmtDay(shoot.starts_at)}
-                {fmtDay(shoot.starts_at) !== fmtDay(shoot.ends_at) && <> to {fmtDay(shoot.ends_at)}</>}
+                {fmtShootWindow(shoot.starts_at, shoot.ends_at)}
               </span>
               {shoot.location && (
                 <span className="flex items-center gap-1.5">
@@ -379,6 +403,45 @@ export function ShootDetailClient({
 
                 {r.status === 'picked_up' ? (
                   <Badge variant="success">Picked up</Badge>
+                ) : r.status === 'pending' ? (
+                  <>
+                    <Badge variant="warning">Awaiting approval</Badge>
+                    {!closed && canManageEquipment && (
+                      <div className="flex gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={decidingId === r.id}
+                          onClick={() => decideReservation(r.id, false, r.item.name)}
+                        >
+                          Decline
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={decidingId === r.id}
+                          onClick={() => decideReservation(r.id, true, r.item.name)}
+                        >
+                          {decidingId === r.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                          Approve
+                        </Button>
+                      </div>
+                    )}
+                    {!closed && (r.reserved_by === currentUserId || canEdit) && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${r.item.name}`}
+                        className="text-muted-foreground hover:text-rose-600 disabled:opacity-50"
+                        disabled={removingId === r.id}
+                        onClick={() => removeReservation(r.id, r.item.name)}
+                      >
+                        {removingId === r.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <>
                     <StatusBadge status={r.item.status} className="hidden sm:inline-flex" />

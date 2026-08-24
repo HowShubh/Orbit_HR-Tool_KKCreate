@@ -23,20 +23,29 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useStore } from '@/lib/store'
-import type { EquipmentItemRow, TechConsoleData } from '@/lib/queries/lockup'
+import type {
+  EquipmentItemRow,
+  KitRow,
+  PendingApprovalRow,
+  TechConsoleData,
+} from '@/lib/queries/lockup'
 import {
+  approveReservation,
   createLocation,
   createStudio,
+  deleteKit,
   deleteLocation,
   deleteStudio,
   receiveFromRepair,
+  rejectReservation,
   renameLocation,
   renameStudio,
   resolveIssue,
 } from '@/lib/actions/lockup'
-import { CodeChip, fmtDay, fmtDayTime } from '../item-bits'
+import { CodeChip, fmtDay, fmtDayTime, fmtShootWindow } from '../item-bits'
 import { InventoryTable } from './inventory-table'
 import { DevicesTable } from './devices-table'
+import { KitDialog } from './kit-dialog'
 
 function StatCard({
   icon: Icon,
@@ -80,18 +89,31 @@ export function TechConsoleClient({
   data,
   items,
   people,
+  kits,
+  approvals,
   qrBaseUrl,
   initialTab,
 }: {
   data: TechConsoleData
   items: EquipmentItemRow[]
   people: { id: string; full_name: string }[]
+  kits: KitRow[]
+  approvals: PendingApprovalRow[]
   qrBaseUrl: string | null
   initialTab?: string
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
-  const validTabs = ['inventory', 'devices', 'activity', 'repairs', 'issues', 'locations']
+  const validTabs = [
+    'inventory',
+    'devices',
+    'approvals',
+    'kits',
+    'activity',
+    'repairs',
+    'issues',
+    'locations',
+  ]
   const [tab, setTab] = useState(
     initialTab && validTabs.includes(initialTab) ? initialTab : 'inventory'
   )
@@ -100,6 +122,10 @@ export function TechConsoleClient({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [newLocation, setNewLocation] = useState('')
   const [newStudio, setNewStudio] = useState('')
+  const [kitDialog, setKitDialog] = useState<{ open: boolean; kit: KitRow | null }>({
+    open: false,
+    kit: null,
+  })
 
   const openIssues = data.issues.filter((i) => i.status === 'open')
   const openRepairs = data.repairs.filter((r) => !r.returned_at)
@@ -137,6 +163,15 @@ export function TechConsoleClient({
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="inventory">Inventory</TabsTrigger>
             <TabsTrigger value="devices">Devices</TabsTrigger>
+            <TabsTrigger value="approvals" className="gap-1.5">
+              Approvals
+              {approvals.length > 0 && (
+                <Badge variant="warning" className="px-1.5 py-0 text-[10px]">
+                  {approvals.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="kits">Kits</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="repairs" className="gap-1.5">
               Repairs
@@ -175,6 +210,120 @@ export function TechConsoleClient({
               privateByItem={data.privateByItem}
               people={people}
             />
+          </TabsContent>
+
+          {/* -------- Approvals (pending flagged-item requests) -------- */}
+          <TabsContent value="approvals" className="mt-4 space-y-2">
+            {approvals.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
+                Nothing awaiting approval. Requests for approval-flagged items land here.
+              </div>
+            )}
+            {approvals.map((a) => (
+              <div
+                key={a.reservation_id}
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
+              >
+                <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-[14px] font-semibold">
+                    {a.item.name} <CodeChip code={a.item.code} />
+                  </div>
+                  <div className="text-[12.5px] text-muted-foreground">
+                    {a.reserved_by_name} wants it for {a.shoot.name} ·{' '}
+                    {fmtShootWindow(a.shoot.starts_at, a.shoot.ends_at)} · asked{' '}
+                    {fmtDayTime(a.created_at)}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busyId === a.reservation_id}
+                    onClick={() => {
+                      const reason =
+                        window.prompt(`Why decline ${a.item.name} for ${a.shoot.name}? (optional)`) ??
+                        undefined
+                      run(
+                        a.reservation_id,
+                        () => rejectReservation({ reservationId: a.reservation_id, reason }),
+                        'Request declined'
+                      )
+                    }}
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={busyId === a.reservation_id}
+                    onClick={() =>
+                      run(
+                        a.reservation_id,
+                        () => approveReservation(a.reservation_id),
+                        `${a.item.name} approved for ${a.shoot.name}`
+                      )
+                    }
+                  >
+                    {busyId === a.reservation_id && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </TabsContent>
+
+          {/* -------- Kits -------- */}
+          <TabsContent value="kits" className="mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[12.5px] text-muted-foreground">
+                A kit is a one-tap selection shortcut in shoot planning. Custody stays per item.
+              </p>
+              <Button size="sm" onClick={() => setKitDialog({ open: true, kit: null })}>
+                <Plus className="h-4 w-4" /> New kit
+              </Button>
+            </div>
+            {kits.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
+                No kits yet. Bundle gear people always take together, like a podcast setup.
+              </div>
+            )}
+            <ul className="space-y-2">
+              {kits.map((kit) => (
+                <li
+                  key={kit.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
+                >
+                  <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[14px] font-semibold">{kit.name}</div>
+                    <div className="truncate text-[12.5px] text-muted-foreground">
+                      {kit.items.map((i) => i.name).join(', ') || 'empty'}
+                      {kit.notes && <> · {kit.notes}</>}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setKitDialog({ open: true, kit })}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-rose-600"
+                    disabled={busyId === kit.id}
+                    onClick={() => {
+                      if (window.confirm(`Delete kit ${kit.name}? Items themselves are untouched.`)) {
+                        run(kit.id, () => deleteKit(kit.id), 'Kit deleted')
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </TabsContent>
 
           {/* -------- Activity -------- */}
@@ -444,6 +593,13 @@ export function TechConsoleClient({
           </TabsContent>
         </Tabs>
       </div>
+
+      <KitDialog
+        open={kitDialog.open}
+        onOpenChange={(open) => setKitDialog((s) => ({ ...s, open }))}
+        kit={kitDialog.kit}
+        pooledItems={pooledItems}
+      />
     </div>
   )
 }

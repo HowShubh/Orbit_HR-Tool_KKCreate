@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import {
   AlertTriangle,
@@ -11,13 +10,12 @@ import {
   Plus,
   User,
 } from 'lucide-react'
-import { fmtTime } from './item-bits'
+import { fmtShootWindow, fmtTime } from './item-bits'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import type { ShootSummary } from '@/lib/queries/lockup'
 import { SHOOT_STATUS_LABELS } from '@/lib/lockup/constants'
 import { fmtDay } from './item-bits'
-import { ShootCreateDialog } from './shoot-create-dialog'
 
 const SHOOT_BADGE: Record<ShootSummary['effective_status'], 'success' | 'info' | 'muted' | 'danger'> = {
   active: 'success',
@@ -33,7 +31,6 @@ export function ShootCards({
   shoots: ShootSummary[]
   currentUserId: string
 }) {
-  const [createOpen, setCreateOpen] = useState(false)
   const visible = shoots.filter(
     (s) => s.effective_status !== 'done' || s.owner_id === currentUserId
   )
@@ -46,9 +43,18 @@ export function ShootCards({
         <div className="text-[12.5px] text-muted-foreground">
           {upcoming.length} shoot{upcoming.length === 1 ? '' : 's'}
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" /> New shoot
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/lockup/shoots/new?start=studio">
+              <Clapperboard className="h-4 w-4" /> Book studio
+            </Link>
+          </Button>
+          <Button size="sm" asChild>
+            <Link href="/lockup/shoots/new">
+              <Plus className="h-4 w-4" /> New shoot
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {upcoming.length === 0 && (
@@ -86,7 +92,6 @@ export function ShootCards({
         </>
       )}
 
-      <ShootCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   )
 }
@@ -107,8 +112,7 @@ function ShootCard({ shoot }: { shoot: ShootSummary }) {
       <div className="space-y-1 text-[12.5px] text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <CalendarDays className="h-3.5 w-3.5" />
-          {fmtDay(shoot.starts_at)}
-          {fmtDay(shoot.starts_at) !== fmtDay(shoot.ends_at) && <> to {fmtDay(shoot.ends_at)}</>}
+          {fmtShootWindow(shoot.starts_at, shoot.ends_at)}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {shoot.location && (
