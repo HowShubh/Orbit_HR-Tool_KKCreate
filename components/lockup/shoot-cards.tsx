@@ -39,22 +39,8 @@ export function ShootCards({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-[12.5px] text-muted-foreground">
-          {upcoming.length} shoot{upcoming.length === 1 ? '' : 's'}
-        </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" asChild>
-            <Link href="/lockup/shoots/new?start=studio">
-              <Clapperboard className="h-4 w-4" /> Book studio
-            </Link>
-          </Button>
-          <Button size="sm" asChild>
-            <Link href="/lockup/shoots/new">
-              <Plus className="h-4 w-4" /> New shoot
-            </Link>
-          </Button>
-        </div>
+      <div className="text-[12.5px] text-muted-foreground">
+        {upcoming.length} shoot{upcoming.length === 1 ? '' : 's'}
       </div>
 
       {upcoming.length === 0 && (

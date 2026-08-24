@@ -14,6 +14,7 @@ import { isoDay, parseDay, slotLabel } from '../schedule-picker'
 import { StepDetails } from './step-details'
 import { StepStudio } from './step-studio'
 import { StepGear, groupGear } from './step-gear'
+import { ReviewDialog } from './review-dialog'
 
 export type Person = { id: string; full_name: string }
 
@@ -89,6 +90,7 @@ export function ShootWizard({
 
   // ---- step 3: gear ----
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [reviewOpen, setReviewOpen] = useState(false)
   const [availability, setAvailability] = useState<AvailabilityRow[] | null>(initialAvailability)
   const [availabilityLoading, setAvailabilityLoading] = useState(false)
   const loadedWindowKey = useRef<string | null>(initialAvailability ? 'seeded' : null)
@@ -269,39 +271,59 @@ export function ShootWizard({
           Next: {step === 1 ? 'Studio' : 'Gear'} <ArrowRight className="h-4 w-4" />
         </Button>
       ) : (
-        <Button type="button" disabled={!canSubmit} onClick={submit}>
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          Create shoot
+        <Button type="button" disabled={!canSubmit} onClick={() => setReviewOpen(true)}>
+          Review your plan <ArrowRight className="h-4 w-4" />
         </Button>
       )}
     </div>
   )
 
   const planSummary = (
-    <>
-      <div className="mt-2 space-y-1.5 text-[13px]">
-        <div className="font-medium">{name.trim() || 'Unnamed shoot'}</div>
-        <div className="text-muted-foreground">{windowLabel}</div>
-        {slots.map((sl, i) => (
-          <div key={`${sl.studioId}-${sl.date}-${sl.startHM}-${i}`} className="text-muted-foreground">
-            {studioNameOf(sl.studioId)} · {dayLabel(sl.date)}, {slotLabel(sl.startHM)} to{' '}
-            {slotLabel(sl.endHM)}
+    <div className="mt-3 space-y-3">
+      {/* One block per step, so the rail reads as the same three stages the
+          wizard walks through rather than one mixed list. */}
+      <RailSection n={1} label="Details" done={name.trim().length > 0}>
+        <div className="font-medium text-foreground">{name.trim() || 'Unnamed shoot'}</div>
+        <div>{windowLabel}</div>
+        {editorIds.length > 0 && (
+          <div>
+            {editorIds.length} editor{editorIds.length === 1 ? '' : 's'}:{' '}
+            {editorIds
+              .map((id) => people.find((p) => p.id === id)?.full_name ?? 'someone')
+              .join(', ')}
           </div>
-        ))}
-        {locationType === 'outside' && outsideAddress.trim() && (
-          <div className="text-muted-foreground">Outside: {outsideAddress.trim()}</div>
         )}
-      </div>
+        {locationType === 'outside' && outsideAddress.trim() && (
+          <div>Outside: {outsideAddress.trim()}</div>
+        )}
+      </RailSection>
 
-      {step === 3 &&
-        (selectedGroups.length > 0 ? (
-          <ul className="mt-3 space-y-1.5">
+      <RailSection n={2} label="Studio" done={slots.length > 0}>
+        {slots.length === 0 ? (
+          <div className="text-muted-foreground/70">no studio booked</div>
+        ) : (
+          [...slots]
+            .sort((a, b) => `${a.date}T${a.startHM}`.localeCompare(`${b.date}T${b.startHM}`))
+            .map((sl, i) => (
+              <div key={`${sl.studioId}-${sl.date}-${sl.startHM}-${i}`}>
+                {studioNameOf(sl.studioId)} · {dayLabel(sl.date)}, {slotLabel(sl.startHM)} to{' '}
+                {slotLabel(sl.endHM)}
+              </div>
+            ))
+        )}
+      </RailSection>
+
+      <RailSection n={3} label="Gear" done={selectedGroups.length > 0}>
+        {selectedGroups.length === 0 ? (
+          <div className="text-muted-foreground/70">no gear yet</div>
+        ) : (
+          <ul className="space-y-1.5">
             {selectedGroups.map((g) => (
               <li
                 key={g.key}
                 className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[13px]"
               >
-                <span className="truncate">
+                <span className="truncate text-foreground">
                   {g.name}
                   {g.units.length > 1 && (
                     <span className="ml-1 font-semibold text-muted-foreground">
@@ -329,26 +351,28 @@ export function ShootWizard({
               </li>
             ))}
           </ul>
-        ) : (
-          <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-2 text-[12.5px] text-muted-foreground">
-            no gear yet
+        )}
+        {approvalCount > 0 && (
+          <div className="mt-2 rounded-lg bg-amber-500/15 px-2.5 py-1.5 text-[12.5px] font-medium text-amber-600">
+            {approvalCount} approval{approvalCount > 1 ? 's' : ''} needed
           </div>
-        ))}
+        )}
+      </RailSection>
 
-      {step === 3 && approvalCount > 0 && (
-        <div className="mt-3 rounded-lg bg-amber-500/15 px-3 py-1.5 text-[12.5px] font-medium text-amber-600">
-          {approvalCount} approval{approvalCount > 1 ? 's' : ''} needed
-        </div>
+      {/* Steps 1 and 2 keep the escape hatch; step 3's action lives in the
+          footer as "Review your plan", so it is not offered twice. */}
+      {step < 3 && (
+        <>
+          <Button type="button" className="w-full" disabled={!canSubmit} onClick={submit}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Create shoot now
+          </Button>
+          <p className="text-center text-[11.5px] text-muted-foreground">
+            {name.trim() ? 'Submit any time; add the rest later.' : 'Name the shoot to submit.'}
+          </p>
+        </>
       )}
-
-      <Button type="button" className="mt-4 w-full" disabled={!canSubmit} onClick={submit}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-        Create shoot
-      </Button>
-      <p className="mt-2 text-center text-[11.5px] text-muted-foreground">
-        {name.trim() ? 'Submit any time; skip what you like.' : 'Name the shoot to submit.'}
-      </p>
-    </>
+    </div>
   )
 
   return (
@@ -452,6 +476,60 @@ export function ShootWizard({
           </aside>
         </div>
       )}
+
+      <ReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        name={name}
+        windowLabel={windowLabel}
+        editors={editorIds.map(
+          (id) => people.find((p) => p.id === id)?.full_name ?? 'someone'
+        )}
+        outsideAddress={
+          locationType === 'outside' && outsideAddress.trim() ? outsideAddress.trim() : null
+        }
+        studioLines={[...slots]
+          .sort((a, b) => `${a.date}T${a.startHM}`.localeCompare(`${b.date}T${b.startHM}`))
+          .map(
+            (sl) =>
+              `${studioNameOf(sl.studioId)} · ${dayLabel(sl.date)}, ${slotLabel(sl.startHM)} to ${slotLabel(sl.endHM)}`
+          )}
+        gear={(availability ?? []).filter((r) => selectedIds.includes(r.item_id))}
+        busy={busy}
+        onConfirm={submit}
+      />
     </div>
+  )
+}
+
+/** One step's worth of the plan, numbered to match the wizard's own steps. */
+function RailSection({
+  n,
+  label,
+  done,
+  children,
+}: {
+  n: number
+  label: string
+  done: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <section className="space-y-1 border-t border-border pt-2.5 first:border-t-0 first:pt-0">
+      <div className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            'grid h-4 w-4 place-items-center rounded-full text-[9.5px] font-bold',
+            done ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'
+          )}
+        >
+          {done ? <Check className="h-2.5 w-2.5" /> : n}
+        </span>
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+      </div>
+      <div className="space-y-1 pl-[22px] text-[12.5px] text-muted-foreground">{children}</div>
+    </section>
   )
 }
