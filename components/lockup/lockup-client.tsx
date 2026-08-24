@@ -109,7 +109,12 @@ export function LockupClient({
           </TabsList>
 
           <TabsContent value="gear" className="mt-4">
-            <InventoryBrowser items={items} kits={kits} />
+            <InventoryBrowser
+              items={items}
+              kits={kits}
+              shoots={shoots}
+              currentUserId={currentUserId}
+            />
           </TabsContent>
 
           <TabsContent value="studio" className="mt-4">

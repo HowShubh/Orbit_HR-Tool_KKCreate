@@ -9,7 +9,7 @@ import { CartBar } from '@/components/lockup/cart-bar'
 export default function LockupLayout({ children }: { children: React.ReactNode }) {
   return (
     <CartProvider>
-      <div className="pb-24">{children}</div>
+      <div className="pb-16 lg:pb-0">{children}</div>
       <CartBar />
     </CartProvider>
   )
