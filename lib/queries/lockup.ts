@@ -1630,3 +1630,75 @@ export async function getShootOutstandingGear(shootId: string): Promise<Outstand
     ]
   })
 }
+
+export type OverdueGearRow = OutstandingGearRow & {
+  days_late: number
+  shoot_name: string | null
+  holder_slack_id: string | null
+}
+
+/**
+ * Everything past its due date, worst first. The Tech Console had only a COUNT
+ * of these, which is not chaseable: you cannot ask for a camera back without
+ * knowing who has it and how late they are.
+ */
+export async function getOverdueGear(): Promise<OverdueGearRow[]> {
+  const adminClient = createAdminClient()
+  const nowIso = new Date().toISOString()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .is('returned_at', null)
+    .not('due_at', 'is', null)
+    .lt('due_at', nowIso)
+    .order('due_at')
+  const list = checkouts ?? []
+  if (list.length === 0) return []
+
+  const shootIds = Array.from(new Set(list.flatMap((c) => (c.shoot_id ? [c.shoot_id] : []))))
+  const [{ data: items }, { data: holders }, { data: shoots }, locations] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url, home_location_id')
+      .in('id', list.map((c) => c.item_id)),
+    adminClient
+      .from('users')
+      .select('id, full_name, slack_user_id')
+      .in('id', Array.from(new Set(list.map((c) => c.holder_id)))),
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    locationMap(),
+  ])
+  const itemById = new Map((items ?? []).map((i) => [i.id, i]))
+  const holderById = new Map((holders ?? []).map((h) => [h.id, h]))
+  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
+  const now = Date.now()
+
+  return list.flatMap((c) => {
+    const item = itemById.get(c.item_id)
+    if (!item || !c.due_at) return []
+    const holder = holderById.get(c.holder_id)
+    return [
+      {
+        checkout_id: c.id,
+        item_id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        home_location_label: item.home_location_id
+          ? locations.get(item.home_location_id) ?? null
+          : null,
+        holder_id: c.holder_id,
+        holder_name: holder?.full_name ?? 'Someone',
+        holder_slack_id: holder?.slack_user_id ?? null,
+        checked_out_at: c.checked_out_at,
+        due_at: c.due_at,
+        overdue: true,
+        days_late: Math.max(1, Math.floor((now - new Date(c.due_at).getTime()) / 86400000)),
+        shoot_name: c.shoot_id ? shootById.get(c.shoot_id)?.name ?? null : null,
+      },
+    ]
+  })
+}

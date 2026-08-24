@@ -2693,3 +2693,52 @@ export async function createStudioHold(input: {
   await revalidateHR()
   return { id: created.id }
 }
+
+/**
+ * Ask someone for gear back, by hand. The daily sweep already nudges, but a
+ * manager chasing a specific item wants to poke now and have it land as a real
+ * message rather than another line in tomorrow's digest.
+ */
+export async function nudgeOverdueHolder(checkoutId: string): Promise<{ holder: string }> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+
+  const { data: checkout } = await admin
+    .from('equipment_checkouts')
+    .select('*')
+    .eq('id', checkoutId)
+    .is('returned_at', null)
+    .maybeSingle()
+  if (!checkout) throw new ActionError('That item is already back.')
+  if (!checkout.due_at || new Date(checkout.due_at) >= new Date()) {
+    throw new ActionError('That item is not overdue.')
+  }
+
+  const [{ data: item }, { data: holder }] = await Promise.all([
+    admin.from('equipment_items').select('name, code').eq('id', checkout.item_id).maybeSingle(),
+    admin.from('users').select('id, full_name').eq('id', checkout.holder_id).maybeSingle(),
+  ])
+  if (!item || !holder) throw new ActionError('Could not find the item or its holder.')
+
+  const daysLate = Math.max(
+    1,
+    Math.floor((Date.now() - new Date(checkout.due_at).getTime()) / 86400000)
+  )
+  await notifyLockup({
+    user_id: holder.id,
+    type: 'lockup_overdue_nudge',
+    title: `${user.full_name} is asking for ${item.name} back`,
+    body: `${item.name} (${item.code}) was due ${fmtDayTime(checkout.due_at)}, ${daysLate} day${daysLate === 1 ? '' : 's'} ago. Please bring it back to the cupboard or check it in from Lockup.`,
+    link_url: '/lockup?tab=mine',
+  })
+
+  await writeAudit(
+    user.id,
+    'equipment.overdue_nudge',
+    'equipment_item',
+    checkout.item_id,
+    null,
+    `${user.full_name} nudged ${holder.full_name} about ${item.name} (${daysLate} day(s) late)`
+  )
+  return { holder: holder.full_name }
+}

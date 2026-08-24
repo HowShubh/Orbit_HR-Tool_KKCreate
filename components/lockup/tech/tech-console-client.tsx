@@ -26,6 +26,7 @@ import { useStore } from '@/lib/store'
 import type {
   EquipmentItemRow,
   KitRow,
+  OverdueGearRow,
   PendingApprovalRow,
   TechConsoleData,
 } from '@/lib/queries/lockup'
@@ -46,6 +47,7 @@ import type { LockupSlackSettings } from '@/lib/slack-lockup'
 import { CodeChip, fmtDay, fmtDayTime, fmtShootWindow } from '../item-bits'
 import { InventoryTable } from './inventory-table'
 import { DevicesTable } from './devices-table'
+import { OverdueTable } from './overdue-table'
 import { KitDialog } from './kit-dialog'
 import { LockupSlackTab } from './slack-tab'
 
@@ -93,6 +95,7 @@ export function TechConsoleClient({
   people,
   kits,
   approvals,
+  overdue,
   qrBaseUrl,
   slackSettings,
   initialTab,
@@ -102,6 +105,7 @@ export function TechConsoleClient({
   people: { id: string; full_name: string }[]
   kits: KitRow[]
   approvals: PendingApprovalRow[]
+  overdue: OverdueGearRow[]
   qrBaseUrl: string | null
   slackSettings: LockupSlackSettings
   initialTab?: string
@@ -112,6 +116,7 @@ export function TechConsoleClient({
     'inventory',
     'devices',
     'approvals',
+    'overdue',
     'kits',
     'activity',
     'repairs',
@@ -160,7 +165,9 @@ export function TechConsoleClient({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard icon={Boxes} value={data.stats.items} label="Items" tone="default" />
           <StatCard icon={Clock} value={data.stats.out_now} label="Out now" tone="blue" />
-          <StatCard icon={AlertTriangle} value={data.stats.overdue} label="Overdue" tone="red" />
+          <button type="button" onClick={() => setTab('overdue')} className="text-left">
+            <StatCard icon={AlertTriangle} value={data.stats.overdue} label="Overdue" tone="red" />
+          </button>
           <StatCard icon={Wrench} value={data.stats.in_repair} label="In repair" tone="amber" />
         </div>
 
@@ -173,6 +180,14 @@ export function TechConsoleClient({
               {approvals.length > 0 && (
                 <Badge variant="warning" className="px-1.5 py-0 text-[10px]">
                   {approvals.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="overdue" className="gap-1.5">
+              Overdue
+              {overdue.length > 0 && (
+                <Badge variant="danger" className="px-1.5 py-0 text-[10px]">
+                  {overdue.length}
                 </Badge>
               )}
             </TabsTrigger>
@@ -276,6 +291,11 @@ export function TechConsoleClient({
                 </div>
               </div>
             ))}
+          </TabsContent>
+
+          {/* -------- Overdue -------- */}
+          <TabsContent value="overdue" className="mt-4">
+            <OverdueTable rows={overdue} />
           </TabsContent>
 
           {/* -------- Kits -------- */}
