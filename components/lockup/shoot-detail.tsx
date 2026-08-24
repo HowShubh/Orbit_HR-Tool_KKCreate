@@ -46,10 +46,11 @@ import {
   removeShootEditor,
   removeStudioBlock,
 } from '@/lib/actions/lockup'
-import type { AvailabilityRow, ShootDetail } from '@/lib/queries/lockup'
+import type { AvailabilityRow, OutstandingGearRow, ShootDetail } from '@/lib/queries/lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import { SHOOT_STATUS_LABELS } from '@/lib/lockup/constants'
 import { CategoryIcon, CodeChip, StatusBadge, fmtDay, fmtShootWindow, fmtTime, itemStatusLine } from './item-bits'
+import { CloseShootDialog } from './close-shoot-dialog'
 import { ReservationPicker } from './reservation-picker'
 import { CheckoutDialog, type CartItem } from './checkout-dialog'
 import { ScanConfirmDialog } from './scan-confirm-dialog'
@@ -70,6 +71,8 @@ export function ShootDetailClient({
   canManageEquipment,
   people,
   studios,
+  outstandingGear,
+  locations,
 }: {
   shoot: ShootDetail
   availability: AvailabilityRow[]
@@ -82,6 +85,9 @@ export function ShootDetailClient({
   canManageEquipment: boolean
   people: { id: string; full_name: string }[]
   studios: Tables<'equipment_studios'>[]
+  /** Gear picked up for this shoot and not yet returned; blocks cancel/delete. */
+  outstandingGear: OutstandingGearRow[]
+  locations: Tables<'equipment_locations'>[]
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
@@ -90,6 +96,7 @@ export function ShootDetailClient({
   const [pickupScan, setPickupScan] = useState<CartItem | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [closeMode, setCloseMode] = useState<'cancel' | 'delete' | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [editorsOpen, setEditorsOpen] = useState(false)
   const [studioOpen, setStudioOpen] = useState(false)
@@ -148,7 +155,6 @@ export function ShootDetailClient({
   }
 
   async function doCancelShoot() {
-    if (!window.confirm(`Cancel ${shoot.name}? All its reservations will be released.`)) return
     setCancelling(true)
     try {
       await cancelShoot(shoot.id)
@@ -161,6 +167,22 @@ export function ShootDetailClient({
         variant: 'error',
       })
       setCancelling(false)
+    }
+  }
+
+  async function doDeleteShoot() {
+    setDeleting(true)
+    try {
+      await deleteShoot(shoot.id)
+      pushToast({ title: `${shoot.name} deleted`, variant: 'success' })
+      router.push('/lockup?tab=shoots')
+      router.refresh()
+    } catch (err) {
+      pushToast({
+        title: err instanceof Error ? err.message : 'Could not delete the shoot',
+        variant: 'error',
+      })
+      setDeleting(false)
     }
   }
 
@@ -493,56 +515,48 @@ export function ShootDetailClient({
             )}
           </div>
 
-          {/* Danger zone */}
+          {/* Danger zone. Both routes go through the same dialog, which will
+              not let either happen while gear is still out. */}
           {canCancel && (
-            <div className="pt-2 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 pt-2">
               {!closed && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                  className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                   disabled={cancelling || deleting}
-                  onClick={doCancelShoot}
+                  onClick={() => setCloseMode('cancel')}
                 >
-                  {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                  Cancel this shoot
+                  <X className="h-4 w-4" /> Cancel this shoot
                 </Button>
               )}
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                 disabled={cancelling || deleting}
-                onClick={async () => {
-                  if (
-                    !window.confirm(
-                      `Delete ${shoot.name} permanently? Its reservations, studio bookings and editor list are removed too. This cannot be undone.`
-                    )
-                  )
-                    return
-                  setDeleting(true)
-                  try {
-                    await deleteShoot(shoot.id)
-                    pushToast({ title: `${shoot.name} deleted`, variant: 'success' })
-                    router.push('/lockup?tab=shoots')
-                    router.refresh()
-                  } catch (err) {
-                    pushToast({
-                      title: err instanceof Error ? err.message : 'Could not delete the shoot',
-                      variant: 'error',
-                    })
-                    setDeleting(false)
-                  }
-                }}
+                onClick={() => setCloseMode('delete')}
               >
-                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                Delete this shoot
+                <Trash2 className="h-4 w-4" /> Delete this shoot
               </Button>
             </div>
           )}
           </aside>
         </div>
       </div>
+
+      <CloseShootDialog
+        open={closeMode !== null}
+        onOpenChange={(o) => !o && setCloseMode(null)}
+        mode={closeMode ?? 'cancel'}
+        shootName={shoot.name}
+        outstanding={outstandingGear}
+        locations={locations}
+        currentUserId={currentUserId}
+        canManageEquipment={canManageEquipment}
+        busy={cancelling || deleting}
+        onConfirm={closeMode === 'delete' ? doDeleteShoot : doCancelShoot}
+      />
 
       <ReservationPicker
         open={pickerOpen}

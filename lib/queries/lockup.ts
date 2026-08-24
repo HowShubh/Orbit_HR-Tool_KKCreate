@@ -1564,3 +1564,69 @@ export async function getItemProfile(code: string): Promise<ItemProfile | null> 
     days,
   }
 }
+
+/** Gear still physically out for a shoot, blocking its cancel/delete. */
+export type OutstandingGearRow = {
+  checkout_id: string
+  item_id: string
+  code: string
+  name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  home_location_label: string | null
+  holder_id: string
+  holder_name: string
+  checked_out_at: string
+  due_at: string | null
+  overdue: boolean
+}
+
+/**
+ * Items picked up for this shoot and not yet brought back. A shoot cannot be
+ * cancelled or deleted while any of these exist: doing so would strand the gear
+ * with no record of why someone is holding it.
+ */
+export async function getShootOutstandingGear(shootId: string): Promise<OutstandingGearRow[]> {
+  const adminClient = createAdminClient()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .eq('shoot_id', shootId)
+    .is('returned_at', null)
+  const list = checkouts ?? []
+  if (list.length === 0) return []
+
+  const [{ data: items }, names, locations] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url, home_location_id')
+      .in('id', list.map((c) => c.item_id)),
+    nameMap(adminClient, list.map((c) => c.holder_id)),
+    locationMap(),
+  ])
+  const itemById = new Map((items ?? []).map((i) => [i.id, i]))
+  const now = new Date()
+
+  return list.flatMap((c) => {
+    const item = itemById.get(c.item_id)
+    if (!item) return []
+    return [
+      {
+        checkout_id: c.id,
+        item_id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        home_location_label: item.home_location_id
+          ? locations.get(item.home_location_id) ?? null
+          : null,
+        holder_id: c.holder_id,
+        holder_name: names.get(c.holder_id) ?? 'Someone',
+        checked_out_at: c.checked_out_at,
+        due_at: c.due_at,
+        overdue: Boolean(c.due_at && new Date(c.due_at) < now),
+      },
+    ]
+  })
+}

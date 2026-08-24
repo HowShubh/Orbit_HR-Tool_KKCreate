@@ -74,6 +74,8 @@ export type SweepResult = {
   repair_reminders: number
   shoots_archived: number
   shoots_deleted: number
+  /** Past retention but skipped: their gear is still out. */
+  shoots_kept_gear_out: number
 }
 
 export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
@@ -86,6 +88,7 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     repair_reminders: 0,
     shoots_archived: 0,
     shoots_deleted: 0,
+    shoots_kept_gear_out: 0,
   }
 
   // ---------- 0a: archive shoots as soon as they finish ----------
@@ -113,6 +116,19 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     .limit(200)
 
   for (const shoot of expired ?? []) {
+    // Same rule the manual buttons follow: a shoot whose gear never came back
+    // is not tidied away, it is left standing as the record of who has it.
+    const { data: stillOut } = await admin
+      .from('equipment_checkouts')
+      .select('id')
+      .eq('shoot_id', shoot.id)
+      .is('returned_at', null)
+      .limit(1)
+    if (stillOut && stillOut.length > 0) {
+      result.shoots_kept_gear_out++
+      continue
+    }
+
     const { error } = await admin.from('equipment_shoots').delete().eq('id', shoot.id)
     if (error) {
       // Never let one stubborn row stop the rest of the sweep.

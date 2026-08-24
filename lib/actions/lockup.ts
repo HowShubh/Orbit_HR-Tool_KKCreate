@@ -1112,10 +1112,43 @@ export async function updateShoot(input: {
   await revalidateHR()
 }
 
+
+/**
+ * Refuses to close a shoot while gear is still in someone's hands. Detaching or
+ * cancelling around it would leave the item checked out with nothing left to
+ * explain why — the gear has to come back first.
+ */
+async function assertNoGearStillOut(
+  admin: Admin,
+  shoot: Tables<'equipment_shoots'>,
+  verb: string
+): Promise<void> {
+  const { data: open } = await admin
+    .from('equipment_checkouts')
+    .select('item_id')
+    .eq('shoot_id', shoot.id)
+    .is('returned_at', null)
+  if (!open || open.length === 0) return
+
+  const { data: items } = await admin
+    .from('equipment_items')
+    .select('name')
+    .in('id', open.map((c) => c.item_id))
+  const names = (items ?? []).map((i) => i.name)
+  throw new ActionError(
+    `${open.length} item${open.length === 1 ? '' : 's'} from this shoot ${
+      open.length === 1 ? 'is' : 'are'
+    } still out (${names.join(', ')}). Return ${
+      open.length === 1 ? 'it' : 'them'
+    } before you ${verb} the shoot.`
+  )
+}
+
 export async function cancelShoot(shootId: string): Promise<void> {
   const user = await requireUser()
   const admin = createAdminClient()
   const shoot = await requireShootAccess(admin, shootId, user)
+  await assertNoGearStillOut(admin, shoot, 'cancel')
 
   const { data: activeReservations } = await admin
     .from('equipment_reservations')
@@ -1181,7 +1214,10 @@ export async function deleteShoot(shootId: string): Promise<void> {
     }
   }
 
-  // Keep checkout history but detach it from the shoot being removed
+  await assertNoGearStillOut(admin, shoot, 'delete')
+
+  // Keep checkout history but detach it from the shoot being removed. Safe now
+  // that nothing is still out: every row here is a completed, returned loan.
   await admin
     .from('equipment_checkouts')
     .update({ shoot_id: null })
