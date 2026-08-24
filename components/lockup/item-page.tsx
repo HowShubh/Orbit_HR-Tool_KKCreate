@@ -382,7 +382,7 @@ function Timeline({
   history: ItemProfile['history']
 }) {
   const [showAll, setShowAll] = useState(false)
-  const shown = showAll ? history : history.slice(0, 5)
+  const shown = showAll ? history : history.slice(0, 4)
 
   return (
     <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -390,7 +390,7 @@ function Timeline({
         <div className="text-[11.5px] font-bold uppercase tracking-wider text-muted-foreground">
           Timeline
         </div>
-        <span className="text-[11px] text-muted-foreground/70">past and upcoming</span>
+        <span className="text-[11px] text-muted-foreground/70">last 90 days</span>
       </div>
 
       <ol className="space-y-0">
@@ -432,13 +432,13 @@ function Timeline({
         )}
       </ol>
 
-      {history.length > 5 && (
+      {history.length > 4 && (
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
           className="w-full border-t border-border pt-2.5 text-center text-[12px] font-semibold text-primary"
         >
-          {showAll ? 'Show less' : `See all ${history.length} events`}
+          {showAll ? 'Show less' : `Show ${history.length - 4} more from the last 90 days`}
         </button>
       )}
     </div>

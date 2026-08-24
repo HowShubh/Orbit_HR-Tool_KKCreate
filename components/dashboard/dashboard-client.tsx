@@ -1,14 +1,15 @@
 'use client'
 
-import { type ComponentType, useTransition } from 'react'
+import { type ComponentType, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { addDays, format, parseISO, startOfWeek } from 'date-fns'
+import { addDays, addWeeks, format, isSameMonth, parseISO, startOfWeek } from 'date-fns'
 import {
   BriefcaseBusiness,
   Building2,
   Cake,
   CalendarCheck,
   CalendarDays,
+  ChevronLeft,
   ChevronRight,
   CheckCircle2,
   Clock3,
@@ -32,7 +33,7 @@ import { ApprovalQueueClient } from '@/components/approvals/approval-queue-clien
 import { decideCompoff } from '@/lib/actions/compoff'
 import { useStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
-import { currentFiscalYearStart, formatFiscalYear } from '@/lib/date'
+import { currentFiscalYearStart, formatFiscalYear, SCHEDULE_WEEKS_AHEAD } from '@/lib/date'
 import type { AppUser } from '@/lib/auth/get-current-user'
 import type { DashboardData } from '@/lib/queries/dashboard'
 
@@ -109,16 +110,6 @@ function getPrimaryTeam(data: DashboardData) {
     data.employeeTeams.find((team) => team.id === data.primaryTeamId) ??
     data.employeeTeams[0] ??
     null
-  )
-}
-
-function leaveForDate(leaves: DashboardData['upcomingMine'], date: Date, userId?: string) {
-  const dateIso = isoDate(date)
-  return leaves.find(
-    (leave) =>
-      (!userId || leave.user_id === userId) &&
-      leave.start_date <= dateIso &&
-      leave.end_date >= dateIso
   )
 }
 
@@ -213,9 +204,8 @@ function PersonalDashboard({
             <EmployeeScheduleCard
               currentUser={currentUser}
               team={primaryTeam}
-              leaves={data.upcomingMine}
-              todayLeaves={data.leavesToday}
-              holidays={data.weekHolidays}
+              leaves={data.scheduleLeaves}
+              holidays={data.scheduleHolidays}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5">
@@ -376,72 +366,148 @@ function EmployeeHolidayCard({ holidays }: { holidays: DashboardData['upcomingHo
   )
 }
 
+// A day can carry more than one row, so pick the most authoritative one rather
+// than whichever sorts first. Only approved leave reaches here.
+const SCHEDULE_STATUS_RANK: Record<string, number> = {
+  active: 0,
+  delete_requested: 1,
+}
+
+function scheduleLeaveForDate(
+  leaves: DashboardData['scheduleLeaves'],
+  date: Date,
+  userId: string
+) {
+  const dateIso = isoDate(date)
+  return leaves
+    .filter(
+      (leave) =>
+        leave.user_id === userId &&
+        leave.start_date <= dateIso &&
+        leave.end_date >= dateIso
+    )
+    .sort(
+      (a, b) => (SCHEDULE_STATUS_RANK[a.status] ?? 9) - (SCHEDULE_STATUS_RANK[b.status] ?? 9)
+    )[0]
+}
+
+// Weekly plan strip. Pages forward one week at a time up to SCHEDULE_WEEKS_AHEAD
+// (~2 months); the whole window is pre-fetched by getDashboardData, so paging is
+// instant and needs no server round trip.
 function EmployeeScheduleCard({
   currentUser,
   team,
   leaves,
-  todayLeaves,
   holidays,
 }: {
   currentUser: AppUser
   team: ReturnType<typeof getPrimaryTeam>
-  leaves: DashboardData['upcomingMine']
-  todayLeaves: DashboardData['leavesToday']
-  holidays: DashboardData['weekHolidays']
+  leaves: DashboardData['scheduleLeaves']
+  holidays: DashboardData['scheduleHolidays']
 }) {
-  const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 })
+  const [weekOffset, setWeekOffset] = useState(0)
+  const thisWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 })
+  const weekStart = addWeeks(thisWeekStart, weekOffset)
+  const weekEnd = addDays(weekStart, 6)
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
   const wfoDays = parseWfoPattern(team?.wfo_pattern)
   const offDays = parseOffDays(team?.off_days)
-  const allLeaves = [
-    ...todayLeaves.filter((leave) => leave.user_id === currentUser.id),
-    ...leaves,
-  ]
+  const todayIso = isoDate(new Date())
+
+  const rangeLabel = isSameMonth(weekStart, weekEnd)
+    ? `${format(weekStart, 'MMM d')} – ${format(weekEnd, 'd, yyyy')}`
+    : `${format(weekStart, 'MMM d')} – ${format(weekEnd, 'MMM d, yyyy')}`
 
   function planForDay(date: Date) {
     const dateIso = isoDate(date)
     const holiday = holidays.find((item) => item.date === dateIso)
-    const leave = leaveForDate(allLeaves, date, currentUser.id)
+    const leave = scheduleLeaveForDate(leaves, date, currentUser.id)
     const code = DAY_CODE_BY_INDEX[date.getDay()]
 
     if (leave) {
+      const type = leave.requested_type ?? leave.type
+      const notes: string[] = []
+      if (leave.half_day_position) notes.push('Half day')
+      if (leave.status === 'delete_requested') notes.push('Cancellation requested')
       return {
-        label: LEAVE_TYPE_LABELS[leave.type] ?? 'Leave',
-        className: LEAVE_TYPE_PILL[leave.type] ?? 'bg-muted text-muted-foreground ring-border',
+        label: LEAVE_TYPE_LABELS[type] ?? leave.type_name ?? 'Leave',
+        className: LEAVE_TYPE_PILL[type] ?? 'bg-muted text-muted-foreground ring-border',
+        note: notes.join(' · ') || null,
+        muted: leave.status !== 'active',
       }
     }
     if (holiday) {
-      return { label: 'Holiday', className: 'bg-rose-50 text-rose-700 ring-rose-100' }
+      return {
+        label: 'Holiday',
+        className: 'bg-rose-50 text-rose-700 ring-rose-100',
+        note: holiday.name,
+        muted: false,
+      }
     }
     if (offDays.has(code)) {
-      return { label: 'Off', className: 'bg-slate-50 text-slate-600 ring-slate-100' }
+      return { label: 'Off', className: 'bg-slate-50 text-slate-600 ring-slate-100', note: null, muted: false }
     }
     if (wfoDays.has(code)) {
-      return { label: 'Office', className: 'bg-emerald-50 text-emerald-700 ring-emerald-100' }
+      return { label: 'Office', className: 'bg-emerald-50 text-emerald-700 ring-emerald-100', note: null, muted: false }
     }
-    return { label: 'Remote', className: 'bg-violet-50 text-violet-700 ring-violet-100' }
+    return { label: 'Remote', className: 'bg-violet-50 text-violet-700 ring-violet-100', note: null, muted: false }
   }
 
   return (
     <Card>
       <CardHeader>
-        <div>
-          <CardTitle>This Week Schedule</CardTitle>
+        <div className="min-w-0">
+          <CardTitle>
+            {weekOffset === 0 ? 'This Week Schedule' : 'Schedule'}
+          </CardTitle>
           <div className="mt-1 text-[12px] text-muted-foreground">
-            {team ? `${team.name} team` : 'No primary team assigned'}
+            {rangeLabel}
+            {team ? ` · ${team.name} team` : ' · No primary team assigned'}
           </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {weekOffset !== 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-[12px]"
+              onClick={() => setWeekOffset(0)}
+            >
+              Today
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Previous week"
+            disabled={weekOffset <= 0}
+            onClick={() => setWeekOffset((offset) => Math.max(0, offset - 1))}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Next week"
+            disabled={weekOffset >= SCHEDULE_WEEKS_AHEAD}
+            onClick={() => setWeekOffset((offset) => Math.min(SCHEDULE_WEEKS_AHEAD, offset + 1))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
           {days.map((day) => {
             const plan = planForDay(day)
-            const isToday = isoDate(day) === isoDate(new Date())
+            const isToday = isoDate(day) === todayIso
             return (
               <div
                 key={day.toISOString()}
                 className={cn(
-                  'rounded-lg border p-3 min-h-[92px]',
+                  'rounded-lg border p-3 min-h-[104px]',
                   isToday ? 'border-primary/40 bg-primary/5' : 'border-border/70'
                 )}
               >
@@ -451,9 +517,20 @@ function EmployeeScheduleCard({
                 <div className="mt-1 text-[18px] font-semibold tabular-nums">
                   {format(day, 'd')}
                 </div>
-                <span className={cn('mt-3 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset', plan.className)}>
+                <span
+                  className={cn(
+                    'mt-3 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset',
+                    plan.className,
+                    plan.muted && 'opacity-70'
+                  )}
+                >
                   {plan.label}
                 </span>
+                {plan.note && (
+                  <div className="mt-1 truncate text-[10px] text-muted-foreground" title={plan.note}>
+                    {plan.note}
+                  </div>
+                )}
               </div>
             )
           })}

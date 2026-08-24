@@ -73,6 +73,7 @@ export type SweepResult = {
   reservations_expired: number
   repair_reminders: number
   shoots_archived: number
+  shoots_deleted: number
 }
 
 export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
@@ -84,19 +85,52 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     reservations_expired: 0,
     repair_reminders: 0,
     shoots_archived: 0,
+    shoots_deleted: 0,
   }
 
-  // ---------- 0: archive finished shoots ----------
-  // A week after a shoot's last day it is marked done (the list already hides
-  // it at that point; this keeps the stored status honest too).
-  const archiveCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  // ---------- 0a: archive shoots as soon as they finish ----------
+  // A shoot that is over is over; it moves to Finished the same day rather
+  // than lingering as "planned" for a week.
   const { data: archived } = await admin
     .from('equipment_shoots')
     .update({ status: 'done' })
     .in('status', ['planned', 'active'] as unknown as ('planned' | 'active')[])
-    .lt('ends_at', archiveCutoff)
+    .lt('ends_at', now.toISOString())
     .select('id')
   result.shoots_archived = archived?.length ?? 0
+
+  // ---------- 0b: delete shoots 90 days after they finished ----------
+  // Retention, not tidying: 90 days matches how far back the app shows shoots
+  // at all, so nothing visible is lost. Reservations, editors and studio
+  // blocks cascade away with the shoot. Checkouts do NOT: they are the gear's
+  // own history and survive with shoot_id set to null (migration 032).
+  const deleteCutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: expired } = await admin
+    .from('equipment_shoots')
+    .select('id, name, ends_at, owner_id')
+    .in('status', ['done', 'cancelled'] as unknown as ('done' | 'cancelled')[])
+    .lt('ends_at', deleteCutoff)
+    .limit(200)
+
+  for (const shoot of expired ?? []) {
+    const { error } = await admin.from('equipment_shoots').delete().eq('id', shoot.id)
+    if (error) {
+      // Never let one stubborn row stop the rest of the sweep.
+      console.error('[lockup-sweep] could not delete shoot', shoot.id, error.message)
+      continue
+    }
+    result.shoots_deleted++
+    // Deleting production data leaves a trail, always. audit_log.actor_id is
+    // NOT NULL and there is no system user, so the row is attributed to the
+    // shoot's owner — the note makes clear nobody actually pressed anything.
+    await admin.from('audit_log').insert({
+      actor_id: shoot.owner_id,
+      action: 'equipment.shoot_retention_delete',
+      entity_type: 'equipment_shoot',
+      entity_id: shoot.id,
+      note: `Retention sweep (automatic) deleted "${shoot.name}", which finished ${shoot.ends_at}, after the 90-day window. Gear history for its items is unaffected.`,
+    })
+  }
 
   // ---------- 1 + 2: due today / overdue ----------
   const { data: openCheckouts } = await admin

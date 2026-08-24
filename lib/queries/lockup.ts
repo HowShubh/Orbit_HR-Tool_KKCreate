@@ -548,25 +548,35 @@ export type ItemHistoryEvent = {
 
 /** Chronological history of one item (newest first), assembled from checkouts,
  *  repairs and issues. */
+/**
+ * An item's past, capped to the last 90 days. The item page shows a handful and
+ * expands to the rest of that window — the point is a readable page, not an
+ * archive, and 90 days is also how long shoots survive before retention deletes
+ * them, so the two windows agree.
+ */
 export async function getItemHistory(itemId: string, limit = 25): Promise<ItemHistoryEvent[]> {
   const adminClient = createAdminClient()
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
   const [{ data: checkouts }, { data: repairs }, { data: issues }, locations] = await Promise.all([
     adminClient
       .from('equipment_checkouts')
       .select('*')
       .eq('item_id', itemId)
+      .gte('checked_out_at', since)
       .order('checked_out_at', { ascending: false })
       .limit(limit),
     adminClient
       .from('equipment_repairs')
       .select('*')
       .eq('item_id', itemId)
+      .gte('sent_at', since)
       .order('sent_at', { ascending: false })
       .limit(limit),
     adminClient
       .from('equipment_issues')
       .select('*')
       .eq('item_id', itemId)
+      .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(limit),
     locationMap(),

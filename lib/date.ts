@@ -53,6 +53,25 @@ export function istWeekRange(): { weekStart: string; weekEnd: string } {
   return { weekStart: start.toISOString().slice(0, 10), weekEnd: end.toISOString().slice(0, 10) }
 }
 
+/**
+ * How many weeks past the current one the dashboard schedule card can be paged
+ * forward (roughly two months). The server pre-fetches leaves and holidays for
+ * this whole window so paging never needs another round trip.
+ */
+export const SCHEDULE_WEEKS_AHEAD = 8
+
+/**
+ * Monday of the current IST week through the Sunday `SCHEDULE_WEEKS_AHEAD`
+ * weeks later. Starting at the week's Monday (not today) matters: days already
+ * past in the current week must still show the leave that was taken on them.
+ */
+export function istScheduleRange(): { start: string; end: string } {
+  const { weekStart } = istWeekRange()
+  const end = new Date(`${weekStart}T00:00:00Z`)
+  end.setUTCDate(end.getUTCDate() + SCHEDULE_WEEKS_AHEAD * 7 + 6)
+  return { start: weekStart, end: end.toISOString().slice(0, 10) }
+}
+
 /** First day (day 1) of the IST month shifted by `monthOffset`, as 'YYYY-MM-DD'. */
 export function istMonthStart(monthOffset = 0): string {
   const { year, month } = istYearMonth()

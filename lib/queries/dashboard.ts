@@ -1,7 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { todayIST, istDatePlusDays, istWeekRange, istMonthDay, istYearMonth, currentFiscalYearStart } from '@/lib/date'
+import { todayIST, istDatePlusDays, istScheduleRange, istMonthDay, istYearMonth, currentFiscalYearStart } from '@/lib/date'
 import type { Tables } from '@/lib/supabase/database.types'
 import {
+  listLeavesInRange,
   listLeavesToday,
   listUpcomingLeaves,
   type LeaveWithUser,
@@ -55,7 +56,12 @@ export interface DashboardData {
   pendingApprovalsForMe: DashboardCompoffApproval[]
   pendingApprovalRequests: LeaveRequestWithDays[]
   upcomingHolidays: Tables<'holidays'>[]
-  weekHolidays: Tables<'holidays'>[]
+  // Everything the schedule card needs to render any week in its paging window,
+  // fetched once up front. Unlike `upcomingMine` these start at the current
+  // week's Monday, so days already past in this week still show what was taken.
+  // Approved leave only — a pending request is not a plan yet.
+  scheduleLeaves: LeaveWithUser[]
+  scheduleHolidays: Tables<'holidays'>[]
   unreadNotifications: number
   primaryTeamId: string | null
   employeeTeams: DashboardTeam[]
@@ -233,18 +239,19 @@ export async function getDashboardData(
   // Run as much as we can in parallel. All "today"/range math resolves in IST.
   const todayDate = todayIST()
   const futureDate = istDatePlusDays(30)
-  const { weekStart: weekStartDate, weekEnd: weekEndDate } = istWeekRange()
+  const { start: scheduleStart, end: scheduleEnd } = istScheduleRange()
 
   const [
     leavesToday,
     upcomingMine,
     upcomingTeam,
     upcomingOrg,
+    scheduleLeaves,
     balancesRes,
     compoffBalRes,
     approvalsRes,
     holidaysRes,
-    weekHolidaysRes,
+    scheduleHolidaysRes,
     notifRes,
     leaveTypes,
   ] = await Promise.all([
@@ -252,6 +259,10 @@ export async function getDashboardData(
     listUpcomingLeaves(60, [currentUserId]),
     myTeamUserIds.length > 0 ? listUpcomingLeaves(30, myTeamUserIds) : Promise.resolve([]),
     orgUserIds.length > 0 ? listUpcomingLeaves(30, orgUserIds) : Promise.resolve([]),
+    listLeavesInRange(scheduleStart, scheduleEnd, {
+      userIds: [currentUserId],
+      statuses: ['active', 'delete_requested'],
+    }),
     adminClient
       .from('leave_balances')
       .select('*')
@@ -277,8 +288,8 @@ export async function getDashboardData(
     adminClient
       .from('holidays')
       .select('*')
-      .gte('date', weekStartDate)
-      .lte('date', weekEndDate)
+      .gte('date', scheduleStart)
+      .lte('date', scheduleEnd)
       .order('date', { ascending: true }),
     adminClient
       .from('notifications')
@@ -319,7 +330,8 @@ export async function getDashboardData(
     })),
     pendingApprovalRequests,
     upcomingHolidays: holidaysRes.data ?? [],
-    weekHolidays: weekHolidaysRes.data ?? [],
+    scheduleLeaves,
+    scheduleHolidays: scheduleHolidaysRes.data ?? [],
     unreadNotifications: notifRes.count ?? 0,
     primaryTeamId,
     employeeTeams,
