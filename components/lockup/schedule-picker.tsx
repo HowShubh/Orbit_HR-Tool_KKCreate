@@ -236,3 +236,24 @@ export function TimeSlotColumn({
     </div>
   )
 }
+
+// ---------- studio slot vocabulary ----------
+// Lives here, not in the wizard, so the shared studio picker does not have to
+// import the wizard (which imports the picker back).
+
+/** One held studio window: a room, a day, and a start/end in that day. */
+export type StudioSlot = {
+  studioId: string
+  /** YYYY-MM-DD (local). Slots are single-day. */
+  date: string
+  startHM: string
+  endHM: string
+}
+
+export function dayLabel(iso: string): string {
+  return parseDay(iso).toLocaleDateString('en-IN', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+}

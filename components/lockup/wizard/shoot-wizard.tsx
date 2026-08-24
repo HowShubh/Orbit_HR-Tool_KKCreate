@@ -10,7 +10,7 @@ import { createShootPlan, fetchWindowAvailability, type GearWindow } from '@/lib
 import type { AvailabilityRow, KitRow, StudioScheduleEntry } from '@/lib/queries/lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import { cn } from '@/lib/utils'
-import { isoDay, parseDay, slotLabel } from '../schedule-picker'
+import { dayLabel, isoDay, parseDay, slotLabel, type StudioSlot } from '../schedule-picker'
 import { StepDetails } from './step-details'
 import { StepStudio } from './step-studio'
 import { StepGear, groupGear } from './step-gear'
@@ -18,13 +18,8 @@ import { ReviewDialog } from './review-dialog'
 
 export type Person = { id: string; full_name: string }
 
-export type StudioSlot = {
-  studioId: string
-  /** YYYY-MM-DD (local). Studio slots are single-day in the wizard. */
-  date: string
-  startHM: string
-  endHM: string
-}
+export type { StudioSlot } from '../schedule-picker'
+export { dayLabel } from '../schedule-picker'
 
 function todayInput(offsetDays = 0): string {
   const d = new Date()
@@ -32,13 +27,7 @@ function todayInput(offsetDays = 0): string {
   return isoDay(d)
 }
 
-export function dayLabel(iso: string): string {
-  return parseDay(iso).toLocaleDateString('en-IN', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  })
-}
+
 
 const STEPS = [
   { n: 1, label: 'Details' },
