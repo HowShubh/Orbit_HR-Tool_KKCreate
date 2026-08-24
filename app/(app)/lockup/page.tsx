@@ -7,46 +7,38 @@ import {
   listKits,
   listLockupLocations,
   listShoots,
+  listStudios,
 } from '@/lib/queries/lockup'
 import { listMyCapabilityKeys } from '@/lib/queries/capabilities'
-import { listUsers } from '@/lib/queries/users'
-import { LockupClient } from '@/components/lockup/lockup-client'
-import { LockupHome } from '@/components/lockup/lockup-home'
+import { LockupClient, type LockupTab } from '@/components/lockup/lockup-client'
 
-const TABS = ['gear', 'devices', 'mine', 'shoots'] as const
+const TABS = ['gear', 'studio', 'shoots', 'mine'] as const
 
 export default async function LockupPage({
   searchParams,
 }: {
-  searchParams?: { tab?: string }
+  searchParams?: { tab?: string; cart?: string }
 }) {
   const me = await requireUser()
-
-  // No tab = the entry fork (Get equipment / Plan a shoot). The tab surfaces
-  // stay reachable at /lockup?tab=… for deep links (dashboard, notifications).
-  if (!(TABS as readonly string[]).includes(searchParams?.tab ?? '')) {
-    return <LockupHome />
-  }
-  const tab = searchParams!.tab as (typeof TABS)[number]
-
-  const [items, myGear, myDevices, shoots, locations, myCapabilities, studioSchedule, users, kits] =
+  const [items, kits, myGear, myDevices, shoots, studios, locations, studioSchedule, myCapabilities] =
     await Promise.all([
       listEquipment(),
+      listKits(),
       getMyGear(me.id),
       getMyDevices(me.id),
       listShoots(),
+      listStudios(),
       listLockupLocations(),
-      listMyCapabilityKeys(me.id),
       getStudioSchedule(),
-      listUsers(),
-      listKits(),
+      listMyCapabilityKeys(me.id),
     ])
 
+  // Gear is the landing tab: no tab param means gear.
+  const tab: LockupTab = (TABS as readonly string[]).includes(searchParams?.tab ?? '')
+    ? (searchParams!.tab as LockupTab)
+    : 'gear'
   const canManageEquipment =
     me.role === 'hr' || me.role === 'founder' || myCapabilities.includes('manage_equipment')
-  const people = users
-    .filter((u) => u.status === 'active')
-    .map((u) => ({ id: u.id, full_name: u.full_name }))
 
   return (
     <LockupClient
@@ -55,12 +47,13 @@ export default async function LockupPage({
       myGear={myGear}
       myDevices={myDevices}
       shoots={shoots}
+      studios={studios}
       locations={locations}
       studioSchedule={studioSchedule}
-      people={people}
       currentUserId={me.id}
       canManageEquipment={canManageEquipment}
       initialTab={tab}
+      openCartInitially={searchParams?.cart === '1'}
     />
   )
 }

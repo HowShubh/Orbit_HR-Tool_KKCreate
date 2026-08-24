@@ -314,7 +314,9 @@ export type Database = {
         Row: {
           id: string
           studio_id: string
-          shoot_id: string
+          /** Null for a standalone hold (no shoot); then `title` names it. */
+          shoot_id: string | null
+          title: string | null
           starts_at: string
           ends_at: string
           created_by: string
@@ -323,7 +325,8 @@ export type Database = {
         Insert: {
           id?: string
           studio_id: string
-          shoot_id: string
+          shoot_id?: string | null
+          title?: string | null
           starts_at: string
           ends_at: string
           created_by: string

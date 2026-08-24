@@ -352,7 +352,7 @@ export function ShootWizard({
         {/* Selected rail */}
         <aside className="h-fit rounded-xl border border-border bg-card p-4 lg:sticky lg:top-4">
           <div className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Selected ({selectedGroups.length})
+            {step === 3 ? `Selected (${selectedGroups.length})` : 'Your plan so far'}
           </div>
 
           <div className="mt-2 space-y-1.5 text-[13px]">
@@ -369,7 +369,7 @@ export function ShootWizard({
             )}
           </div>
 
-          {selectedGroups.length > 0 ? (
+          {step === 3 && (selectedGroups.length > 0 ? (
             <ul className="mt-3 space-y-1.5">
               {selectedGroups.map((g) => (
                 <li
@@ -408,9 +408,9 @@ export function ShootWizard({
             <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-2 text-[12.5px] text-muted-foreground">
               no gear yet
             </div>
-          )}
+          ))}
 
-          {approvalCount > 0 && (
+          {step === 3 && approvalCount > 0 && (
             <div className="mt-3 rounded-lg bg-amber-500/15 px-3 py-1.5 text-[12.5px] font-medium text-amber-600">
               {approvalCount} approval{approvalCount > 1 ? 's' : ''} needed
             </div>

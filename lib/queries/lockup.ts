@@ -105,8 +105,12 @@ export type StudioBlockRow = {
 }
 
 export type StudioScheduleEntry = StudioBlockRow & {
-  shoot_id: string
+  /** Null for a standalone hold: someone blocked the room without a shoot. */
+  shoot_id: string | null
+  /** The shoot's name, or the hold's own title. Always something to show. */
   shoot_name: string
+  created_by: string
+  created_by_name: string
 }
 
 export type ShootSummary = {
@@ -275,6 +279,8 @@ async function studioBlocksByShoot(
   ])
   const byShoot = new Map<string, StudioBlockRow[]>()
   for (const b of blocks ?? []) {
+    // Standalone holds have no shoot to group under.
+    if (!b.shoot_id) continue
     const list = byShoot.get(b.shoot_id) ?? []
     list.push({
       id: b.id,
@@ -1242,11 +1248,15 @@ export async function getStudioSchedule(): Promise<StudioScheduleEntry[]> {
   const list = blocks ?? []
   if (list.length === 0) return []
 
-  const shootIds = Array.from(new Set(list.map((b) => b.shoot_id)))
-  const { data: shoots } = await adminClient
-    .from('equipment_shoots')
-    .select('id, name')
-    .in('id', shootIds)
+  const shootIds = Array.from(
+    new Set(list.flatMap((b) => (b.shoot_id ? [b.shoot_id] : [])))
+  )
+  const [{ data: shoots }, bookerNames] = await Promise.all([
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    nameMap(adminClient, list.map((b) => b.created_by)),
+  ])
   const shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
 
   return list.map((b) => ({
@@ -1256,7 +1266,12 @@ export async function getStudioSchedule(): Promise<StudioScheduleEntry[]> {
     starts_at: b.starts_at,
     ends_at: b.ends_at,
     shoot_id: b.shoot_id,
-    shoot_name: shootNames.get(b.shoot_id) ?? 'A shoot',
+    // A standalone hold shows its own title; a shoot block shows the shoot.
+    shoot_name: b.shoot_id
+      ? shootNames.get(b.shoot_id) ?? 'A shoot'
+      : b.title?.trim() || 'Studio hold',
+    created_by: b.created_by,
+    created_by_name: bookerNames.get(b.created_by) ?? 'Someone',
   }))
 }
 
@@ -1282,11 +1297,15 @@ export async function getStudioBlocksRange(
   const list = blocks ?? []
   if (list.length === 0) return []
 
-  const shootIds = Array.from(new Set(list.map((b) => b.shoot_id)))
-  const { data: shoots } = await adminClient
-    .from('equipment_shoots')
-    .select('id, name')
-    .in('id', shootIds)
+  const shootIds = Array.from(
+    new Set(list.flatMap((b) => (b.shoot_id ? [b.shoot_id] : [])))
+  )
+  const [{ data: shoots }, bookerNames] = await Promise.all([
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    nameMap(adminClient, list.map((b) => b.created_by)),
+  ])
   const shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
 
   return list.map((b) => ({
@@ -1296,7 +1315,12 @@ export async function getStudioBlocksRange(
     starts_at: b.starts_at,
     ends_at: b.ends_at,
     shoot_id: b.shoot_id,
-    shoot_name: shootNames.get(b.shoot_id) ?? 'A shoot',
+    // A standalone hold shows its own title; a shoot block shows the shoot.
+    shoot_name: b.shoot_id
+      ? shootNames.get(b.shoot_id) ?? 'A shoot'
+      : b.title?.trim() || 'Studio hold',
+    created_by: b.created_by,
+    created_by_name: bookerNames.get(b.created_by) ?? 'Someone',
   }))
 }
 
@@ -1315,4 +1339,185 @@ export async function countMyOpenCheckouts(userId: string): Promise<number> {
 export async function getLockupSettings(): Promise<LockupSlackSettings> {
   const admin = createAdminClient()
   return getLockupSlackSettings(admin)
+}
+
+// ============================================================
+// Item profile page (/lockup/items/[code])
+// ============================================================
+
+export type ItemUpcomingEvent = {
+  at: string
+  ends_at: string | null
+  kind: 'reservation' | 'repair_due' | 'due_back'
+  text: string
+  sub: string | null
+}
+
+/** One day the item is spoken for, for the month grid. */
+export type ItemDayState = { day: string; state: 'busy' | 'repair' }
+
+export type ItemProfile = {
+  item: EquipmentItemRow
+  /** Whoever physically has it right now, with enough to contact them. */
+  holder: {
+    id: string
+    full_name: string
+    email: string | null
+    slack_user_id: string | null
+  } | null
+  /** The shoot the current checkout belongs to, when it has one. */
+  holder_shoot: { id: string; name: string; location: string | null } | null
+  kits: { id: string; name: string }[]
+  history: ItemHistoryEvent[]
+  upcoming: ItemUpcomingEvent[]
+  /** Days in the next ~8 weeks that are already spoken for. */
+  days: ItemDayState[]
+}
+
+function istDayKey(iso: string | Date): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+}
+
+/** Every IST day touched by [start, end], inclusive. */
+function daySpan(startIso: string, endIso: string): string[] {
+  const out: string[] = []
+  const end = istDayKey(endIso)
+  const cursor = new Date(`${istDayKey(startIso)}T00:00:00Z`)
+  for (let i = 0; i < 120; i++) {
+    const key = cursor.toISOString().slice(0, 10)
+    out.push(key)
+    if (key >= end) break
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return out
+}
+
+/**
+ * Everything the item page shows: the live answer (free / who has it / when it
+ * frees up), how to reach that person, what is coming, and the trail behind it.
+ */
+export async function getItemProfile(code: string): Promise<ItemProfile | null> {
+  const item = await getItemByCode(code)
+  if (!item) return null
+
+  const adminClient = createAdminClient()
+  const [
+    { data: openCheckout },
+    { data: reservations },
+    { data: openRepair },
+    { data: kitRows },
+    history,
+  ] = await Promise.all([
+    adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .eq('item_id', item.id)
+      .is('returned_at', null)
+      .maybeSingle(),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .eq('item_id', item.id)
+      .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[]),
+    adminClient
+      .from('equipment_repairs')
+      .select('*')
+      .eq('item_id', item.id)
+      .is('returned_at', null)
+      .maybeSingle(),
+    adminClient.from('equipment_kit_items').select('kit_id').eq('item_id', item.id),
+    getItemHistory(item.id, 40),
+  ])
+
+  // Holder + the shoot their checkout belongs to
+  let holder: ItemProfile['holder'] = null
+  let holderShoot: ItemProfile['holder_shoot'] = null
+  if (openCheckout) {
+    const { data: person } = await adminClient
+      .from('users')
+      .select('id, full_name, email, slack_user_id')
+      .eq('id', openCheckout.holder_id)
+      .maybeSingle()
+    if (person) holder = person
+    if (openCheckout.shoot_id) {
+      const { data: shoot } = await adminClient
+        .from('equipment_shoots')
+        .select('id, name, location')
+        .eq('id', openCheckout.shoot_id)
+        .maybeSingle()
+      if (shoot) holderShoot = shoot
+    }
+  }
+
+  // Kits this item belongs to
+  const kitIds = Array.from(new Set((kitRows ?? []).map((k) => k.kit_id)))
+  const { data: kits } = kitIds.length
+    ? await adminClient.from('equipment_kits').select('id, name').in('id', kitIds)
+    : { data: [] as { id: string; name: string }[] }
+
+  // Upcoming: reservations (with their shoot window), the open repair, the due date
+  const shootIds = Array.from(new Set((reservations ?? []).map((r) => r.shoot_id)))
+  const { data: shoots } = shootIds.length
+    ? await adminClient
+        .from('equipment_shoots')
+        .select('id, name, starts_at, ends_at, status, owner_id')
+        .in('id', shootIds)
+    : { data: [] as Pick<Tables<'equipment_shoots'>, 'id' | 'name' | 'starts_at' | 'ends_at' | 'status' | 'owner_id'>[] }
+  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
+  const ownerNames = await nameMap(adminClient, (shoots ?? []).map((s) => s.owner_id))
+
+  const upcoming: ItemUpcomingEvent[] = []
+  const days: ItemDayState[] = []
+
+  if (openCheckout?.due_at) {
+    upcoming.push({
+      at: openCheckout.due_at,
+      ends_at: null,
+      kind: 'due_back',
+      text: 'Due back',
+      sub: holder ? `from ${holder.full_name}` : null,
+    })
+    for (const day of daySpan(openCheckout.checked_out_at, openCheckout.due_at)) {
+      days.push({ day, state: 'busy' })
+    }
+  }
+
+  for (const r of reservations ?? []) {
+    const shoot = shootById.get(r.shoot_id)
+    if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+    upcoming.push({
+      at: shoot.starts_at,
+      ends_at: shoot.ends_at,
+      kind: 'reservation',
+      text: shoot.name,
+      sub: `${r.status === 'pending' ? 'awaiting approval · ' : ''}${ownerNames.get(shoot.owner_id) ?? 'someone'}`,
+    })
+    for (const day of daySpan(shoot.starts_at, shoot.ends_at)) days.push({ day, state: 'busy' })
+  }
+
+  if (openRepair) {
+    upcoming.push({
+      at: openRepair.expected_back_on ?? openRepair.sent_at,
+      ends_at: null,
+      kind: 'repair_due',
+      text: openRepair.expected_back_on ? 'Expected back from repair' : 'In repair, no date yet',
+      sub: openRepair.vendor,
+    })
+    const until = openRepair.expected_back_on
+      ? `${openRepair.expected_back_on}T23:59:00+05:30`
+      : new Date(Date.now() + 14 * 86400000).toISOString()
+    for (const day of daySpan(openRepair.sent_at, until)) days.push({ day, state: 'repair' })
+  }
+
+  upcoming.sort((a, b) => a.at.localeCompare(b.at))
+
+  return {
+    item,
+    holder,
+    holder_shoot: holderShoot,
+    kits: kits ?? [],
+    history,
+    upcoming,
+    days,
+  }
 }

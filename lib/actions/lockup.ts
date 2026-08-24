@@ -810,13 +810,12 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
       .limit(1)
     if (clashes && clashes.length > 0) {
       const clash = clashes[0]
-      const { data: holder } = await admin
-        .from('equipment_shoots')
-        .select('name')
-        .eq('id', clash.shoot_id)
-        .maybeSingle()
+      const { data: holder } = clash.shoot_id
+        ? await admin.from('equipment_shoots').select('name').eq('id', clash.shoot_id).maybeSingle()
+        : { data: null }
+      const holderLabel = holder?.name ?? clash.title?.trim() ?? 'another booking'
       throw new ActionError(
-        `${studio.name} is already booked by ${holder?.name ?? 'another shoot'} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
+        `${studio.name} is already booked by ${holderLabel} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
       )
     }
   }
@@ -1583,13 +1582,12 @@ export async function addStudioBlock(input: {
     .limit(1)
   if (clashes && clashes.length > 0) {
     const clash = clashes[0]
-    const { data: holder } = await admin
-      .from('equipment_shoots')
-      .select('name')
-      .eq('id', clash.shoot_id)
-      .maybeSingle()
+    const { data: holder } = clash.shoot_id
+      ? await admin.from('equipment_shoots').select('name').eq('id', clash.shoot_id).maybeSingle()
+      : { data: null }
+    const holderLabel = holder?.name ?? clash.title?.trim() ?? 'another booking'
     throw new ActionError(
-      `${studio.name} is already booked by ${holder?.name ?? 'another shoot'} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
+      `${studio.name} is already booked by ${holderLabel} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}. Pick a different time or studio.`
     )
   }
 
@@ -1634,7 +1632,13 @@ export async function removeStudioBlock(blockId: string): Promise<void> {
     .eq('id', blockId)
     .maybeSingle()
   if (!block) throw new ActionError('Booking not found.')
-  const shoot = await requireShootAccess(admin, block.shoot_id, user)
+  // Shoot blocks follow the shoot's access rules; a standalone hold belongs to
+  // whoever made it (managers can always clear the room).
+  const shoot = block.shoot_id ? await requireShootAccess(admin, block.shoot_id, user) : null
+  if (!shoot && block.created_by !== user.id) {
+    // Not theirs: only an equipment manager may clear someone else's hold.
+    await requireCapability('manage_equipment')
+  }
 
   const { error } = await admin.from('equipment_studio_blocks').delete().eq('id', block.id)
   if (error) throw new ActionError(error.message)
@@ -1642,10 +1646,12 @@ export async function removeStudioBlock(blockId: string): Promise<void> {
   await writeAudit(
     user.id,
     'equipment.studio_unblock',
-    'equipment_shoot',
-    shoot.id,
+    shoot ? 'equipment_shoot' : 'equipment_studio_block',
+    shoot ? shoot.id : block.id,
     null,
-    `${user.full_name} released a studio booking of ${shoot.name}`
+    shoot
+      ? `${user.full_name} released a studio booking of ${shoot.name}`
+      : `${user.full_name} released the studio hold "${block.title ?? 'untitled'}"`
   )
   await revalidateHR()
 }
@@ -2511,4 +2517,93 @@ export async function syncLockupSlackIds(): Promise<{
   })
   await revalidateHR()
   return { matched, already, unmatched }
+}
+
+// ============================================================
+// Standalone studio holds (Studio tab, no shoot involved)
+// ============================================================
+
+/**
+ * Block a studio without creating a shoot: an edit session, a quick record, a
+ * client visit. Same room, same no-overlap rule as a shoot's studio block, so
+ * the two can never double-book each other.
+ */
+export async function createStudioHold(input: {
+  studioId: string
+  title: string
+  startsAt: string
+  endsAt: string
+}): Promise<{ id: string }> {
+  const user = await requireUser()
+  const admin = createAdminClient()
+
+  const title = input.title.trim()
+  if (!title) throw new ActionError('Give the hold a name so people know what the room is for.')
+
+  const starts = new Date(input.startsAt)
+  const ends = new Date(input.endsAt)
+  if (isNaN(starts.getTime()) || isNaN(ends.getTime())) throw new ActionError('Pick a valid time.')
+  if (ends <= starts) throw new ActionError('The end time has to be after the start time.')
+
+  const { data: studio } = await admin
+    .from('equipment_studios')
+    .select('*')
+    .eq('id', input.studioId)
+    .maybeSingle()
+  if (!studio) throw new ActionError('Studio not found.')
+
+  // Friendly pre-check. The exclusion constraint is still the real guarantee:
+  // two people booking the same slot at once cannot both win.
+  const { data: clashes } = await admin
+    .from('equipment_studio_blocks')
+    .select('*')
+    .eq('studio_id', studio.id)
+    .lt('starts_at', ends.toISOString())
+    .gt('ends_at', starts.toISOString())
+    .limit(1)
+  if (clashes && clashes.length > 0) {
+    const clash = clashes[0]
+    const { data: holder } = clash.shoot_id
+      ? await admin.from('equipment_shoots').select('name').eq('id', clash.shoot_id).maybeSingle()
+      : { data: null }
+    const holderLabel = holder?.name ?? clash.title?.trim() ?? 'another booking'
+    throw new ActionError(
+      `${studio.name} is taken by ${holderLabel} from ${fmtDayTime(clash.starts_at)} to ${fmtDayTime(clash.ends_at)}.`
+    )
+  }
+
+  const { data: created, error } = await admin
+    .from('equipment_studio_blocks')
+    .insert({
+      studio_id: studio.id,
+      shoot_id: null,
+      title,
+      starts_at: starts.toISOString(),
+      ends_at: ends.toISOString(),
+      created_by: user.id,
+    })
+    .select('id')
+    .single()
+  if (error || !created) {
+    throw new ActionError(
+      error?.message.includes('equipment_studio_blocks_no_overlap')
+        ? 'Someone just booked that slot. Pick another time.'
+        : error?.message ?? 'Could not book the studio.'
+    )
+  }
+
+  await writeAudit(
+    user.id,
+    'equipment.studio_hold',
+    'equipment_studio_block',
+    created.id,
+    null,
+    `${user.full_name} held ${studio.name} for "${title}", ${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())}`
+  )
+  await postLockupChannel(
+    admin,
+    `🎬 ${studio.name} held for ${title}: ${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())}`
+  )
+  await revalidateHR()
+  return { id: created.id }
 }

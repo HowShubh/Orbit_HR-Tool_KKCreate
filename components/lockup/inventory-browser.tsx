@@ -2,59 +2,50 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Boxes, ChevronRight, ExternalLink, Search } from 'lucide-react'
+import { Boxes, Check, ChevronRight, Plus, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import type { Tables } from '@/lib/supabase/database.types'
 import type { EquipmentItemRow, KitRow } from '@/lib/queries/lockup'
 import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
+import { useCart } from '@/lib/lockup/cart'
 import { cn } from '@/lib/utils'
-import { CategoryIcon, CodeChip, StatusBadge, itemStatusLine } from './item-bits'
-import { KitTakeDialog } from './kit-take-dialog'
-import { QrActionCard } from './qr-action-card'
+import { CategoryIcon, CodeChip, itemStatusLine } from './item-bits'
 
 /**
- * The "Get equipment" browser: one search box, category chips, kits with
- * one-tap checkout, then the flat gear list. Tapping a row opens the item
- * INSTANTLY in an in-page sheet (the data is already in the browser).
+ * Gear browse: the landing surface. One search box, category chips, an
+ * available-only toggle, kits, then everything. Plus adds to the cart; the row
+ * itself opens the item's page, which is where the full story lives.
  */
 export function InventoryBrowser({
   items,
   kits,
-  locations,
-  currentUserId,
-  canManageEquipment,
 }: {
   items: EquipmentItemRow[]
   kits: KitRow[]
-  locations: Tables<'equipment_locations'>[]
-  currentUserId: string
-  canManageEquipment: boolean
 }) {
+  const cart = useCart()
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<'all' | EquipmentCategory>('all')
-  const [availableOnly, setAvailableOnly] = useState(false)
-  const [openItemId, setOpenItemId] = useState<string | null>(null)
-  const [openKitId, setOpenKitId] = useState<string | null>(null)
+  const [freeOnly, setFreeOnly] = useState(false)
 
-  // Derive from props so sheets live-update after an action refreshes data.
-  const openItem = openItemId ? items.find((i) => i.id === openItemId) ?? null : null
-  const openKit = openKitId ? kits.find((k) => k.id === openKitId) ?? null : null
+  const pooled = useMemo(
+    () =>
+      items.filter(
+        (i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost'
+      ),
+    [items]
+  )
 
-  // Only surface categories that actually have gear, so the chip row stays short.
+  // Only show categories that actually hold gear, so the chip row stays short.
   const usedCategories = useMemo(() => {
-    const used = new Set(items.filter((i) => i.kind !== 'assigned').map((i) => i.category))
+    const used = new Set(pooled.map((i) => i.category))
     return EQUIPMENT_CATEGORIES.filter((c) => used.has(c.key))
-  }, [items])
+  }, [pooled])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return items.filter((item) => {
-      // Assigned devices live in their own Devices tab; dead stock stays in Tech.
-      if (item.kind === 'assigned') return false
-      if (item.status === 'retired' || item.status === 'lost') return false
+    return pooled.filter((item) => {
       if (category !== 'all' && item.category !== category) return false
-      if (availableOnly && item.status !== 'available') return false
+      if (freeOnly && item.status !== 'available') return false
       if (!q) return true
       return (
         item.name.toLowerCase().includes(q) ||
@@ -64,22 +55,27 @@ export function InventoryBrowser({
         (item.holder_name ?? '').toLowerCase().includes(q)
       )
     })
-  }, [items, query, category, availableOnly])
+  }, [pooled, query, category, freeOnly])
+
+  const freeCount = pooled.filter((i) => i.status === 'available').length
 
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
-  const kitCards = kits.map((kit) => {
-    const availableCount = kit.items.filter(
-      (m) => (itemById.get(m.item_id)?.status ?? m.status) === 'available'
-    ).length
-    return { kit, availableCount }
-  })
-  const matchedKits = query.trim()
+  const kitCards = useMemo(
+    () =>
+      kits.map((kit) => {
+        const free = kit.items.filter(
+          (m) => (itemById.get(m.item_id)?.status ?? m.status) === 'available'
+        )
+        return { kit, freeIds: free.map((f) => f.item_id) }
+      }),
+    [kits, itemById]
+  )
+  const shownKits = query.trim()
     ? kitCards.filter(({ kit }) => kit.name.toLowerCase().includes(query.trim().toLowerCase()))
     : kitCards
 
   return (
     <div className="space-y-4">
-      {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -90,180 +86,189 @@ export function InventoryBrowser({
         />
       </div>
 
-      {/* Category chips */}
-      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-0.5">
-        <FilterChip active={category === 'all'} onClick={() => setCategory('all')}>
+      <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-0.5">
+        <Chip active={category === 'all'} onClick={() => setCategory('all')}>
           All
-        </FilterChip>
+        </Chip>
         {usedCategories.map((c) => (
-          <FilterChip
+          <Chip
             key={c.key}
             active={category === c.key}
             onClick={() => setCategory(category === c.key ? 'all' : c.key)}
           >
             {c.label}
-          </FilterChip>
+          </Chip>
         ))}
-        <FilterChip
-          active={availableOnly}
-          dashed
-          onClick={() => setAvailableOnly((v) => !v)}
-          className="ml-auto"
-        >
-          Available only
-        </FilterChip>
+        <Chip active={freeOnly} dashed onClick={() => setFreeOnly((v) => !v)} className="ml-auto">
+          Free now · {freeCount}
+        </Chip>
       </div>
 
       {/* Kits */}
-      {matchedKits.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-baseline gap-2 px-0.5">
-            <span className="text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
-              Kits
-            </span>
-            <span className="text-[12px] text-muted-foreground/70">
-              grab a whole setup in one tap
-            </span>
-          </div>
+      {shownKits.length > 0 && (
+        <section className="space-y-2">
+          <SectionHead title="Kits" hint="grab a whole setup in one tap" />
           <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-0.5">
-            {matchedKits.map(({ kit, availableCount }) => (
-              <div
-                key={kit.id}
-                className="flex w-[220px] shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-card p-3.5"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10">
-                    <Boxes className="h-4 w-4 text-primary" />
+            {shownKits.map(({ kit, freeIds }) => {
+              const allIn = freeIds.length > 0 && freeIds.every((id) => cart.has(id))
+              return (
+                <div
+                  key={kit.id}
+                  className="flex w-[220px] shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-card p-3.5"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10">
+                      <Boxes className="h-4 w-4 text-primary" />
+                    </div>
+                    <span className="truncate text-[14px] font-bold">{kit.name}</span>
                   </div>
-                  <span className="truncate text-[14px] font-bold">{kit.name}</span>
+                  <span
+                    className={cn(
+                      'text-[12px]',
+                      freeIds.length === kit.items.length
+                        ? 'text-emerald-700'
+                        : freeIds.length > 0
+                          ? 'text-amber-700'
+                          : 'text-muted-foreground'
+                    )}
+                  >
+                    {kit.items.length} item{kit.items.length === 1 ? '' : 's'} ·{' '}
+                    {freeIds.length === kit.items.length ? 'all free' : `${freeIds.length} free`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={freeIds.length === 0}
+                    onClick={() => cart.add(freeIds)}
+                    className={cn(
+                      'rounded-lg py-2 text-[13px] font-semibold transition-colors',
+                      freeIds.length === 0
+                        ? 'cursor-not-allowed bg-muted text-muted-foreground'
+                        : allIn
+                          ? 'bg-primary/10 text-primary'
+                          : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    )}
+                  >
+                    {freeIds.length === 0
+                      ? 'Nothing free'
+                      : allIn
+                        ? 'In your cart'
+                        : `Add ${freeIds.length} to cart`}
+                  </button>
                 </div>
-                <span
-                  className={cn(
-                    'text-[12px]',
-                    availableCount === kit.items.length
-                      ? 'text-emerald-700'
-                      : availableCount > 0
-                        ? 'text-amber-700'
-                        : 'text-muted-foreground'
-                  )}
-                >
-                  {kit.items.length} item{kit.items.length === 1 ? '' : 's'} ·{' '}
-                  {availableCount === kit.items.length
-                    ? 'all available'
-                    : `${availableCount} available`}
-                </span>
-                <button
-                  type="button"
-                  disabled={availableCount === 0}
-                  onClick={() => setOpenKitId(kit.id)}
-                  className={cn(
-                    'rounded-lg py-2 text-[13px] font-semibold transition-colors',
-                    availableCount === kit.items.length
-                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : availableCount > 0
-                        ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                        : 'cursor-not-allowed bg-muted text-muted-foreground'
-                  )}
-                >
-                  {availableCount === 0
-                    ? 'Nothing available'
-                    : availableCount === kit.items.length
-                      ? 'Take kit'
-                      : `Take ${availableCount} available`}
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
-        </div>
+        </section>
       )}
 
       {/* All gear */}
-      <div className="space-y-2">
-        <div className="flex items-baseline justify-between px-0.5">
-          <span className="text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
-            All gear
-          </span>
-          <span className="text-[12px] text-muted-foreground/70">
-            {filtered.length} item{filtered.length === 1 ? '' : 's'}
-          </span>
-        </div>
+      <section className="space-y-2">
+        <SectionHead
+          title="All gear"
+          hint={`${filtered.length} item${filtered.length === 1 ? '' : 's'}`}
+          hintRight
+        />
         <ul className="space-y-2">
-          {filtered.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => setOpenItemId(item.id)}
-                className="flex w-full items-center gap-3.5 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-colors hover:bg-accent/50"
+          {filtered.map((item) => {
+            const free = item.status === 'available'
+            const inCart = cart.has(item.id)
+            return (
+              <li
+                key={item.id}
+                className="flex items-center gap-2 rounded-xl border border-border bg-card pr-2.5 transition-colors hover:bg-accent/40"
               >
-                <CategoryIcon category={item.category} photoUrl={item.photo_url} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-[14.5px] font-semibold">{item.name}</span>
-                    <CodeChip code={item.code} />
-                    {item.requires_approval && (
-                      <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-700">
-                        approval
-                      </span>
+                <Link
+                  href={`/lockup/items/${item.code}`}
+                  className="flex min-w-0 flex-1 items-center gap-3.5 py-3 pl-3.5"
+                >
+                  <CategoryIcon category={item.category} photoUrl={item.photo_url} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[14.5px] font-semibold">{item.name}</span>
+                      <CodeChip code={item.code} />
+                      {item.requires_approval && (
+                        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-700">
+                          approval
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className={cn(
+                        'truncate text-[12.5px]',
+                        free
+                          ? 'text-emerald-700'
+                          : item.status === 'in_repair'
+                            ? 'text-amber-700'
+                            : 'text-blue-700'
+                      )}
+                    >
+                      {itemStatusLine(item)}
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </Link>
+
+                {free ? (
+                  <button
+                    type="button"
+                    aria-label={inCart ? `Remove ${item.name} from cart` : `Add ${item.name} to cart`}
+                    onClick={() => cart.toggle(item.id)}
+                    className={cn(
+                      'grid h-9 w-9 shrink-0 place-items-center rounded-xl border-[1.5px] transition-colors',
+                      inCart
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-primary text-primary hover:bg-primary/10'
                     )}
-                  </div>
-                  <div className="truncate text-[12.5px] text-muted-foreground">
-                    {itemStatusLine(item)}
-                    {item.active_reservations.length > 0 &&
-                      ` · reserved for ${item.active_reservations[0].shoot_name}`}
-                  </div>
-                </div>
-                <StatusBadge status={item.status} />
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </button>
-            </li>
-          ))}
+                  >
+                    {inCart ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  </button>
+                ) : (
+                  <Link
+                    href={`/lockup/items/${item.code}`}
+                    className="shrink-0 rounded-lg px-2 py-1 text-[12px] font-semibold text-primary hover:bg-primary/10"
+                  >
+                    When?
+                  </Link>
+                )}
+              </li>
+            )
+          })}
           {filtered.length === 0 && (
             <li className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
               No gear matches these filters.
             </li>
           )}
         </ul>
-      </div>
-
-      {/* Instant item sheet: same card as the QR page, zero navigation */}
-      <Dialog open={openItem !== null} onOpenChange={(o) => !o && setOpenItemId(null)}>
-        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
-          {openItem && (
-            <>
-              <DialogTitle className="sr-only">{openItem.name}</DialogTitle>
-              <QrActionCard
-                item={openItem}
-                locations={locations}
-                currentUserId={currentUserId}
-                requireScan={!canManageEquipment}
-                canManageEquipment={canManageEquipment}
-                knownItems={items}
-              />
-              <Link
-                href={`/e/${openItem.code}?src=app`}
-                className="flex items-center justify-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground"
-              >
-                <ExternalLink className="h-3 w-3" /> Open full page
-              </Link>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Kit sheet */}
-      {openKit && (
-        <KitTakeDialog
-          kit={openKit}
-          knownItems={items}
-          open={true}
-          onOpenChange={(o) => !o && setOpenKitId(null)}
-        />
-      )}
+      </section>
     </div>
   )
 }
 
-function FilterChip({
+function SectionHead({
+  title,
+  hint,
+  hintRight,
+}: {
+  title: string
+  hint: string
+  hintRight?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-baseline gap-2 px-0.5',
+        hintRight ? 'justify-between' : undefined
+      )}
+    >
+      <span className="text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </span>
+      <span className="text-[12px] text-muted-foreground/70">{hint}</span>
+    </div>
+  )
+}
+
+function Chip({
   active,
   dashed,
   onClick,
