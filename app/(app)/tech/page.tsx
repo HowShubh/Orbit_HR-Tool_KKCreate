@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { requireCapability } from '@/lib/actions/_helpers'
 import {
+  getLockupSettings,
   getTechConsoleData,
   listEquipment,
   listKits,
@@ -20,12 +21,13 @@ export default async function TechConsolePage({
     redirect('/lockup')
   }
 
-  const [data, items, users, kits, approvals] = await Promise.all([
+  const [data, items, users, kits, approvals, slackSettings] = await Promise.all([
     getTechConsoleData(),
     listEquipment(),
     listUsers(),
     listKits(),
     listPendingApprovals(),
+    getLockupSettings(),
   ])
   const people = users
     .filter((u) => u.status === 'active')
@@ -39,6 +41,7 @@ export default async function TechConsolePage({
       kits={kits}
       approvals={approvals}
       qrBaseUrl={process.env.LOCKUP_QR_BASE_URL ?? null}
+      slackSettings={slackSettings}
       initialTab={searchParams?.tab}
     />
   )

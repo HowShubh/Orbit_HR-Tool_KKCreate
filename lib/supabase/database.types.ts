@@ -416,6 +416,24 @@ export type Database = {
         Update: Partial<Database['public']['Tables']['equipment_private']['Insert']>
         Relationships: []
       }
+      equipment_settings: {
+        Row: {
+          id: number
+          slack_dm_enabled: boolean
+          slack_reminders_enabled: boolean
+          slack_channel_feed: boolean
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          slack_dm_enabled?: boolean
+          slack_reminders_enabled?: boolean
+          slack_channel_feed?: boolean
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['equipment_settings']['Insert']>
+        Relationships: []
+      }
       holidays: {
         Row: {
           id: string

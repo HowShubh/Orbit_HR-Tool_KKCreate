@@ -25,7 +25,10 @@ export function lockupLink(path: string, label: string): string | null {
   return base ? `<${base}${path}|${label}>` : null
 }
 
-async function lockupSlackApi(
+/** Low-level Lockup-bot Web API call. Returns the parsed JSON, or null when
+ *  the token is missing / the request threw. Also used by the Tech Console
+ *  Slack-controls actions (auth.test, users.list). */
+export async function lockupSlackApi(
   method: string,
   body: Record<string, unknown>
 ): Promise<{ ok: boolean; [k: string]: unknown } | null> {
@@ -56,7 +59,31 @@ async function lockupSlackApi(
   }
 }
 
-async function resolveSlackUserId(
+export type LockupSlackSettings = {
+  dmEnabled: boolean
+  remindersEnabled: boolean
+  channelFeed: boolean
+}
+
+/**
+ * Runtime feature toggles from equipment_settings (singleton), editable in the
+ * Tech Console Slack tab. Defaults everything to ON when the row/table is
+ * missing, so behaviour matches the pre-toggle state.
+ */
+export async function getLockupSlackSettings(admin: AdminClient): Promise<LockupSlackSettings> {
+  const { data } = await admin
+    .from('equipment_settings')
+    .select('slack_dm_enabled, slack_reminders_enabled, slack_channel_feed')
+    .eq('id', 1)
+    .maybeSingle()
+  return {
+    dmEnabled: data?.slack_dm_enabled ?? true,
+    remindersEnabled: data?.slack_reminders_enabled ?? true,
+    channelFeed: data?.slack_channel_feed ?? true,
+  }
+}
+
+export async function resolveSlackUserId(
   admin: AdminClient,
   user: { id: string; slack_user_id?: string | null; email?: string | null }
 ): Promise<string | null> {
@@ -75,13 +102,20 @@ async function resolveSlackUserId(
   return slackId
 }
 
-/** DM one user from the Lockup bot. No-op without a token or resolvable id. */
+/**
+ * DM one user from the Lockup bot. No-op without a token or resolvable id, or
+ * when the matching Tech Console toggle is off. `kind` picks the toggle:
+ * 'instant' (action-triggered DMs) or 'reminder' (daily sweep DMs).
+ */
 export async function dmLockupUser(
   admin: AdminClient,
   user: { id: string; slack_user_id?: string | null; email?: string | null },
-  text: string
+  text: string,
+  kind: 'instant' | 'reminder' = 'instant'
 ): Promise<void> {
   if (!botToken()) return
+  const settings = await getLockupSlackSettings(admin)
+  if (kind === 'reminder' ? !settings.remindersEnabled : !settings.dmEnabled) return
 
   // TEST MODE: SLACK_TEST_DM_TO redirects every DM to one Slack user id,
   // labeled with the intended recipient — same convention as the HR bot.
@@ -116,9 +150,12 @@ export async function dmLockupUser(
   })
 }
 
-/** Optional public activity feed. No-op unless LOCKUP_SLACK_CHANNEL is set. */
-export async function postLockupChannel(text: string): Promise<void> {
+/** Optional public activity feed. No-op unless LOCKUP_SLACK_CHANNEL is set
+ *  and the Tech Console "channel feed" toggle is on. */
+export async function postLockupChannel(admin: AdminClient, text: string): Promise<void> {
   const channel = process.env.LOCKUP_SLACK_CHANNEL
   if (!botToken() || !channel) return
+  const settings = await getLockupSlackSettings(admin)
+  if (!settings.channelFeed) return
   await lockupSlackApi('chat.postMessage', { channel, text, unfurl_links: false })
 }

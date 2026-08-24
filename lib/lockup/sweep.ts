@@ -47,7 +47,8 @@ async function notify(
   await dmLockupUser(
     admin,
     target,
-    [`*${input.title}*`, input.body, link].filter(Boolean).join('\n')
+    [`*${input.title}*`, input.body, link].filter(Boolean).join('\n'),
+    'reminder'
   )
 }
 

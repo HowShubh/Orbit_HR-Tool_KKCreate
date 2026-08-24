@@ -5,7 +5,13 @@ import type { Tables, Updates } from '@/lib/supabase/database.types'
 import { ActionError } from './errors'
 import { requireUser, requireCapability, writeAudit, revalidateHR } from './_helpers'
 import { notifyUser } from './notifications'
-import { dmLockupUser, lockupLink, postLockupChannel } from '@/lib/slack-lockup'
+import {
+  dmLockupUser,
+  lockupLink,
+  lockupSlackApi,
+  postLockupChannel,
+  resolveSlackUserId,
+} from '@/lib/slack-lockup'
 import { generateItemCode } from '@/lib/lockup/codes'
 import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
 import {
@@ -345,6 +351,7 @@ export async function checkoutItems(input: {
 
   const names = itemList.map((i) => itemLabel(i)).join(', ')
   await postLockupChannel(
+    admin,
     `📤 ${user.full_name} checked out ${names}, due ${fmtDayTime(dueAt.toISOString())}`
   )
 
@@ -436,7 +443,7 @@ export async function checkinItem(input: {
     void issue
   }
 
-  await postLockupChannel(`📥 ${user.full_name} returned ${itemLabel(item)} to ${location.label}`)
+  await postLockupChannel(admin, `📥 ${user.full_name} returned ${itemLabel(item)} to ${location.label}`)
   await revalidateHR()
 }
 
@@ -523,6 +530,7 @@ export async function takeOverItem(input: { itemId: string; dueAt?: string }): P
     link_url: `/e/${item.code}?src=app`,
   })
   await postLockupChannel(
+    admin,
     `🔁 ${user.full_name} took over ${itemLabel(item)} from ${prevHolder?.full_name ?? 'previous holder'}`
   )
   await revalidateHR()
@@ -911,6 +919,7 @@ export async function createShootPlan(input: ShootPlanInput): Promise<ShootPlanR
 
     if (studio && blockStarts && blockEnds) {
       await postLockupChannel(
+        admin,
         `🎬 ${studio.name} booked for ${name}: ${fmtDayTime(blockStarts.toISOString())} to ${fmtDayTime(blockEnds.toISOString())}`
       )
     }
@@ -1610,6 +1619,7 @@ export async function addStudioBlock(input: {
     `${user.full_name} booked ${studio.name} for ${shoot.name}, ${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())}`
   )
   await postLockupChannel(
+    admin,
     `🎬 ${studio.name} booked for ${shoot.name}: ${fmtDayTime(starts.toISOString())} to ${fmtDayTime(ends.toISOString())}`
   )
   await revalidateHR()
@@ -1831,7 +1841,7 @@ export async function sendToRepair(input: {
     }
   }
 
-  await postLockupChannel(`🔧 ${itemLabel(item)} sent for repair, ${backText}`)
+  await postLockupChannel(admin, `🔧 ${itemLabel(item)} sent for repair, ${backText}`)
   await revalidateHR()
 }
 
@@ -1887,7 +1897,7 @@ export async function receiveFromRepair(repairId: string): Promise<void> {
       })
     )
   )
-  await postLockupChannel(`✅ ${itemLabel(item)} is back from repair`)
+  await postLockupChannel(admin, `✅ ${itemLabel(item)} is back from repair`)
   await revalidateHR()
 }
 
@@ -2329,3 +2339,176 @@ export async function importEquipmentCsv(rows: ImportRow[]): Promise<ImportResul
   return { created, errors }
 }
 
+// ============================================================
+// Slack bot controls (Tech Console)
+// ============================================================
+
+const LOCKUP_SLACK_TOGGLES = [
+  'slack_dm_enabled',
+  'slack_reminders_enabled',
+  'slack_channel_feed',
+] as const
+type LockupSlackToggleKey = (typeof LOCKUP_SLACK_TOGGLES)[number]
+
+/** Flip one of the Lockup Slack feature toggles (equipment_settings singleton). */
+export async function updateLockupSlackSetting(
+  key: LockupSlackToggleKey,
+  value: boolean
+): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  if (!LOCKUP_SLACK_TOGGLES.includes(key)) throw new ActionError('Unknown setting')
+
+  const admin = createAdminClient()
+  const base = { id: 1, updated_at: new Date().toISOString() }
+  const payload =
+    key === 'slack_dm_enabled'
+      ? { ...base, slack_dm_enabled: value }
+      : key === 'slack_reminders_enabled'
+        ? { ...base, slack_reminders_enabled: value }
+        : { ...base, slack_channel_feed: value }
+  const { error } = await admin.from('equipment_settings').upsert(payload)
+  if (error) throw new ActionError(error.message)
+
+  await writeAudit(user.id, 'equipment.slack_setting_update', 'equipment_settings', '1', {
+    after: { [key]: value },
+  })
+  await revalidateHR()
+}
+
+/** Read-only health check shown at the top of the Tech Console Slack tab. */
+export async function getLockupSlackStatus() {
+  await requireCapability('manage_equipment')
+  const tokenSet = Boolean(process.env.LOCKUP_SLACK_BOT_TOKEN)
+  const channelSet = Boolean(process.env.LOCKUP_SLACK_CHANNEL)
+  if (!tokenSet) {
+    return { tokenSet, channelSet, ok: false, team: null, botUser: null, error: null }
+  }
+
+  const res = await lockupSlackApi('auth.test', {})
+  return {
+    tokenSet,
+    channelSet,
+    ok: Boolean(res?.ok),
+    team: (res?.team as string | undefined) ?? null,
+    botUser: (res?.user as string | undefined) ?? null,
+    error: (res?.error as string | undefined) ?? null,
+  }
+}
+
+/**
+ * Post a one-off test message so the Tech Lead can confirm wiring. Goes to the
+ * activity channel when LOCKUP_SLACK_CHANNEL is set, otherwise DMs the caller.
+ * Deliberately bypasses the feature toggles: a test should always send.
+ */
+export async function sendLockupSlackTest(): Promise<{ via: 'channel' | 'dm' }> {
+  const user = await requireCapability('manage_equipment')
+  if (!process.env.LOCKUP_SLACK_BOT_TOKEN) {
+    throw new ActionError('Lockup Slack bot token is not configured.')
+  }
+
+  const channel = process.env.LOCKUP_SLACK_CHANNEL
+  if (channel) {
+    const res = await lockupSlackApi('chat.postMessage', {
+      channel,
+      text: '✅ Lockup is connected to this channel. (Test message sent from the Tech Console.)',
+      unfurl_links: false,
+    })
+    if (!res?.ok) throw new ActionError(`Slack rejected the message: ${res?.error ?? 'unknown error'}`)
+    return { via: 'channel' }
+  }
+
+  const admin = createAdminClient()
+  const { data: me } = await admin
+    .from('users')
+    .select('id, email, slack_user_id')
+    .eq('id', user.id)
+    .single()
+  const slackId = me ? await resolveSlackUserId(admin, me) : null
+  if (!slackId) {
+    throw new ActionError('Could not match your Slack account. Run "Sync IDs from email" first.')
+  }
+  const opened = await lockupSlackApi('conversations.open', { users: slackId })
+  const channelId =
+    opened && opened.ok ? (opened.channel as { id?: string } | undefined)?.id : undefined
+  if (!channelId) {
+    throw new ActionError(`Slack could not open a DM: ${(opened?.error as string) ?? 'unknown error'}`)
+  }
+  const res = await lockupSlackApi('chat.postMessage', {
+    channel: channelId,
+    text: '✅ The Lockup bot can DM you. (Test message sent from the Tech Console.)',
+    unfurl_links: false,
+  })
+  if (!res?.ok) throw new ActionError(`Slack rejected the message: ${res?.error ?? 'unknown error'}`)
+  return { via: 'dm' }
+}
+
+/**
+ * Bulk-fill Slack member ids by matching each active user's email against the
+ * workspace member list, using the Lockup bot's token. Writes the same
+ * users.slack_user_id column the Orbit bot and profiles use (one workspace,
+ * one cached id), so running it here helps both bots.
+ */
+export async function syncLockupSlackIds(): Promise<{
+  matched: number
+  already: number
+  unmatched: number
+}> {
+  const user = await requireCapability('manage_equipment')
+  if (!process.env.LOCKUP_SLACK_BOT_TOKEN) {
+    throw new ActionError('Lockup Slack bot token is not configured.')
+  }
+
+  type SlackMember = {
+    id: string
+    deleted?: boolean
+    is_bot?: boolean
+    profile?: { email?: string | null }
+  }
+
+  // Email -> slack id from the full workspace member list (cursor-paged).
+  const slackByEmail = new Map<string, string>()
+  let cursor: string | undefined
+  for (let page = 0; page < 25; page++) {
+    const res = await lockupSlackApi('users.list', { limit: 200, ...(cursor ? { cursor } : {}) })
+    if (!res?.ok) {
+      throw new ActionError(`Slack error while listing members: ${(res?.error as string) ?? 'unknown'}`)
+    }
+    for (const m of (res.members as SlackMember[] | undefined) ?? []) {
+      const email = m.profile?.email
+      if (email && !m.deleted && !m.is_bot) {
+        slackByEmail.set(email.toLowerCase(), m.id)
+      }
+    }
+    cursor = ((res.response_metadata as { next_cursor?: string } | undefined)?.next_cursor) || undefined
+    if (!cursor) break
+  }
+
+  const admin = createAdminClient()
+  const { data: users } = await admin
+    .from('users')
+    .select('id, email, slack_user_id')
+    .eq('status', 'active')
+
+  let matched = 0
+  let already = 0
+  let unmatched = 0
+  for (const u of users ?? []) {
+    if (u.slack_user_id) {
+      already++
+      continue
+    }
+    const id = u.email ? slackByEmail.get(u.email.toLowerCase()) : undefined
+    if (id) {
+      await admin.from('users').update({ slack_user_id: id }).eq('id', u.id)
+      matched++
+    } else {
+      unmatched++
+    }
+  }
+
+  await writeAudit(user.id, 'equipment.slack_sync_ids', 'equipment_settings', '1', {
+    after: { matched, already, unmatched },
+  })
+  await revalidateHR()
+  return { matched, already, unmatched }
+}

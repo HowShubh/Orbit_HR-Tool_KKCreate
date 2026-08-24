@@ -1,5 +1,6 @@
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLockupSlackSettings, type LockupSlackSettings } from '@/lib/slack-lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { EquipmentCategory, EquipmentStatus, ShootStatus } from '@/lib/lockup/constants'
 
@@ -1308,4 +1309,10 @@ export async function countMyOpenCheckouts(userId: string): Promise<number> {
     .eq('holder_id', userId)
     .is('returned_at', null)
   return count ?? 0
+}
+
+/** Lockup Slack feature toggles for the Tech Console Slack tab. */
+export async function getLockupSettings(): Promise<LockupSlackSettings> {
+  const admin = createAdminClient()
+  return getLockupSlackSettings(admin)
 }

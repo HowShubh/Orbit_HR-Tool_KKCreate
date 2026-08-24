@@ -42,10 +42,12 @@ import {
   renameStudio,
   resolveIssue,
 } from '@/lib/actions/lockup'
+import type { LockupSlackSettings } from '@/lib/slack-lockup'
 import { CodeChip, fmtDay, fmtDayTime, fmtShootWindow } from '../item-bits'
 import { InventoryTable } from './inventory-table'
 import { DevicesTable } from './devices-table'
 import { KitDialog } from './kit-dialog'
+import { LockupSlackTab } from './slack-tab'
 
 function StatCard({
   icon: Icon,
@@ -92,6 +94,7 @@ export function TechConsoleClient({
   kits,
   approvals,
   qrBaseUrl,
+  slackSettings,
   initialTab,
 }: {
   data: TechConsoleData
@@ -100,6 +103,7 @@ export function TechConsoleClient({
   kits: KitRow[]
   approvals: PendingApprovalRow[]
   qrBaseUrl: string | null
+  slackSettings: LockupSlackSettings
   initialTab?: string
 }) {
   const router = useRouter()
@@ -113,6 +117,7 @@ export function TechConsoleClient({
     'repairs',
     'issues',
     'locations',
+    'slack',
   ]
   const [tab, setTab] = useState(
     initialTab && validTabs.includes(initialTab) ? initialTab : 'inventory'
@@ -190,6 +195,7 @@ export function TechConsoleClient({
               )}
             </TabsTrigger>
             <TabsTrigger value="locations">Locations</TabsTrigger>
+            <TabsTrigger value="slack">Slack</TabsTrigger>
           </TabsList>
 
           {/* -------- Inventory (pooled gear) -------- */}
@@ -590,6 +596,11 @@ export function TechConsoleClient({
                 </Button>
               </div>
             </div>
+          </TabsContent>
+
+          {/* -------- Slack bot controls -------- */}
+          <TabsContent value="slack" className="mt-4">
+            <LockupSlackTab settings={slackSettings} />
           </TabsContent>
         </Tabs>
       </div>
