@@ -574,6 +574,12 @@ export function ShootDetailClient({
         onOpenChange={setPickerOpen}
         shootId={shoot.id}
         shootName={shoot.name}
+        shootStartsAt={shoot.starts_at}
+        shootEndsAt={shoot.ends_at}
+        studioSpans={shoot.studio_blocks.map((b) => ({
+          startsAt: b.starts_at,
+          endsAt: b.ends_at,
+        }))}
         availability={availability}
         kits={kits}
       />

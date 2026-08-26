@@ -48,6 +48,7 @@ export function GearPicker({
   aside,
   asideTitle,
   asideCount,
+  asideOnMobile = false,
   footer,
 }: {
   rows: PickerRow[]
@@ -59,6 +60,9 @@ export function GearPicker({
   aside: React.ReactNode
   asideTitle: string
   asideCount: number
+  /** Show the aside stacked below the list on phones too (dialogs), instead of
+   *  the default desktop-only column (browse, which has its own mobile bar). */
+  asideOnMobile?: boolean
   /** Wizard step navigation; browse passes nothing. */
   footer?: React.ReactNode
 }) {
@@ -209,7 +213,7 @@ export function GearPicker({
       </section>
 
       {/* ---- Column 3: what you picked ---- */}
-      <aside className="hidden lg:block">
+      <aside className={cn('lg:block', asideOnMobile ? 'mt-3 lg:mt-0' : 'hidden')}>
         <div className="sticky top-4 space-y-3 rounded-2xl border border-border bg-card p-4">
           <div className="flex items-baseline justify-between">
             <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -250,14 +254,31 @@ function Row({
           <Icon className="h-5 w-5 text-muted-foreground" />
         )}
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-[14.5px] font-semibold">{row.name}</span>
           <CodeChip code={row.code} />
+          {row.requires_approval && (
+            <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-700">
+              approval
+            </span>
+          )}
         </div>
-        {row.subtitle && (
-          <div className="truncate text-[12px] text-muted-foreground">{row.subtitle}</div>
-        )}
+        <div className="flex flex-wrap items-center gap-x-2 text-[12px]">
+          <span
+            className={cn(
+              'font-medium',
+              row.statusTone === 'free'
+                ? 'text-emerald-700'
+                : row.statusTone === 'warn'
+                  ? 'text-amber-700'
+                  : 'text-rose-700'
+            )}
+          >
+            {row.statusText}
+          </span>
+          {row.subtitle && <span className="truncate text-muted-foreground">{row.subtitle}</span>}
+        </div>
       </div>
     </>
   )
@@ -272,24 +293,7 @@ function Row({
         <div className="flex min-w-0 flex-1 items-center gap-3">{body}</div>
       )}
 
-      <div className="flex shrink-0 items-center gap-2.5">
-        {row.requires_approval && (
-          <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 sm:inline">
-            approval
-          </span>
-        )}
-        <span
-          className={cn(
-            'rounded-full px-2.5 py-1 text-[12px] font-semibold',
-            row.statusTone === 'free'
-              ? 'bg-emerald-50 text-emerald-700'
-              : row.statusTone === 'warn'
-                ? 'bg-amber-50 text-amber-700'
-                : 'bg-rose-50 text-rose-700'
-          )}
-        >
-          {row.statusText}
-        </span>
+      <div className="flex shrink-0 items-center">
         {row.selectable ? (
           <AddButton
             added={selected}

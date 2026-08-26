@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { AlertTriangle, Check, Clapperboard, Loader2, MapPin, Users } from 'lucide-react'
 import {
   Dialog,
@@ -14,11 +14,11 @@ import type { AvailabilityRow } from '@/lib/queries/lockup'
 import type { GearWindow } from '@/lib/actions/lockup'
 import { cn } from '@/lib/utils'
 import { CodeChip } from '../item-bits'
+import { GearTimingChooser, type TimingResult } from '../gear-timing'
 
 export type ReviewLine = { label: string; sub?: string }
 
 /** How long the gear is held for, relative to the shoot. */
-export type GearTiming = 'whole_shoot' | 'studio_only' | 'custom'
 
 /** The studio blocks, as absolute times, for the "only while in the studio" option. */
 export type StudioSpan = { label: string; startsAt: string; endsAt: string }
@@ -62,31 +62,10 @@ export function ReviewDialog({
   const clashing = gear.filter((g) => g.conflict)
   const approvals = gear.filter((g) => g.requires_approval)
 
-  const [timing, setTiming] = useState<GearTiming>('whole_shoot')
-  // Per-item overrides, only consulted when timing is 'custom'.
-  const [custom, setCustom] = useState<Record<string, { from: string; to: string }>>({})
-
-  const studioSpan = useMemo(() => {
-    if (studioSpans.length === 0) return null
-    const from = studioSpans.reduce((a, b) => (a.startsAt < b.startsAt ? a : b)).startsAt
-    const to = studioSpans.reduce((a, b) => (a.endsAt > b.endsAt ? a : b)).endsAt
-    return { from, to }
-  }, [studioSpans])
-
-  const dayOptions = useMemo(() => buildDayOptions(shootStartsAt, shootEndsAt), [shootStartsAt, shootEndsAt])
-
-  function windowsFor(): GearWindow[] {
-    if (timing === 'whole_shoot') return []
-    if (timing === 'studio_only') {
-      if (!studioSpan) return []
-      return gear.map((g) => ({ itemId: g.item_id, startsAt: studioSpan.from, endsAt: studioSpan.to }))
-    }
-    return gear.flatMap((g) => {
-      const c = custom[g.item_id]
-      if (!c) return []
-      return [{ itemId: g.item_id, startsAt: c.from, endsAt: c.to }]
-    })
-  }
+  // null until they choose; Create shoot stays disabled until then, so a hold
+  // this long is always a deliberate answer rather than a silent default.
+  const [timing, setTiming] = useState<TimingResult>({ timing: null, windows: [] })
+  const needsTiming = gear.length > 0 && timing.timing === null
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
@@ -166,93 +145,13 @@ export function ReviewDialog({
         </Section>
 
         {gear.length > 0 && (
-          <section className="space-y-2 rounded-xl border border-border p-3">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              How long do you need the gear?
-            </div>
-            <TimingOption
-              active={timing === 'whole_shoot'}
-              onClick={() => setTiming('whole_shoot')}
-              title="For the whole shoot"
-              sub="Held from the shoot's start to its end. Simplest, and blocks the most."
-            />
-            <TimingOption
-              active={timing === 'studio_only'}
-              onClick={() => setTiming('studio_only')}
-              title="Only while the studio is booked"
-              sub={
-                studioSpan
-                  ? `Held ${fmtDateTime(studioSpan.from)} to ${fmtDateTime(studioSpan.to)}, freeing it for everyone else outside that.`
-                  : 'No studio booked on this shoot, so there is no window to use.'
-              }
-              disabled={!studioSpan}
-            />
-            <TimingOption
-              active={timing === 'custom'}
-              onClick={() => setTiming('custom')}
-              title="Set it per item"
-              sub="Give each item its own start and end inside the shoot."
-            />
-
-            {timing === 'custom' && (
-              <ul className="space-y-1.5 pt-1">
-                {gear.map((g) => {
-                  const c = custom[g.item_id]
-                  return (
-                    <li key={g.item_id} className="flex flex-wrap items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">
-                        {g.name}
-                      </span>
-                      <select
-                        value={c?.from ?? ''}
-                        onChange={(e) =>
-                          setCustom((prev) => ({
-                            ...prev,
-                            [g.item_id]: {
-                              from: e.target.value,
-                              to: prev[g.item_id]?.to ?? shootEndsAt,
-                            },
-                          }))
-                        }
-                        className="h-8 rounded-lg border border-input bg-card px-2 text-[12px]"
-                      >
-                        <option value="">whole shoot</option>
-                        {dayOptions.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="text-[12px] text-muted-foreground">to</span>
-                      <select
-                        value={c?.to ?? ''}
-                        onChange={(e) =>
-                          setCustom((prev) => ({
-                            ...prev,
-                            [g.item_id]: {
-                              from: prev[g.item_id]?.from ?? shootStartsAt,
-                              to: e.target.value,
-                            },
-                          }))
-                        }
-                        className="h-8 rounded-lg border border-input bg-card px-2 text-[12px]"
-                      >
-                        <option value="">whole shoot</option>
-                        {dayOptions.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                    </li>
-                  )
-                })}
-                <li className="text-[11.5px] text-muted-foreground">
-                  Anything left on &ldquo;whole shoot&rdquo; is held for the full window.
-                </li>
-              </ul>
-            )}
-          </section>
+          <GearTimingChooser
+            gear={gear.map((g) => ({ item_id: g.item_id, name: g.name }))}
+            studioSpans={studioSpans}
+            shootStartsAt={shootStartsAt}
+            shootEndsAt={shootEndsAt}
+            onChange={setTiming}
+          />
         )}
 
         {(clashing.length > 0 || approvals.length > 0) && (
@@ -283,9 +182,14 @@ export function ReviewDialog({
           >
             Keep editing
           </Button>
-          <Button type="button" className="flex-1" disabled={busy} onClick={() => onConfirm(windowsFor())}>
+          <Button
+            type="button"
+            className="flex-1"
+            disabled={busy || needsTiming}
+            onClick={() => onConfirm(timing.windows)}
+          >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create shoot
+            {needsTiming ? 'Choose how long' : 'Create shoot'}
           </Button>
         </div>
       </DialogContent>
@@ -315,71 +219,4 @@ function Section({
       <div className="space-y-1 pl-[22px] text-[12.5px] text-muted-foreground">{children}</div>
     </section>
   )
-}
-
-function TimingOption({
-  active,
-  disabled,
-  onClick,
-  title,
-  sub,
-}: {
-  active: boolean
-  disabled?: boolean
-  onClick: () => void
-  title: string
-  sub: string
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors',
-        disabled
-          ? 'cursor-not-allowed border-border opacity-50'
-          : active
-            ? 'border-primary bg-primary/10'
-            : 'border-border hover:bg-accent'
-      )}
-    >
-      <span
-        className={cn(
-          'mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border-[1.5px]',
-          active ? 'border-primary bg-primary' : 'border-muted-foreground/40'
-        )}
-      >
-        {active && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[13px] font-semibold text-foreground">{title}</span>
-        <span className="block text-[11.5px] text-muted-foreground">{sub}</span>
-      </span>
-    </button>
-  )
-}
-
-function fmtDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
-}
-
-/** Half-hour marks across the shoot, so a per-item window is picked from the
- *  shoot's own days rather than a free-floating date field. */
-function buildDayOptions(startsAt: string, endsAt: string): { value: string; label: string }[] {
-  const out: { value: string; label: string }[] = []
-  const cursor = new Date(startsAt)
-  const end = new Date(endsAt)
-  // Guard against a silly window producing thousands of options.
-  for (let i = 0; i < 200 && cursor <= end; i++) {
-    out.push({ value: cursor.toISOString(), label: fmtDateTime(cursor.toISOString()) })
-    cursor.setMinutes(cursor.getMinutes() + 30)
-  }
-  return out
 }

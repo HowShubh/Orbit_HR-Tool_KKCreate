@@ -17,6 +17,7 @@ import type { AvailabilityRow, KitRow } from '@/lib/queries/lockup'
 import { GearPicker, type PickerKit, type PickerRow } from './gear-picker'
 import { isAddable } from './wizard/step-gear'
 import { CodeChip } from './item-bits'
+import { GearTimingChooser, type StudioSpan, type TimingResult } from './gear-timing'
 
 /**
  * Add gear to an existing shoot, using the exact 3-column picker from the
@@ -29,6 +30,9 @@ export function AddGearDialog({
   onOpenChange,
   shootId,
   shootName,
+  shootStartsAt,
+  shootEndsAt,
+  studioSpans,
   availability,
   kits,
 }: {
@@ -36,19 +40,26 @@ export function AddGearDialog({
   onOpenChange: (open: boolean) => void
   shootId: string
   shootName: string
+  shootStartsAt: string
+  shootEndsAt: string
+  studioSpans: StudioSpan[]
   availability: AvailabilityRow[]
   kits: KitRow[]
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
   const [selected, setSelected] = useState<string[]>([])
+  const [timing, setTiming] = useState<TimingResult>({ timing: null, windows: [] })
   const [busy, setBusy] = useState(false)
 
   // Reset each open.
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setSelected([])
+    if (open) {
+      setSelected([])
+      setTiming({ timing: null, windows: [] })
+    }
   }
 
   // Items already on the shoot are hidden; the rest become picker rows.
@@ -95,12 +106,13 @@ export function AddGearDialog({
     return r ? [r] : []
   })
   const approvals = selectedRows.filter((r) => r.requires_approval).length
+  const needsTiming = selected.length > 0 && timing.timing === null
 
   async function reserve() {
     if (selected.length === 0) return
     setBusy(true)
     try {
-      await reserveItems({ shootId, itemIds: selected })
+      await reserveItems({ shootId, itemIds: selected, gearWindows: timing.windows })
       pushToast({
         title: `${selected.length} item${selected.length === 1 ? '' : 's'} reserved for ${shootName}`,
         body: approvals > 0 ? `${approvals} awaiting Tech Lead approval.` : undefined,
@@ -136,6 +148,7 @@ export function AddGearDialog({
           onAddMany={(ids) => setSelected((p) => Array.from(new Set([...p, ...ids])))}
           asideTitle="Selected"
           asideCount={selected.length}
+          asideOnMobile
           aside={
             <div className="space-y-3">
               {selectedRows.length === 0 ? (
@@ -166,15 +179,31 @@ export function AddGearDialog({
                 </ul>
               )}
 
+              {selected.length > 0 && (
+                <GearTimingChooser
+                  gear={selectedRows.map((r) => ({ item_id: r.item_id, name: r.name }))}
+                  studioSpans={studioSpans}
+                  shootStartsAt={shootStartsAt}
+                  shootEndsAt={shootEndsAt}
+                  onChange={setTiming}
+                />
+              )}
+
               {approvals > 0 && (
                 <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-center text-[11.5px] font-medium text-amber-700">
                   {approvals} approval{approvals === 1 ? '' : 's'} needed
                 </p>
               )}
 
-              <Button className="w-full" disabled={busy || selected.length === 0} onClick={reserve}>
+              <Button
+                className="w-full"
+                disabled={busy || selected.length === 0 || needsTiming}
+                onClick={reserve}
+              >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Reserve {selected.length || ''} item{selected.length === 1 ? '' : 's'}
+                {needsTiming
+                  ? 'Choose how long'
+                  : `Reserve ${selected.length || ''} item${selected.length === 1 ? '' : 's'}`}
               </Button>
               <p className="text-center text-[11px] text-muted-foreground">
                 <Clapperboard className="mr-1 inline h-3 w-3" />

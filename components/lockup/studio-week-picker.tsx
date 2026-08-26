@@ -246,7 +246,7 @@ export function StudioWeekPicker({
   const weekLabel = `${dayLabel(days[0])} to ${dayLabel(days[6])}`
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {/* Studio cards */}
       <div className="grid gap-2 sm:grid-cols-2">
         {studios.map((s) => (
@@ -302,7 +302,7 @@ export function StudioWeekPicker({
       </div>
 
       {/* Week grid */}
-      <div className="overflow-x-auto">
+      <div className="min-w-0 overflow-x-auto">
         <div className="min-w-[560px]">
           <div className="grid" style={{ gridTemplateColumns: '44px repeat(7, 1fr)' }}>
             <div />
