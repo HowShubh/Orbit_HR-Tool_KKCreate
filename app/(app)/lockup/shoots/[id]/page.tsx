@@ -3,6 +3,8 @@ import { requireUser } from '@/lib/actions/_helpers'
 import {
   getAvailabilityForShoot,
   getShootDetail,
+  getStudioSchedule,
+  listKits,
   getShootOutstandingGear,
   listLockupLocations,
   listStudios,
@@ -13,16 +15,27 @@ import { ShootDetailClient } from '@/components/lockup/shoot-detail'
 
 export default async function ShootDetailPage({ params }: { params: { id: string } }) {
   const me = await requireUser()
-  const [shoot, availability, myCapabilities, users, studios, outstandingGear, locations] =
-    await Promise.all([
-      getShootDetail(params.id),
-      getAvailabilityForShoot(params.id),
-      listMyCapabilityKeys(me.id),
-      listUsers(),
-      listStudios(),
-      getShootOutstandingGear(params.id),
-      listLockupLocations(),
-    ])
+  const [
+    shoot,
+    availability,
+    myCapabilities,
+    users,
+    studios,
+    outstandingGear,
+    locations,
+    kits,
+    studioSchedule,
+  ] = await Promise.all([
+    getShootDetail(params.id),
+    getAvailabilityForShoot(params.id),
+    listMyCapabilityKeys(me.id),
+    listUsers(),
+    listStudios(),
+    getShootOutstandingGear(params.id),
+    listLockupLocations(),
+    listKits(),
+    getStudioSchedule(),
+  ])
   if (!shoot) notFound()
 
   const canManageEquipment =
@@ -45,6 +58,8 @@ export default async function ShootDetailPage({ params }: { params: { id: string
       studios={studios}
       outstandingGear={outstandingGear}
       locations={locations}
+      kits={kits}
+      studioSchedule={studioSchedule}
     />
   )
 }

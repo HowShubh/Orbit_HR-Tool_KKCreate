@@ -46,15 +46,21 @@ import {
   removeShootEditor,
   removeStudioBlock,
 } from '@/lib/actions/lockup'
-import type { AvailabilityRow, OutstandingGearRow, ShootDetail } from '@/lib/queries/lockup'
+import type {
+  AvailabilityRow,
+  KitRow,
+  OutstandingGearRow,
+  ShootDetail,
+  StudioScheduleEntry,
+} from '@/lib/queries/lockup'
 import type { Tables } from '@/lib/supabase/database.types'
 import { SHOOT_STATUS_LABELS } from '@/lib/lockup/constants'
 import { CategoryIcon, CodeChip, StatusBadge, fmtDay, fmtShootWindow, fmtTime, itemStatusLine } from './item-bits'
 import { CloseShootDialog } from './close-shoot-dialog'
-import { ReservationPicker } from './reservation-picker'
+import { AddGearDialog } from './add-gear-dialog'
 import { CheckoutDialog, type CartItem } from './checkout-dialog'
 import { ScanConfirmDialog } from './scan-confirm-dialog'
-import { StudioBlockDialog } from './studio-block-dialog'
+import { AddStudioDialog } from './add-studio-dialog'
 
 function toLocalInput(iso: string): string {
   const d = new Date(iso)
@@ -73,6 +79,8 @@ export function ShootDetailClient({
   studios,
   outstandingGear,
   locations,
+  kits,
+  studioSchedule,
 }: {
   shoot: ShootDetail
   availability: AvailabilityRow[]
@@ -88,6 +96,8 @@ export function ShootDetailClient({
   /** Gear picked up for this shoot and not yet returned; blocks cancel/delete. */
   outstandingGear: OutstandingGearRow[]
   locations: Tables<'equipment_locations'>[]
+  kits: KitRow[]
+  studioSchedule: StudioScheduleEntry[]
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
@@ -200,8 +210,8 @@ export function ShootDetailClient({
         {/* Two columns on desktop: the gear list earns the width, while the
             shoot's facts and its destructive actions sit in a sticky rail —
             one narrow column left half the screen empty. */}
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="order-2 space-y-4 lg:order-1">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4">
+          <div className="order-2 space-y-4">
           {/* Conflicts, loud */}
           {conflicts.length > 0 && !closed && (
             <div className="rounded-xl border border-rose-300 bg-rose-50 p-4 space-y-2">
@@ -356,7 +366,7 @@ export function ShootDetailClient({
 
           </div>
 
-          <aside className="order-1 space-y-4 lg:order-2 lg:sticky lg:top-4">
+          <div className="order-1 space-y-4">
           {/* Header card */}
           <div className="rounded-xl border border-border bg-card p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -515,10 +525,12 @@ export function ShootDetailClient({
             )}
           </div>
 
-          {/* Danger zone. Both routes go through the same dialog, which will
-              not let either happen while gear is still out. */}
+          </div>
+
+          {/* Danger zone, always last. Both routes go through the same dialog,
+              which refuses while gear is still out. */}
           {canCancel && (
-            <div className="flex flex-wrap gap-2 pt-2">
+            <div className="order-3 flex flex-wrap gap-2 border-t border-border pt-4">
               {!closed && (
                 <Button
                   variant="ghost"
@@ -541,7 +553,6 @@ export function ShootDetailClient({
               </Button>
             </div>
           )}
-          </aside>
         </div>
       </div>
 
@@ -558,12 +569,13 @@ export function ShootDetailClient({
         onConfirm={closeMode === 'delete' ? doDeleteShoot : doCancelShoot}
       />
 
-      <ReservationPicker
+      <AddGearDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         shootId={shoot.id}
         shootName={shoot.name}
         availability={availability}
+        kits={kits}
       />
       {pickupScan && (
         <ScanConfirmDialog
@@ -588,13 +600,13 @@ export function ShootDetailClient({
           onDone={() => setPickupItem(null)}
         />
       )}
-      <StudioBlockDialog
+      <AddStudioDialog
         open={studioOpen}
         onOpenChange={setStudioOpen}
         shootId={shoot.id}
         shootName={shoot.name}
-        shootStartsAt={shoot.starts_at}
         studios={studios}
+        blocks={studioSchedule}
       />
       <AddEditorDialog
         open={editorsOpen}
