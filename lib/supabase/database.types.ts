@@ -245,8 +245,9 @@ export type Database = {
         Row: {
           id: string
           item_id: string
-          shoot_id: string
-          /** Custom hold window; null/null means the whole shoot. */
+          /** Null for a standalone hold; then starts_at/ends_at are required. */
+          shoot_id: string | null
+          /** Custom hold window; null/null means the whole shoot (shoot res only). */
           starts_at: string | null
           ends_at: string | null
           reserved_by: string
@@ -257,7 +258,7 @@ export type Database = {
         Insert: {
           id?: string
           item_id: string
-          shoot_id: string
+          shoot_id?: string | null
           starts_at?: string | null
           ends_at?: string | null
           reserved_by: string

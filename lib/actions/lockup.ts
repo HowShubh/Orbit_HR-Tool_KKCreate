@@ -214,7 +214,7 @@ export async function checkoutItems(input: {
     .select('*')
     .in('item_id', input.itemIds)
     .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
-  const shootIds = Array.from(new Set((reservations ?? []).map((r) => r.shoot_id)))
+  const shootIds = Array.from(new Set((reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
   const { data: shoots } = shootIds.length
     ? await admin.from('equipment_shoots').select('*').in('id', shootIds)
     : { data: [] as Tables<'equipment_shoots'>[] }
@@ -249,38 +249,59 @@ export async function checkoutItems(input: {
     // APPROVED reservation for this checkout's shoot (managers are exempt).
     // Without this, the approval flag could be bypassed by not reserving.
     if (item.requires_approval && !actorIsManager) {
-      const mine = input.shootId
-        ? itemReservations.find((r) => r.shoot_id === input.shootId)
-        : undefined
+      const mine = itemReservations.find(
+        (r) =>
+          (input.shootId && r.shoot_id === input.shootId) || r.reserved_by === user.id
+      )
       if (!mine || mine.status !== 'active') {
         throw new ActionError(
           mine?.status === 'pending'
             ? `${itemLabel(item)} is still awaiting approval. Ask the tech lead to approve it first.`
-            : `${itemLabel(item)} needs tech lead approval. Reserve it through a shoot first.`
+            : `${itemLabel(item)} needs tech lead approval. Reserve it first and wait for approval.`
         )
       }
     }
 
     for (const r of itemReservations) {
-      const shoot = shootMap.get(r.shoot_id)
-      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
-      if (input.shootId && r.shoot_id === input.shootId) {
-        // Picking up gear reserved for this very shoot — not a conflict.
-        // Only an approved reservation flips to picked_up; a pending one
-        // (manager exemption path) stays pending for the approval queue.
+      // Resolve this reservation's window and label, shoot or standalone.
+      let winStart: string
+      let winEnd: string
+      let forName: string
+      if (r.shoot_id) {
+        const shoot = shootMap.get(r.shoot_id)
+        if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+        winStart = r.starts_at ?? shoot.starts_at
+        winEnd = r.ends_at ?? shoot.ends_at
+        forName = shoot.name
+        // Crew picking up gear reserved for THIS shoot: fulfil, not a conflict.
+        if (input.shootId && r.shoot_id === input.shootId) {
+          if (r.status === 'active') pickupReservations.set(item.id, r)
+          continue
+        }
+      } else if (r.starts_at && r.ends_at) {
+        winStart = r.starts_at
+        winEnd = r.ends_at
+        forName = 'a personal hold'
+      } else {
+        continue
+      }
+
+      // Taking gear you yourself reserved (standalone or a shoot) fulfils that
+      // hold rather than clashing with it.
+      if (r.reserved_by === user.id) {
         if (r.status === 'active') pickupReservations.set(item.id, r)
         continue
       }
-      // Conflict when the reservation's shoot window overlaps [now, dueAt]
-      const overlaps =
-        new Date(shoot.starts_at) <= dueAt && new Date() <= new Date(shoot.ends_at)
+
+      // Someone else's hold: a conflict if their window overlaps [now, dueAt].
+      const overlaps = new Date(winStart) <= dueAt && new Date() <= new Date(winEnd)
       if (overlaps) {
         warnings.push({
           item_id: item.id,
           item_name: itemLabel(item),
-          message: `Reserved for ${shoot.name} (${fmtDay(shoot.starts_at)} to ${fmtDay(shoot.ends_at)})`,
+          message: `Reserved for ${forName} (${fmtDay(winStart)} to ${fmtDay(winEnd)})`,
           reserved_by: r.reserved_by,
-          shoot_name: shoot.name,
+          shoot_name: forName,
         })
       }
     }
@@ -1362,6 +1383,94 @@ export async function reserveItems(input: {
   await revalidateHR()
 }
 
+export async function reserveGear(input: {
+  itemIds: string[]
+  startsAt: string
+  endsAt: string
+}): Promise<{ reserved: number; pending: number }> {
+  const user = await requireUser()
+  const admin = createAdminClient()
+
+  if (input.itemIds.length === 0) throw new ActionError('No items selected.')
+
+  const from = new Date(input.startsAt)
+  const to = new Date(input.endsAt)
+  if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+    throw new ActionError('Pick a valid pickup and drop-off time.')
+  }
+  if (to <= from) {
+    throw new ActionError('The drop-off time has to be after the pickup time.')
+  }
+  // A little slack so "reserve to pick up right now" survives clock skew.
+  if (from.getTime() < Date.now() - 60 * 60 * 1000) {
+    throw new ActionError('Pick a pickup time in the future.')
+  }
+
+  const { data: items } = await admin
+    .from('equipment_items')
+    .select('*')
+    .in('id', input.itemIds as unknown as string[])
+  const itemList = (items ?? []).filter(
+    (i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost'
+  )
+  if (itemList.length === 0) throw new ActionError('None of the selected items can be reserved.')
+
+  // Skip anything this person already holds across an overlapping window, so a
+  // double tap doesn't stack duplicate holds on the same gear.
+  const { data: mine } = await admin
+    .from('equipment_reservations')
+    .select('item_id, starts_at, ends_at')
+    .eq('reserved_by', user.id)
+    .is('shoot_id', null)
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+    .in('item_id', input.itemIds as unknown as string[])
+  const overlaps = (aS: string | null, aE: string | null) => {
+    if (!aS || !aE) return false
+    return new Date(aS) < to && from < new Date(aE)
+  }
+  const dupe = new Set(
+    (mine ?? []).filter((r) => overlaps(r.starts_at, r.ends_at)).map((r) => r.item_id)
+  )
+  const fresh = itemList.filter((i) => !dupe.has(i.id))
+  if (fresh.length === 0) throw new ActionError('You already have these on hold for that window.')
+
+  const actorIsManager = await isEquipmentManager(admin, user)
+  const startsIso = from.toISOString()
+  const endsIso = to.toISOString()
+  const toInsert = fresh.map((i) => ({
+    item_id: i.id,
+    shoot_id: null,
+    reserved_by: user.id,
+    starts_at: startsIso,
+    ends_at: endsIso,
+    status: (i.requires_approval && !actorIsManager ? 'pending' : 'active') as 'pending' | 'active',
+  }))
+  const { error } = await admin.from('equipment_reservations').insert(toInsert)
+  if (error) throw new ActionError(error.message)
+
+  const pending = actorIsManager ? [] : fresh.filter((i) => i.requires_approval)
+  if (pending.length > 0) {
+    await notifyManagers(admin, user.id, {
+      type: 'lockup_approval_request',
+      title: 'Gear approval needed',
+      body: `${user.full_name} wants ${pending.map((i) => itemLabel(i)).join(', ')} from ${fmtDayTime(startsIso)} to ${fmtDayTime(endsIso)}.`,
+      link_url: '/tech?tab=approvals',
+    })
+  }
+
+  await writeAudit(
+    user.id,
+    'equipment.reserve',
+    'equipment_item',
+    fresh[0].id,
+    null,
+    `${user.full_name} reserved ${fresh.length} item(s) for ${fmtDay(startsIso)} to ${fmtDay(endsIso)}` +
+      (pending.length > 0 ? ` (${pending.length} awaiting approval)` : '')
+  )
+  await revalidateHR()
+  return { reserved: fresh.length, pending: pending.length }
+}
+
 export async function cancelReservation(reservationId: string): Promise<void> {
   const user = await requireUser()
   const admin = createAdminClient()
@@ -1375,9 +1484,14 @@ export async function cancelReservation(reservationId: string): Promise<void> {
     throw new ActionError('This reservation is not active.')
   }
 
-  // Reserver, shoot owner, or equipment manager
+  // Reserver, shoot owner, or equipment manager. A standalone hold has no
+  // shoot to gate on, so only its reserver or a manager can drop it.
   if (reservation.reserved_by !== user.id) {
-    await requireShootAccess(admin, reservation.shoot_id, user)
+    if (reservation.shoot_id) {
+      await requireShootAccess(admin, reservation.shoot_id, user)
+    } else {
+      await requireCapability('manage_equipment')
+    }
   }
 
   await admin
@@ -1407,7 +1521,11 @@ async function getPendingReservationOrThrow(
 ): Promise<{
   reservation: Tables<'equipment_reservations'>
   item: Tables<'equipment_items'>
-  shoot: Tables<'equipment_shoots'>
+  shoot: Tables<'equipment_shoots'> | null
+  /** Human label for what it is reserved for, shoot or plain window. */
+  forLabel: string
+  /** Where the decision notification links. */
+  link: string
 }> {
   const { data: reservation } = await admin
     .from('equipment_reservations')
@@ -1419,19 +1537,29 @@ async function getPendingReservationOrThrow(
     throw new ActionError('This reservation is not awaiting approval.')
   }
   const item = await getItemOrThrow(admin, reservation.item_id)
-  const { data: shoot } = await admin
-    .from('equipment_shoots')
-    .select('*')
-    .eq('id', reservation.shoot_id)
-    .maybeSingle()
-  if (!shoot) throw new ActionError('Shoot not found.')
-  return { reservation, item, shoot }
+  if (reservation.shoot_id) {
+    const { data: shoot } = await admin
+      .from('equipment_shoots')
+      .select('*')
+      .eq('id', reservation.shoot_id)
+      .maybeSingle()
+    if (!shoot) throw new ActionError('Shoot not found.')
+    return { reservation, item, shoot, forLabel: shoot.name, link: `/lockup/shoots/${shoot.id}` }
+  }
+  const forLabel =
+    reservation.starts_at && reservation.ends_at
+      ? `${fmtDay(reservation.starts_at)} to ${fmtDay(reservation.ends_at)}`
+      : 'a personal hold'
+  return { reservation, item, shoot: null, forLabel, link: '/lockup?tab=mine' }
 }
 
 export async function approveReservation(reservationId: string): Promise<void> {
   const user = await requireCapability('manage_equipment')
   const admin = createAdminClient()
-  const { reservation, item, shoot } = await getPendingReservationOrThrow(admin, reservationId)
+  const { reservation, item, forLabel, link } = await getPendingReservationOrThrow(
+    admin,
+    reservationId
+  )
 
   const { error } = await admin
     .from('equipment_reservations')
@@ -1446,14 +1574,14 @@ export async function approveReservation(reservationId: string): Promise<void> {
     'equipment_item',
     item.id,
     null,
-    `${user.full_name} approved ${itemLabel(item)} for ${shoot.name}`
+    `${user.full_name} approved ${itemLabel(item)} for ${forLabel}`
   )
   await notifyLockup({
     user_id: reservation.reserved_by,
     type: 'lockup_approval_decision',
     title: 'Gear approved',
-    body: `${user.full_name} approved ${itemLabel(item)} for ${shoot.name}. It is reserved for you.`,
-    link_url: `/lockup/shoots/${shoot.id}`,
+    body: `${user.full_name} approved ${itemLabel(item)} for ${forLabel}. It is reserved for you.`,
+    link_url: link,
   })
   await revalidateHR()
 }
@@ -1464,7 +1592,7 @@ export async function rejectReservation(input: {
 }): Promise<void> {
   const user = await requireCapability('manage_equipment')
   const admin = createAdminClient()
-  const { reservation, item, shoot } = await getPendingReservationOrThrow(
+  const { reservation, item, forLabel, link } = await getPendingReservationOrThrow(
     admin,
     input.reservationId
   )
@@ -1483,7 +1611,7 @@ export async function rejectReservation(input: {
     'equipment_item',
     item.id,
     null,
-    `${user.full_name} declined ${itemLabel(item)} for ${shoot.name}` +
+    `${user.full_name} declined ${itemLabel(item)} for ${forLabel}` +
       (reason ? ` (${reason})` : '')
   )
   await notifyLockup({
@@ -1491,9 +1619,9 @@ export async function rejectReservation(input: {
     type: 'lockup_approval_decision',
     title: 'Gear request declined',
     body:
-      `${user.full_name} declined ${itemLabel(item)} for ${shoot.name}.` +
+      `${user.full_name} declined ${itemLabel(item)} for ${forLabel}.` +
       (reason ? ` Reason: ${reason}` : ''),
-    link_url: `/lockup/shoots/${shoot.id}`,
+    link_url: link,
   })
   await revalidateHR()
 }
@@ -1907,7 +2035,7 @@ export async function sendToRepair(input: {
     .select('*')
     .eq('item_id', item.id)
     .eq('status', 'active')
-  const shootIds = Array.from(new Set((reservations ?? []).map((r) => r.shoot_id)))
+  const shootIds = Array.from(new Set((reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
   if (shootIds.length > 0) {
     const { data: shoots } = await admin
       .from('equipment_shoots')

@@ -14,6 +14,7 @@ import type {
   KitRow,
   MyDevices,
   MyGearRow,
+  MyReservationRow,
   ShootSummary,
   StudioScheduleEntry,
 } from '@/lib/queries/lockup'
@@ -36,6 +37,7 @@ export function LockupClient({
   kits,
   myGear,
   myDevices,
+  myReservations,
   shoots,
   studios,
   locations,
@@ -50,6 +52,7 @@ export function LockupClient({
   kits: KitRow[]
   myGear: MyGearRow[]
   myDevices: MyDevices
+  myReservations: MyReservationRow[]
   shoots: ShootSummary[]
   studios: Tables<'equipment_studios'>[]
   locations: Tables<'equipment_locations'>[]
@@ -69,7 +72,10 @@ export function LockupClient({
 
   const overdueCount = myGear.filter((g) => g.overdue).length
   const mineCount =
-    myGear.length + myDevices.assignedToMe.length + myDevices.borrowedByMe.length
+    myGear.length +
+    myDevices.assignedToMe.length +
+    myDevices.borrowedByMe.length +
+    myReservations.length
   const upcomingShoots = shoots.filter(
     (s) => s.status !== 'done' && s.status !== 'cancelled'
   ).length
@@ -151,6 +157,7 @@ export function LockupClient({
               assignedToMe={myDevices.assignedToMe}
               borrowedByMe={myDevices.borrowedByMe}
               gear={myGear}
+              reservations={myReservations}
               locations={locations}
               canManageEquipment={canManageEquipment}
             />

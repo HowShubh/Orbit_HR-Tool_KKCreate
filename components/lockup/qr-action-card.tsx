@@ -402,7 +402,7 @@ export function QrActionCard({
         onOpenChange={setCheckoutOpen}
         initialItems={[item]}
         knownItems={knownItems}
-        shootId={pickupReservation?.shoot_id}
+        shootId={pickupReservation?.shoot_id ?? undefined}
         defaultDue={pickupReservation ? toLocalInput(pickupReservation.shoot_ends_at) : undefined}
       />
       <ReturnDialog

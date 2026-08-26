@@ -337,7 +337,9 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     .select('*')
     .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   if (activeReservations && activeReservations.length > 0) {
-    const shootIds = Array.from(new Set(activeReservations.map((r) => r.shoot_id)))
+    const shootIds = Array.from(
+      new Set(activeReservations.flatMap((r) => (r.shoot_id ? [r.shoot_id] : [])))
+    )
     const { data: shoots } = await admin
       .from('equipment_shoots')
       .select('*')
@@ -352,9 +354,23 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
     const resItemMap = new Map((resItems ?? []).map((i) => [i.id, i]))
 
     for (const r of activeReservations) {
-      const shoot = shootMap.get(r.shoot_id)
-      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
-      const cutoff = new Date(new Date(shoot.starts_at).getTime() + 24 * 60 * 60 * 1000)
+      // Expire 24h after the window opens (shoot start, or the hold's own
+      // start), whether or not there is a shoot behind it.
+      let windowStart: Date | null = null
+      let label = ''
+      let link = '/lockup?tab=mine'
+      if (r.shoot_id) {
+        const shoot = shootMap.get(r.shoot_id)
+        if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+        windowStart = new Date(shoot.starts_at)
+        label = `for ${shoot.name}`
+        link = `/lockup/shoots/${shoot.id}`
+      } else if (r.starts_at) {
+        windowStart = new Date(r.starts_at)
+        label = 'you held'
+      }
+      if (!windowStart) continue
+      const cutoff = new Date(windowStart.getTime() + 24 * 60 * 60 * 1000)
       if (now <= cutoff) continue
 
       await admin
@@ -369,8 +385,8 @@ export async function runLockupSweep(admin: AdminClient): Promise<SweepResult> {
         user_id: r.reserved_by,
         type: 'lockup_reservation_expired',
         title: 'Reservation expired',
-        body: `Your reservation of ${item ? `${item.name} (${item.code})` : 'an item'} for ${shoot.name} expired because it was not picked up within 24 hours of the shoot start.`,
-        link_url: `/lockup/shoots/${shoot.id}`,
+        body: `Your reservation of ${item ? `${item.name} (${item.code})` : 'an item'} ${label} expired because it was not picked up within 24 hours of the window opening.`,
+        link_url: link,
       })
     }
   }

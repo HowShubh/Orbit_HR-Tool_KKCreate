@@ -251,9 +251,13 @@ export function TechConsoleClient({
                     {a.item.name} <CodeChip code={a.item.code} />
                   </div>
                   <div className="text-[12.5px] text-muted-foreground">
-                    {a.reserved_by_name} wants it for {a.shoot.name} ·{' '}
-                    {fmtShootWindow(a.shoot.starts_at, a.shoot.ends_at)} · asked{' '}
-                    {fmtDayTime(a.created_at)}
+                    {a.reserved_by_name} wants it for{' '}
+                    {a.shoot
+                      ? `${a.shoot.name} · ${fmtShootWindow(a.shoot.starts_at, a.shoot.ends_at)}`
+                      : a.window
+                        ? `a personal hold · ${fmtShootWindow(a.window.starts_at, a.window.ends_at)}`
+                        : 'a personal hold'}{' '}
+                    · asked {fmtDayTime(a.created_at)}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -263,7 +267,7 @@ export function TechConsoleClient({
                     disabled={busyId === a.reservation_id}
                     onClick={() => {
                       const reason =
-                        window.prompt(`Why decline ${a.item.name} for ${a.shoot.name}? (optional)`) ??
+                        window.prompt(`Why decline ${a.item.name}? (optional)`) ??
                         undefined
                       run(
                         a.reservation_id,
@@ -281,7 +285,7 @@ export function TechConsoleClient({
                       run(
                         a.reservation_id,
                         () => approveReservation(a.reservation_id),
-                        `${a.item.name} approved for ${a.shoot.name}`
+                        `${a.item.name} approved`
                       )
                     }
                   >

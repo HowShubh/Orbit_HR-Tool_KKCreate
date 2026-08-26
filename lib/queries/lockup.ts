@@ -10,7 +10,9 @@ import type { EquipmentCategory, EquipmentStatus, ShootStatus } from '@/lib/lock
 
 export type ReservationBadge = {
   id: string
-  shoot_id: string
+  /** Null for a standalone hold (no shoot). */
+  shoot_id: string | null
+  /** Shoot name, or "personal hold" wording for a standalone reservation. */
   shoot_name: string
   /** The shoot's own window, for display ("for X, 25 to 26 Aug"). */
   shoot_starts_at: string
@@ -75,6 +77,27 @@ export type MyDeviceRow = {
 export type MyDevices = {
   assignedToMe: MyDeviceRow[]
   borrowedByMe: MyDeviceRow[]
+}
+
+/** A reservation the current user is holding: gear set aside for a shoot, or
+ *  a standalone "pick up on this date" window hold. Powers the "Reserved gear"
+ *  section of the With me tab. */
+export type MyReservationRow = {
+  id: string
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  status: 'active' | 'pending'
+  /** Standalone hold window; null/null when it's tied to a shoot. */
+  starts_at: string | null
+  ends_at: string | null
+  /** Shoot it's reserved for; null for a standalone window hold. */
+  shoot_id: string | null
+  shoot_name: string | null
+  /** Where to collect it from. */
+  home_location_label: string | null
 }
 
 export type ShootConflict = {
@@ -189,12 +212,15 @@ export type PendingApprovalRow = {
     category: EquipmentCategory
     photo_url: string | null
   }
+  /** Null for a standalone hold; then `window` carries the times. */
   shoot: {
     id: string
     name: string
     starts_at: string
     ends_at: string
-  }
+  } | null
+  /** A standalone hold's own window (null for shoot reservations). */
+  window: { starts_at: string; ends_at: string } | null
 }
 
 export type ActivityEvent = {
@@ -409,32 +435,55 @@ const activeReservationsByItem = cache(async (): Promise<Map<string, Reservation
     .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
   if (!reservations || reservations.length === 0) return new Map()
 
-  const shootIds = Array.from(new Set(reservations.map((r) => r.shoot_id)))
-  const { data: shoots } = await adminClient
-    .from('equipment_shoots')
-    .select('id, name, starts_at, ends_at, status')
-    .in('id', shootIds)
+  const shootIds = Array.from(new Set(reservations.flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
+  const { data: shoots } = shootIds.length
+    ? await adminClient
+        .from('equipment_shoots')
+        .select('id, name, starts_at, ends_at, status')
+        .in('id', shootIds)
+    : { data: [] as Pick<Tables<'equipment_shoots'>, 'id' | 'name' | 'starts_at' | 'ends_at' | 'status'>[] }
   const shootMap = new Map((shoots ?? []).map((s) => [s.id, s]))
   const names = await nameMap(adminClient, reservations.map((r) => r.reserved_by))
 
   const byItem = new Map<string, ReservationBadge[]>()
   for (const r of reservations) {
-    const shoot = shootMap.get(r.shoot_id)
-    if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+    const reserverName = names.get(r.reserved_by) ?? 'Unknown'
+    let badge: ReservationBadge | null = null
+    if (r.shoot_id) {
+      const shoot = shootMap.get(r.shoot_id)
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+      badge = {
+        id: r.id,
+        shoot_id: r.shoot_id,
+        shoot_name: shoot.name,
+        shoot_starts_at: shoot.starts_at,
+        shoot_ends_at: shoot.ends_at,
+        holds_from: r.starts_at ?? shoot.starts_at,
+        holds_to: r.ends_at ?? shoot.ends_at,
+        custom_window: Boolean(r.starts_at && r.ends_at),
+        reserved_by: r.reserved_by,
+        reserved_by_name: reserverName,
+        status: r.status as 'active' | 'pending',
+      }
+    } else if (r.starts_at && r.ends_at) {
+      // Standalone hold: someone booked it for a plain window, no shoot.
+      badge = {
+        id: r.id,
+        shoot_id: null,
+        shoot_name: `${reserverName}'s hold`,
+        shoot_starts_at: r.starts_at,
+        shoot_ends_at: r.ends_at,
+        holds_from: r.starts_at,
+        holds_to: r.ends_at,
+        custom_window: true,
+        reserved_by: r.reserved_by,
+        reserved_by_name: reserverName,
+        status: r.status as 'active' | 'pending',
+      }
+    }
+    if (!badge) continue
     const list = byItem.get(r.item_id) ?? []
-    list.push({
-      id: r.id,
-      shoot_id: r.shoot_id,
-      shoot_name: shoot.name,
-      shoot_starts_at: shoot.starts_at,
-      shoot_ends_at: shoot.ends_at,
-      holds_from: r.starts_at ?? shoot.starts_at,
-      holds_to: r.ends_at ?? shoot.ends_at,
-      custom_window: Boolean(r.starts_at && r.ends_at),
-      reserved_by: r.reserved_by,
-      reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
-      status: r.status as 'active' | 'pending',
-    })
+    list.push(badge)
     byItem.set(r.item_id, list)
   }
   return byItem
@@ -727,6 +776,61 @@ export async function getMyDevices(userId: string): Promise<MyDevices> {
     .filter((i) => i.current_holder_id === userId && i.assignee_id !== userId)
     .map(toRow)
   return { assignedToMe, borrowedByMe }
+}
+
+/** Active + pending reservations this person is holding, newest window first.
+ *  Includes both shoot reservations and standalone window holds. */
+export async function getMyReservations(userId: string): Promise<MyReservationRow[]> {
+  const adminClient = createAdminClient()
+  const { data: rows } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .eq('reserved_by', userId)
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+    .order('starts_at', { ascending: true, nullsFirst: false })
+  const reservations = rows ?? []
+  if (reservations.length === 0) return []
+
+  const itemIds = [...new Set(reservations.map((r) => r.item_id))]
+  const { data: itemRows } = await adminClient.from('equipment_items').select('*').in('id', itemIds)
+  const itemById = new Map((itemRows ?? []).map((i) => [i.id, i]))
+
+  const shootIds = [
+    ...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[]),
+  ]
+  const shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    for (const sh of shoots ?? []) shootNames.set(sh.id, sh.name)
+  }
+
+  const locations = await locationMap()
+
+  const out: MyReservationRow[] = []
+  for (const r of reservations) {
+    const item = itemById.get(r.item_id)
+    if (!item) continue
+    out.push({
+      id: r.id,
+      item_id: item.id,
+      item_code: item.code,
+      item_name: item.name,
+      category: item.category,
+      photo_url: item.photo_url,
+      status: r.status as 'active' | 'pending',
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      shoot_id: r.shoot_id,
+      shoot_name: r.shoot_id ? shootNames.get(r.shoot_id) ?? null : null,
+      home_location_label: item.home_location_id
+        ? locations.get(item.home_location_id) ?? null
+        : null,
+    })
+  }
+  return out
 }
 
 // ============================================================
@@ -1061,7 +1165,7 @@ export async function listPendingApprovals(): Promise<PendingApprovalRow[]> {
   if (list.length === 0) return []
 
   const itemIds = Array.from(new Set(list.map((r) => r.item_id)))
-  const shootIds = Array.from(new Set(list.map((r) => r.shoot_id)))
+  const shootIds = Array.from(new Set(list.flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
   const [{ data: items }, { data: shoots }, names] = await Promise.all([
     adminClient
       .from('equipment_items')
@@ -1078,10 +1182,15 @@ export async function listPendingApprovals(): Promise<PendingApprovalRow[]> {
 
   return list.flatMap((r) => {
     const item = itemMap.get(r.item_id)
-    const shoot = shootMap.get(r.shoot_id)
-    // A cancelled/done shoot's pending requests are moot; hide them (the
-    // sweep or shoot cancellation resolves the rows themselves).
-    if (!item || !shoot || shoot.status === 'cancelled' || shoot.status === 'done') return []
+    if (!item) return []
+    const shoot = r.shoot_id ? shootMap.get(r.shoot_id) : null
+    // A shoot request on a cancelled/done shoot is moot; hide it. A standalone
+    // hold needs its own window present.
+    if (r.shoot_id) {
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') return []
+    } else if (!r.starts_at || !r.ends_at) {
+      return []
+    }
     return [
       {
         reservation_id: r.id,
@@ -1095,12 +1204,16 @@ export async function listPendingApprovals(): Promise<PendingApprovalRow[]> {
           category: item.category,
           photo_url: item.photo_url,
         },
-        shoot: {
-          id: shoot.id,
-          name: shoot.name,
-          starts_at: shoot.starts_at,
-          ends_at: shoot.ends_at,
-        },
+        shoot: shoot
+          ? {
+              id: shoot.id,
+              name: shoot.name,
+              starts_at: shoot.starts_at,
+              ends_at: shoot.ends_at,
+            }
+          : null,
+        window:
+          r.starts_at && r.ends_at ? { starts_at: r.starts_at, ends_at: r.ends_at } : null,
       },
     ]
   })
@@ -1499,7 +1612,7 @@ export async function getItemProfile(code: string): Promise<ItemProfile | null> 
     : { data: [] as { id: string; name: string }[] }
 
   // Upcoming: reservations (with their shoot window), the open repair, the due date
-  const shootIds = Array.from(new Set((reservations ?? []).map((r) => r.shoot_id)))
+  const shootIds = Array.from(new Set((reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
   const { data: shoots } = shootIds.length
     ? await adminClient
         .from('equipment_shoots')
@@ -1507,7 +1620,10 @@ export async function getItemProfile(code: string): Promise<ItemProfile | null> 
         .in('id', shootIds)
     : { data: [] as Pick<Tables<'equipment_shoots'>, 'id' | 'name' | 'starts_at' | 'ends_at' | 'status' | 'owner_id'>[] }
   const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
-  const ownerNames = await nameMap(adminClient, (shoots ?? []).map((s) => s.owner_id))
+  const ownerNames = await nameMap(adminClient, [
+    ...(shoots ?? []).map((s) => s.owner_id),
+    ...(reservations ?? []).map((r) => r.reserved_by),
+  ])
 
   const upcoming: ItemUpcomingEvent[] = []
   const days: ItemDayState[] = []
@@ -1526,16 +1642,31 @@ export async function getItemProfile(code: string): Promise<ItemProfile | null> 
   }
 
   for (const r of reservations ?? []) {
-    const shoot = shootById.get(r.shoot_id)
-    if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
-    upcoming.push({
-      at: shoot.starts_at,
-      ends_at: shoot.ends_at,
-      kind: 'reservation',
-      text: shoot.name,
-      sub: `${r.status === 'pending' ? 'awaiting approval · ' : ''}${ownerNames.get(shoot.owner_id) ?? 'someone'}`,
-    })
-    for (const day of daySpan(shoot.starts_at, shoot.ends_at)) days.push({ day, state: 'busy' })
+    const pend = r.status === 'pending' ? 'awaiting approval · ' : ''
+    if (r.shoot_id) {
+      const shoot = shootById.get(r.shoot_id)
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+      const from = r.starts_at ?? shoot.starts_at
+      const to = r.ends_at ?? shoot.ends_at
+      upcoming.push({
+        at: from,
+        ends_at: to,
+        kind: 'reservation',
+        text: shoot.name,
+        sub: `${pend}${ownerNames.get(shoot.owner_id) ?? 'someone'}`,
+      })
+      for (const day of daySpan(from, to)) days.push({ day, state: 'busy' })
+    } else if (r.starts_at && r.ends_at) {
+      // Standalone hold: someone reserved it for a plain window, no shoot.
+      upcoming.push({
+        at: r.starts_at,
+        ends_at: r.ends_at,
+        kind: 'reservation',
+        text: 'Held (no shoot)',
+        sub: `${pend}${ownerNames.get(r.reserved_by) ?? 'someone'}`,
+      })
+      for (const day of daySpan(r.starts_at, r.ends_at)) days.push({ day, state: 'busy' })
+    }
   }
 
   if (openRepair) {
@@ -1858,7 +1989,7 @@ export async function getScanContext(code: string, userId: string): Promise<Scan
   // ---- Reserved for a shoot that is live (or starts within 24h)? ----
   const now = Date.now()
   const live = item.active_reservations.find((r) => {
-    if (r.status !== 'active') return false
+    if (r.status !== 'active' || !r.shoot_id) return false
     return (
       now >= new Date(r.shoot_starts_at).getTime() - 24 * 60 * 60 * 1000 &&
       now <= new Date(r.shoot_ends_at).getTime()
@@ -1884,18 +2015,19 @@ export async function getScanContext(code: string, userId: string): Promise<Scan
       }))
   }
 
-  if (live) {
+  if (live && live.shoot_id) {
+    const liveShootId = live.shoot_id
     const { data: sibs } = await adminClient
       .from('equipment_reservations')
       .select('item_id')
-      .eq('shoot_id', live.shoot_id)
+      .eq('shoot_id', liveShootId)
       .in('status', ['active'] as unknown as 'active'[])
     const otherIds = (sibs ?? []).map((r) => r.item_id).filter((id) => id !== item.id)
     return {
       kind: 'pickup',
       scanned: { ...base, in_shoot: true },
       shoot: {
-        id: live.shoot_id,
+        id: liveShootId,
         name: live.shoot_name,
         starts_at: live.shoot_starts_at,
         ends_at: live.shoot_ends_at,

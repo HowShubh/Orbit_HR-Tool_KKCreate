@@ -2,6 +2,7 @@ import { requireUser } from '@/lib/actions/_helpers'
 import {
   getMyDevices,
   getMyGear,
+  getMyReservations,
   getOverdueGear,
   getStudioSchedule,
   listEquipment,
@@ -21,19 +22,31 @@ export default async function LockupPage({
   searchParams?: { tab?: string; cart?: string }
 }) {
   const me = await requireUser()
-  const [items, kits, myGear, myDevices, shoots, studios, locations, studioSchedule, myCapabilities, overdueAll] =
-    await Promise.all([
-      listEquipment(),
-      listKits(),
-      getMyGear(me.id),
-      getMyDevices(me.id),
-      listShoots(),
-      listStudios(),
-      listLockupLocations(),
-      getStudioSchedule(),
-      listMyCapabilityKeys(me.id),
-      getOverdueGear(),
-    ])
+  const [
+    items,
+    kits,
+    myGear,
+    myDevices,
+    myReservations,
+    shoots,
+    studios,
+    locations,
+    studioSchedule,
+    myCapabilities,
+    overdueAll,
+  ] = await Promise.all([
+    listEquipment(),
+    listKits(),
+    getMyGear(me.id),
+    getMyDevices(me.id),
+    getMyReservations(me.id),
+    listShoots(),
+    listStudios(),
+    listLockupLocations(),
+    getStudioSchedule(),
+    listMyCapabilityKeys(me.id),
+    getOverdueGear(),
+  ])
 
   // Gear is the landing tab: no tab param means gear.
   const tab: LockupTab = (TABS as readonly string[]).includes(searchParams?.tab ?? '')
@@ -48,6 +61,7 @@ export default async function LockupPage({
       kits={kits}
       myGear={myGear}
       myDevices={myDevices}
+      myReservations={myReservations}
       shoots={shoots}
       studios={studios}
       locations={locations}
