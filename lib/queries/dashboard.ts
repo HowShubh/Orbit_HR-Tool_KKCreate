@@ -9,7 +9,7 @@ import {
 } from './leaves'
 import { listPendingApprovalsForReviewer } from './leave-requests'
 import { listLeaveTypes } from './leave-types'
-import { isEligibleForPolicy, type LeaveTypePolicy } from '@/lib/leave-types'
+import { isEligibleForPolicy, redactLeaveTypesForUser, type LeaveTypePolicy } from '@/lib/leave-types'
 import type { LeaveRequestWithDays } from '@/components/approvals/leave-request-types'
 
 export type DashboardTeamMember = Pick<
@@ -255,13 +255,16 @@ export async function getDashboardData(
     notifRes,
     leaveTypes,
   ] = await Promise.all([
-    listLeavesToday(),
-    listUpcomingLeaves(60, [currentUserId]),
-    myTeamUserIds.length > 0 ? listUpcomingLeaves(30, myTeamUserIds) : Promise.resolve([]),
-    orgUserIds.length > 0 ? listUpcomingLeaves(30, orgUserIds) : Promise.resolve([]),
+    listLeavesToday(currentUserId),
+    listUpcomingLeaves(60, [currentUserId], currentUserId),
+    myTeamUserIds.length > 0
+      ? listUpcomingLeaves(30, myTeamUserIds, currentUserId)
+      : Promise.resolve([]),
+    orgUserIds.length > 0 ? listUpcomingLeaves(30, orgUserIds, currentUserId) : Promise.resolve([]),
     listLeavesInRange(scheduleStart, scheduleEnd, {
       userIds: [currentUserId],
       statuses: ['active', 'delete_requested'],
+      viewerId: currentUserId,
     }),
     adminClient
       .from('leave_balances')
@@ -320,8 +323,11 @@ export async function getDashboardData(
     upcomingOrg,
     myBalances: balancesRes.data ?? [],
     myCompoffBalance: compoffBalRes.data ?? [],
-    leaveTypes: leaveTypes.filter(
-      (policy) => policy.is_active && isEligibleForPolicy(policy, currentUserId)
+    leaveTypes: redactLeaveTypesForUser(
+      leaveTypes.filter(
+        (policy) => policy.is_active && isEligibleForPolicy(policy, currentUserId)
+      ),
+      currentUserId
     ),
     pendingApprovalsForMe: (approvalsRes.data ?? []).map((grant) => ({
       ...grant,

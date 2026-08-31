@@ -19,7 +19,9 @@ export default async function CalendarPage() {
     listUsers(),
     listTeams(),
     listHolidays(),
-    listLeavesInRange(start, end),
+    // viewerId: the person's own rows keep the name they applied under; everyone
+    // else's show the policy's public name.
+    listLeavesInRange(start, end, { viewerId: user.id }),
   ])
 
   return (

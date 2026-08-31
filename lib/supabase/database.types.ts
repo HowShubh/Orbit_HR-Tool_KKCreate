@@ -498,6 +498,7 @@ export type Database = {
         Row: {
           key: string
           name: string
+          public_name: string
           category: 'leave' | 'wfh' | 'compoff_leave' | 'compoff_wfh'
           annual_quota: number
           monthly_quota: number | null
@@ -510,6 +511,7 @@ export type Database = {
         Insert: {
           key: string
           name: string
+          public_name: string
           category: 'leave' | 'wfh' | 'compoff_leave' | 'compoff_wfh'
           annual_quota?: number
           monthly_quota?: number | null

@@ -71,7 +71,10 @@ export default async function TeamPage() {
 
   for (const teamId of myTeamIds) {
     const ids = (membersByTeam[teamId] ?? []).map((u) => u.id)
-    upcomingByTeam[teamId] = ids.length > 0 ? await listLeavesInRange(today, inThirty, { userIds: ids }) : []
+    upcomingByTeam[teamId] =
+      ids.length > 0
+        ? await listLeavesInRange(today, inThirty, { userIds: ids, viewerId: user.id })
+        : []
   }
 
   return (

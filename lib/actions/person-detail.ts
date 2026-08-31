@@ -5,9 +5,18 @@ import { requireCapability } from './_helpers'
 import { getMyProfileContext } from '@/lib/queries/users'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
 import { reconcileCompoffExpiry } from '@/lib/compoff-expiry'
-import { leaveTypeCategory, leaveTypeLabel, COMPOFF_YEAR } from '@/lib/leave-types'
+import {
+  leaveTypeCategory,
+  leaveTypeLabelFor,
+  isPrivateLeaveType,
+  COMPOFF_YEAR,
+} from '@/lib/leave-types'
 import { currentFiscalYearStart } from '@/lib/date'
-import type { PersonLeaveProfile, PersonLeaveRow } from '@/lib/person-detail-types'
+import type {
+  PersonBalanceRow,
+  PersonLeaveProfile,
+  PersonLeaveRow,
+} from '@/lib/person-detail-types'
 
 /**
  * Everything about one person's time off, for the HR user drawer and the team
@@ -15,7 +24,14 @@ import type { PersonLeaveProfile, PersonLeaveRow } from '@/lib/person-detail-typ
  * team leads see members of teams they lead, and a person can see themselves.
  */
 export async function getUserLeaveProfile(targetUserId: string): Promise<PersonLeaveProfile> {
-  await requireCapability('view_leaves', targetUserId)
+  const viewer = await requireCapability('view_leaves', targetUserId)
+
+  // Team leads reach this drawer for their own members, so a private policy has
+  // to stay private here: they get the public name on every row, and its balance
+  // bucket is left out entirely (a bucket is a disclosure even when its label is
+  // neutral). The person themselves and HR/founders see the real thing.
+  const canSeePrivate =
+    viewer.id === targetUserId || viewer.role === 'hr' || viewer.role === 'founder'
 
   const adminClient = createAdminClient()
   // Reflect comp-off expiry before reading balances/grants.
@@ -52,16 +68,23 @@ export async function getUserLeaveProfile(targetUserId: string): Promise<PersonL
 
   const leaves: PersonLeaveRow[] = (leavesRes.data ?? []).map((l) => ({
     ...l,
-    type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+    type_name: leaveTypeLabelFor(l.requested_type ?? l.type, policies, canSeePrivate),
     type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
   }))
+
+  const balances: PersonBalanceRow[] = (balancesRes.data ?? [])
+    .filter((b) => canSeePrivate || !isPrivateLeaveType(b.type, policies))
+    .map((b) => ({
+      ...b,
+      type_name: leaveTypeLabelFor(b.type, policies, canSeePrivate),
+    }))
 
   return {
     user,
     managerName,
     teams,
     directReports,
-    balances: balancesRes.data ?? [],
+    balances,
     leaves,
     compoff: compoffRes.data ?? [],
   }

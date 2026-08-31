@@ -11,7 +11,7 @@ import {
   isAwayCategory,
   isWfhCategory,
   leaveTypeCategory,
-  leaveTypeLabel,
+  leaveTypeLabelFor,
   type LeaveTypePolicy,
 } from '@/lib/leave-types'
 import { managedUserIds } from '@/lib/approvers'
@@ -132,7 +132,11 @@ export async function listPendingApprovalsForReviewer(
       leave_id: l.id,
       date: l.start_date,
       type: l.requested_type ?? l.type,
-      type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+      type_name: leaveTypeLabelFor(
+        l.requested_type ?? l.type,
+        policies,
+        l.user_id === reviewerUserId
+      ),
       type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
       days_deducted: Number(l.days_deducted ?? 0),
       half_day_position: l.half_day_position as LeaveRequestDay['half_day_position'],
@@ -198,10 +202,15 @@ export async function listPendingApprovalsForReviewer(
   return result
 }
 
+/**
+ * Team roster grid. `viewerUserId` gets their own cells labelled with the
+ * private policy name; every other member's cell shows the public name.
+ */
 export async function listRosterContext(
   teamId: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  viewerUserId?: string
 ): Promise<RosterCell[]> {
   const adminClient = createAdminClient()
   const policies = await loadLeaveTypePolicies(adminClient)
@@ -245,7 +254,11 @@ export async function listRosterContext(
         user_full_name: memberNameById.get(l.user_id) ?? 'Unknown',
         date: cursor,
         type: l.requested_type ?? l.type,
-        type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+        type_name: leaveTypeLabelFor(
+          l.requested_type ?? l.type,
+          policies,
+          l.user_id === viewerUserId
+        ),
         type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
         half_day_position: (l.half_day_position ?? null) as RosterCell['half_day_position'],
       })
@@ -344,7 +357,11 @@ export async function listLeaveRequestHistory(
       leave_id: l.id,
       date: l.start_date,
       type: l.requested_type ?? l.type,
-      type_name: leaveTypeLabel(l.requested_type ?? l.type, policies),
+      type_name: leaveTypeLabelFor(
+        l.requested_type ?? l.type,
+        policies,
+        l.user_id === reviewerUserId
+      ),
       type_category: leaveTypeCategory(l.requested_type ?? l.type, policies),
       days_deducted: Number(l.days_deducted ?? 0),
       half_day_position: l.half_day_position as LeaveRequestDay['half_day_position'],

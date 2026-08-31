@@ -29,6 +29,9 @@ import {
   isWfhCategory,
   leaveTypeCategory,
   leaveTypeLabel,
+  leaveTypeLabelFor,
+  leaveTypePublicLabel,
+  redactLeaveTypesForUser,
   leaveYearForCategory,
   type LeaveTypePolicy,
 } from '@/lib/leave-types'
@@ -394,9 +397,34 @@ function buildPlanRows(
   return rows
 }
 
+/**
+ * Who ends up reading the string being built.
+ *
+ * 'own'    — the person the leave belongs to (and HR acting in the console).
+ *            Gets the policy's real name, the one they applied under.
+ * 'others' — approvers, managers, teammates, #whereabouts. Gets the policy's
+ *            public name, so a private policy stays private.
+ *
+ * Every builder below takes this explicitly: a message that reaches both
+ * audiences has to be built twice, and no call site can end up public by
+ * forgetting a default.
+ */
+type LabelVisibility = 'own' | 'others'
+
+function labelFor(
+  typeKey: string,
+  policies: LeaveTypePolicy[],
+  visibility: LabelVisibility
+) {
+  return visibility === 'own'
+    ? leaveTypeLabel(typeKey, policies)
+    : leaveTypePublicLabel(typeKey, policies)
+}
+
 function summarizePlanRows(
   rows: Array<{ requested_type: string; days_deducted: number }>,
-  policies: LeaveTypePolicy[]
+  policies: LeaveTypePolicy[],
+  visibility: LabelVisibility
 ) {
   const totals = new Map<string, number>()
   for (const row of rows) {
@@ -404,7 +432,7 @@ function summarizePlanRows(
   }
 
   return Array.from(totals.entries())
-    .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
+    .map(([type, days]) => `${fmtDays(days)} ${labelFor(type, policies, visibility)}`)
     .join(', ')
 }
 
@@ -414,7 +442,8 @@ function summarizePlanRows(
 //   > Mon, 6 Jul 2026 — Leave 🌴 (half day)
 function slackLeaveLines(
   rows: Array<{ date: string; type: string; half: boolean }>,
-  policies: LeaveTypePolicy[]
+  policies: LeaveTypePolicy[],
+  visibility: LabelVisibility
 ): string {
   return rows
     .slice()
@@ -422,7 +451,7 @@ function slackLeaveLines(
     .map((r) => {
       const emoji = isWfhCategory(leaveTypeCategory(r.type, policies)) ? '🏠' : '🌴'
       const day = format(parseISO(r.date), 'EEE, d MMM yyyy')
-      return `> ${day} — ${leaveTypeLabel(r.type, policies)} ${emoji}${r.half ? ' (half day)' : ''}`
+      return `> ${day} — ${labelFor(r.type, policies, visibility)} ${emoji}${r.half ? ' (half day)' : ''}`
     })
     .join('\n')
 }
@@ -564,12 +593,19 @@ async function buildPlannerData(
     holidays: holidaysRes.data ?? [],
     balances: balancesRes.data ?? [],
     pending,
-    leaveTypes: eligibleLeaveTypes,
-    allLeaveTypes,
+    // The planner shows teammates' bookings for conflict awareness, so only the
+    // rows belonging to `userId` carry the policy's real name. The policy lists
+    // are redacted for the same reason: this payload reaches the browser.
+    leaveTypes: redactLeaveTypesForUser(eligibleLeaveTypes, userId),
+    allLeaveTypes: redactLeaveTypesForUser(allLeaveTypes, userId),
     leaves: (leavesRes.data ?? []).map((leave) => ({
       ...leave,
       user_full_name: userById.get(leave.user_id)?.full_name ?? 'Unknown',
-      type_name: leaveTypeLabel(leave.requested_type ?? leave.type, allLeaveTypes),
+      type_name: leaveTypeLabelFor(
+        leave.requested_type ?? leave.type,
+        allLeaveTypes,
+        leave.user_id === userId
+      ),
       type_category: leaveTypeCategory(leave.requested_type ?? leave.type, allLeaveTypes),
     })),
   }
@@ -795,7 +831,9 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     throw new ActionError('No leave approver is available. Contact HR or your founder.')
   }
 
-  const summary = summarizePlanRows(planRows, policies)
+  // Never shown back to the applicant: this feeds the approver DM, the FYI to
+  // leads and the downstream "will be away" notices.
+  const summary = summarizePlanRows(planRows, policies, 'others')
   const decidedAt = new Date().toISOString()
   const status = routing.autoApprove ? ('active' as const) : ('pending' as const)
   const decisionFields = routing.autoApprove
@@ -858,7 +896,8 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
       adminClient,
       `📅 ${who}'s leave is approved\n${slackLeaveLines(
         planRows.map((r) => ({ date: r.date, type: r.requested_type, half: r.half_day })),
-        policies
+        policies,
+        'others'
       )}`
     )
   } else {
@@ -876,7 +915,8 @@ export async function createMyLeavePlan(input: z.infer<typeof CreateLeavePlanSch
     const applicantMention = await slackMention(adminClient, user)
     const slackText = `*Leave approval needed*\n${applicantMention} applied for *${summary}*\n> *Dates:*\n${slackLeaveLines(
       planRows.map((r) => ({ date: r.date, type: r.requested_type, half: r.half_day })),
-      policies
+      policies,
+      'others'
     )}`
 
     await Promise.all([
@@ -1068,12 +1108,18 @@ export async function createLeavePlanForUser(input: z.infer<typeof CreatePlanFor
     await bumpUsed(adminClient, parsed.user_id, type, days, policies)
   }
 
-  const summary = summarizePlanRows(planRows, policies)
+  // Built twice: the employee reads the policy's real name, their manager reads
+  // the public one.
+  const ownSummary = summarizePlanRows(planRows, policies, 'own')
+  const publicSummary = summarizePlanRows(planRows, policies, 'others')
   const when = formatWhen(startDate, endDate)
-  const slackDays = slackLeaveLines(
-    planRows.map((r) => ({ date: r.date, type: r.requested_type, half: r.half_day })),
-    policies
-  )
+  const planDayRows = planRows.map((r) => ({
+    date: r.date,
+    type: r.requested_type,
+    half: r.half_day,
+  }))
+  const ownSlackDays = slackLeaveLines(planDayRows, policies, 'own')
+  const publicSlackDays = slackLeaveLines(planDayRows, policies, 'others')
   const adderMention = await slackMentionById(adminClient, actor.id)
   const employeeMention = await slackMentionById(adminClient, parsed.user_id)
 
@@ -1082,12 +1128,12 @@ export async function createLeavePlanForUser(input: z.infer<typeof CreatePlanFor
     user_id: parsed.user_id,
     type: 'leave_created_for_you',
     title: 'A leave was added to your record',
-    body: `${actor.full_name} added ${summary} for ${when}.`,
+    body: `${actor.full_name} added ${ownSummary} for ${when}.`,
     link_url: '/leaves',
     related_entity_type: 'leave_request',
     related_entity_id: request.id,
     slackDm: true,
-    slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${slackDays}\n> Added by ${adderMention}`,
+    slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${ownSlackDays}\n> Added by ${adderMention}`,
   })
 
   // Notify the manager (in-app + Slack DM, day by day).
@@ -1097,12 +1143,12 @@ export async function createLeavePlanForUser(input: z.infer<typeof CreatePlanFor
       user_id: managerId,
       type: 'leave_created_for_report',
       title: 'A leave was added for your report',
-      body: `${actor.full_name} added ${summary} for ${employee.full_name} (${when}).`,
+      body: `${actor.full_name} added ${publicSummary} for ${employee.full_name} (${when}).`,
       link_url: '/',
       related_entity_type: 'leave_request',
       related_entity_id: request.id,
       slackDm: true,
-      slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${slackDays}\n> Added by ${adderMention}`,
+      slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${publicSlackDays}\n> Added by ${adderMention}`,
     })
   }
 
@@ -1164,10 +1210,14 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
     .select('full_name, manager_id')
     .eq('id', parsed.user_id)
     .maybeSingle()
-  const typeLabel = leaveTypeLabel(parsed.type, policies)
+  // The employee's copy names the policy; their manager's copy does not.
+  const ownTypeLabel = leaveTypeLabel(parsed.type, policies)
+  const publicTypeLabel = leaveTypePublicLabel(parsed.type, policies)
   const when = formatWhen(parsed.start_date, parsed.end_date)
   const emoji = isWfhCategory(leaveTypeCategory(parsed.type, policies)) ? '🏠' : '🌴'
-  const dayLine = `> ${when} — ${typeLabel} ${emoji}${leave.half_day_start ? ' (half day)' : ''}`
+  const halfSuffix = leave.half_day_start ? ' (half day)' : ''
+  const ownDayLine = `> ${when} — ${ownTypeLabel} ${emoji}${halfSuffix}`
+  const publicDayLine = `> ${when} — ${publicTypeLabel} ${emoji}${halfSuffix}`
   const adderMention = await slackMentionById(adminClient, actor.id)
   const employeeMention = await slackMentionById(adminClient, parsed.user_id)
 
@@ -1175,12 +1225,12 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
     user_id: parsed.user_id,
     type: 'leave_created_for_you',
     title: 'A leave was added to your record',
-    body: `${actor.full_name} added ${typeLabel} for ${when}.`,
+    body: `${actor.full_name} added ${ownTypeLabel} for ${when}.`,
     link_url: '/leaves',
     related_entity_type: 'leave',
     related_entity_id: leave.id,
     slackDm: true,
-    slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${dayLine}\n> Added by ${adderMention}`,
+    slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${ownDayLine}\n> Added by ${adderMention}`,
   })
 
   const managerId = employee?.manager_id
@@ -1189,12 +1239,12 @@ export async function createLeaveOnBehalf(input: z.infer<typeof CreateOnBehalfSc
       user_id: managerId,
       type: 'leave_created_for_report',
       title: 'A leave was added for your report',
-      body: `${actor.full_name} added ${typeLabel} for ${employee?.full_name ?? 'a team member'} (${when}).`,
+      body: `${actor.full_name} added ${publicTypeLabel} for ${employee?.full_name ?? 'a team member'} (${when}).`,
       link_url: '/',
       related_entity_type: 'leave',
       related_entity_id: leave.id,
       slackDm: true,
-      slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${dayLine}\n> Added by ${adderMention}`,
+      slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${publicDayLine}\n> Added by ${adderMention}`,
     })
   }
 
@@ -1429,10 +1479,13 @@ export async function importBacklogLeavesCsv(
   for (const [userId, rows] of byUser.entries()) {
     const employee = userById.get(userId)
     if (!employee) continue
-    const slackDays = slackLeaveLines(
-      rows.map((r) => ({ date: r.start_date, type: r.type, half: r.half_day_start })),
-      policies
-    )
+    const dayRows = rows.map((r) => ({
+      date: r.start_date,
+      type: r.type,
+      half: r.half_day_start,
+    }))
+    const ownSlackDays = slackLeaveLines(dayRows, policies, 'own')
+    const publicSlackDays = slackLeaveLines(dayRows, policies, 'others')
     const count = rows.length
 
     await notifyUser({
@@ -1442,7 +1495,7 @@ export async function importBacklogLeavesCsv(
       body: `${actor.full_name} added ${count} leave entr${count === 1 ? 'y' : 'ies'} to your record.`,
       link_url: '/leaves',
       slackDm: true,
-      slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${slackDays}\n> Added by ${adderMention}`,
+      slackText: `A leave was added to your record 😮\n> *Leave date(s):*\n${ownSlackDays}\n> Added by ${adderMention}`,
     })
 
     const managerId = employee.manager_id
@@ -1455,7 +1508,7 @@ export async function importBacklogLeavesCsv(
         body: `${actor.full_name} added ${count} leave entr${count === 1 ? 'y' : 'ies'} for ${employee.full_name}.`,
         link_url: '/',
         slackDm: true,
-        slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${slackDays}\n> Added by ${adderMention}`,
+        slackText: `Leave record updated for ${employeeMention}\n> *Leave date(s):*\n${publicSlackDays}\n> Added by ${adderMention}`,
       })
     }
   }
@@ -1525,10 +1578,14 @@ async function approveLeaveRequestById(
     after: { request: updatedRequest, leaves: updatedLeaves },
   })
   const approverMention = await slackMention(adminClient, actor)
-  const dayLines = slackLeaveLines(
-    requestLeaves.map((l) => ({ date: l.start_date, type: l.requested_type ?? l.type, half: l.half_day_start })),
-    policies
-  )
+  const approvedDayRows = requestLeaves.map((l) => ({
+    date: l.start_date,
+    type: l.requested_type ?? l.type,
+    half: l.half_day_start,
+  }))
+  // The applicant's own DM names the policy. The #whereabouts post does not.
+  const ownDayLines = slackLeaveLines(approvedDayRows, policies, 'own')
+  const publicDayLines = slackLeaveLines(approvedDayRows, policies, 'others')
   await notifyUser({
     user_id: firstLeave.user_id,
     type: 'leave_approved',
@@ -1538,13 +1595,13 @@ async function approveLeaveRequestById(
     related_entity_type: 'leave_request',
     related_entity_id: requestId,
     slackDm: true,
-    slackText: `✅ *Your leave is approved*\n> *Dates:*\n${dayLines}\n> Approved by ${approverMention}`,
+    slackText: `✅ *Your leave is approved*\n> *Dates:*\n${ownDayLines}\n> Approved by ${approverMention}`,
   })
 
   // Now that it's confirmed, tell everyone under the applicant they'll be away.
   const applicant = await getLeaveUser(adminClient, firstLeave.user_id)
   const downstreamSummary = Array.from(totals.entries())
-    .map(([type, days]) => `${fmtDays(days)} ${leaveTypeLabel(type, policies)}`)
+    .map(([type, days]) => `${fmtDays(days)} ${leaveTypePublicLabel(type, policies)}`)
     .join(', ')
   const downstreamStart = requestLeaves[0].start_date
   const downstreamEnd = requestLeaves[requestLeaves.length - 1].end_date
@@ -1556,7 +1613,7 @@ async function approveLeaveRequestById(
     downstreamEnd
   )
   const who = await slackMention(adminClient, applicant)
-  await postWhereaboutsOnApproval(adminClient, `📅 ${who}'s leave is approved\n${dayLines}`)
+  await postWhereaboutsOnApproval(adminClient, `📅 ${who}'s leave is approved\n${publicDayLines}`)
 
   revalidatePath('/', 'layout')
   return updatedLeaves
@@ -1598,9 +1655,15 @@ async function rejectLeaveRequestById(
     after: { request: updatedRequest, leaves: updatedLeaves },
   })
   const rejecterMention = await slackMention(adminClient, actor)
+  // Only the applicant is told about a rejection, so this stays private.
   const dayLines = slackLeaveLines(
-    requestLeaves.map((l) => ({ date: l.start_date, type: l.requested_type ?? l.type, half: l.half_day_start })),
-    policies
+    requestLeaves.map((l) => ({
+      date: l.start_date,
+      type: l.requested_type ?? l.type,
+      half: l.half_day_start,
+    })),
+    policies,
+    'own'
   )
   const cleanReason = reason?.trim()
   await notifyUser({
@@ -1788,7 +1851,7 @@ export async function requestLeaveDeletion(leaveId: string) {
         user_id: reviewerId,
         type: 'leave_delete_requested',
         title: 'Leave deletion approval needed',
-        body: `${user.full_name} requested deletion of ${leaveTypeLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
+        body: `${user.full_name} requested deletion of ${leaveTypePublicLabel(leave.requested_type ?? leave.type, policies)} from ${leave.start_date} to ${leave.end_date}.`,
         link_url: '/',
         related_entity_type: 'leave',
         related_entity_id: leave.id,

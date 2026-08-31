@@ -157,8 +157,8 @@ export function PersonDetail({ userId }: { userId: string }) {
               const remaining = Number(b.allocated) - Number(b.used)
               return (
                 <div key={b.id} className="rounded-lg border p-2.5">
-                  <div className="text-[11px] text-muted-foreground capitalize truncate">
-                    {b.type.replace('compoff_', 'comp ').replace('_', ' ')}
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {b.type_name}
                   </div>
                   <div className="text-[15px] font-semibold tabular-nums">{fmtDays(remaining)}</div>
                   <div className="text-[10px] text-muted-foreground">of {fmtDays(Number(b.allocated))}</div>

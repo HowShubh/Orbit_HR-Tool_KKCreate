@@ -19,6 +19,9 @@ const EligibilityModeSchema = z.enum(['all', 'selected'])
 const CreateLeaveTypeSchema = z.object({
   key: z.string().trim().min(1).max(48).optional(),
   name: z.string().trim().min(2).max(80),
+  // What everyone who is not the applicant sees. Omitted means "same as name",
+  // which is how every ordinary policy behaves.
+  public_name: z.string().trim().min(2).max(80).optional(),
   category: CategorySchema,
   annual_quota: z.number().min(0).max(365).optional(),
   monthly_quota: z.number().min(0).max(31).nullable().optional(),
@@ -30,6 +33,7 @@ const CreateLeaveTypeSchema = z.object({
 const UpdateLeaveTypeSchema = z.object({
   key: z.string().trim().min(1).max(48),
   name: z.string().trim().min(2).max(80).optional(),
+  public_name: z.string().trim().min(2).max(80).optional(),
   category: CategorySchema.optional(),
   annual_quota: z.number().min(0).max(365).optional(),
   monthly_quota: z.number().min(0).max(31).nullable().optional(),
@@ -125,6 +129,7 @@ export async function createLeaveType(input: z.infer<typeof CreateLeaveTypeSchem
     .insert({
       key,
       name: parsed.name,
+      public_name: parsed.public_name ?? parsed.name,
       category: parsed.category,
       annual_quota: parsed.annual_quota ?? 0,
       monthly_quota: parsed.monthly_quota ?? null,
@@ -172,8 +177,18 @@ export async function updateLeaveType(input: z.infer<typeof UpdateLeaveTypeSchem
   const effectiveEligibleUserIds =
     parsed.eligible_user_ids ?? (currentEligibility ?? []).map((row) => row.user_id)
 
+  // A policy whose two names already match is an ordinary one, so renaming it
+  // renames both — otherwise "Sick Leave" -> "Health Leave" would quietly turn
+  // private, still reading "Sick Leave" to everyone else. Once HR has set them
+  // apart, the public name is deliberate and only an explicit edit moves it.
+  const nextName = parsed.name ?? before.name
+  const namesWereInSync = before.public_name === before.name
+  const nextPublicName =
+    parsed.public_name ?? (namesWereInSync ? nextName : before.public_name)
+
   const update = {
-    name: parsed.name ?? before.name,
+    name: nextName,
+    public_name: nextPublicName,
     category: parsed.category ?? before.category,
     annual_quota: parsed.annual_quota ?? before.annual_quota,
     monthly_quota: parsed.monthly_quota === undefined ? before.monthly_quota : parsed.monthly_quota,

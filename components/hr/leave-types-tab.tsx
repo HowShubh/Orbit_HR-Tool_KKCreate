@@ -34,6 +34,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
 type FormState = {
   key: string
   name: string
+  public_name: string
   category: Category
   annual_quota: string
   monthly_quota: string
@@ -45,6 +46,7 @@ type FormState = {
 const BLANK_FORM: FormState = {
   key: '',
   name: '',
+  public_name: '',
   category: 'leave',
   annual_quota: '0',
   monthly_quota: '',
@@ -57,6 +59,7 @@ function formFromPolicy(policy: LeaveTypePolicy): FormState {
   return {
     key: policy.key,
     name: policy.name,
+    public_name: policy.public_name,
     category: policy.category,
     annual_quota: String(policy.annual_quota ?? 0),
     monthly_quota: policy.monthly_quota == null ? '' : String(policy.monthly_quota),
@@ -126,6 +129,9 @@ export function LeaveTypesTab({
     setForm((prev) => ({
       ...prev,
       name,
+      // The public name shadows the name until the two are deliberately pulled
+      // apart, which is what makes an ordinary policy need no thought at all.
+      public_name: prev.public_name === prev.name ? name : prev.public_name,
       key: editingKey || keyTouched ? prev.key : slugifyLeaveTypeKey(name),
     }))
   }
@@ -160,6 +166,10 @@ export function LeaveTypesTab({
         const payload = {
           key: slugifyLeaveTypeKey(form.key),
           name: form.name.trim(),
+          // Blank is never sent: an empty public name would have to fall back to
+          // the private one somewhere downstream, which is the one thing this
+          // field exists to prevent.
+          public_name: form.public_name.trim() || form.name.trim(),
           category: form.category,
           annual_quota: annualQuota,
           monthly_quota: monthlyQuota,
@@ -226,6 +236,11 @@ export function LeaveTypesTab({
                     <td className="px-4 py-3">
                       <div className="font-medium">{type.name}</div>
                       <div className="text-[11px] text-muted-foreground">{type.key}</div>
+                      {type.public_name !== type.name && (
+                        <div className="text-[11px] text-muted-foreground">
+                          Others see: {type.public_name}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">{CATEGORY_LABEL[type.category]}</td>
                     <td className="px-4 py-3 tabular-nums">{type.annual_quota}</td>
@@ -241,6 +256,9 @@ export function LeaveTypesTab({
                           {type.is_active ? 'Active' : 'Inactive'}
                         </Badge>
                         {type.is_system && <Badge variant="muted">System</Badge>}
+                        {type.public_name !== type.name && (
+                          <Badge variant="muted">Private</Badge>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -258,7 +276,8 @@ export function LeaveTypesTab({
               {editingKey ? 'Edit leave type' : 'New leave type'}
             </div>
             <div className="text-xs text-muted-foreground">
-              Use selected eligibility for policies like Period Leave.
+              Use selected eligibility for policies like Period Leave, and give
+              those a different public name so approvals and Slack stay quiet.
             </div>
           </div>
 
@@ -266,6 +285,23 @@ export function LeaveTypesTab({
             <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
               Name
               <Input value={form.name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+              Name shown to others
+              <Input
+                value={form.public_name}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, public_name: event.target.value }))
+                }
+              />
+              <span className="block font-normal leading-snug text-muted-foreground">
+                The name above is what the person applying sees. This one is what
+                everybody else sees: approvers, the calendar, notifications and
+                Slack. Keep them identical for an ordinary policy. To keep a
+                policy private, set this to exactly the same text as your ordinary
+                leave type (usually &ldquo;Leave&rdquo;) so it cannot be told
+                apart from a normal day off.
+              </span>
             </label>
             <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
               Key

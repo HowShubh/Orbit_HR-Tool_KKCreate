@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { listLeavesForUser } from '@/lib/queries/leaves'
 import { listCompoffForUser } from '@/lib/queries/compoff'
 import { listLeaveTypes } from '@/lib/queries/leave-types'
+import { redactLeaveTypesForUser } from '@/lib/leave-types'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { currentFiscalYearStart } from '@/lib/date'
 import { reconcileCompoffExpiry } from '@/lib/compoff-expiry'
@@ -39,7 +40,9 @@ export default async function MyLeavesPage() {
       compoff={compoff}
       balances={balancesRes.data ?? []}
       compoffBalances={compoffBalRes.data ?? []}
-      leaveTypes={leaveTypes}
+      // Redacted: this page ships the policy list to the browser, and a
+      // private policy's real name is only the owner's business.
+      leaveTypes={redactLeaveTypesForUser(leaveTypes, user.id)}
     />
   )
 }

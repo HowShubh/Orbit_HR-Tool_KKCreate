@@ -44,5 +44,5 @@ export async function fetchRosterContext(
     }
   }
 
-  return listRosterContext(parsed.team_id, parsed.start_date, parsed.end_date)
+  return listRosterContext(parsed.team_id, parsed.start_date, parsed.end_date, me.id)
 }

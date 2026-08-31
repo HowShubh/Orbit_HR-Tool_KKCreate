@@ -3,7 +3,7 @@ import { todayIST, istDatePlusDays } from '@/lib/date'
 import {
   DEFAULT_LEAVE_TYPES,
   leaveTypeCategory,
-  leaveTypeLabel,
+  leaveTypeLabelFor,
   type LeaveTypeCategory,
 } from '@/lib/leave-types'
 import type { Tables } from '@/lib/supabase/database.types'
@@ -36,13 +36,21 @@ export async function listLeavesForUser(
   return data ?? []
 }
 
-/** All leaves in a date range, optionally filtered by user_ids. Used by HR + Calendar. */
+/**
+ * All leaves in a date range, optionally filtered by user_ids. Used by HR + Calendar.
+ *
+ * `type_name` is the policy's PUBLIC name for everyone except the person the row
+ * belongs to. Pass `viewerId` to get their own rows labelled with the private
+ * name they applied under; omit it and every row is public, which is the safe
+ * default for any caller that renders to a mixed audience.
+ */
 export async function listLeavesInRange(
   startDate: string,
   endDate: string,
   options?: {
     userIds?: string[]
     statuses?: Array<Tables<'leaves'>['status']> | 'all'
+    viewerId?: string
   }
 ): Promise<LeaveWithUser[]> {
   const adminClient = createAdminClient()
@@ -79,25 +87,34 @@ export async function listLeavesInRange(
   return leaves.map((l) => ({
     ...l,
     user_full_name: nameMap.get(l.user_id) ?? 'Unknown',
-    type_name: leaveTypeLabel(l.requested_type ?? l.type, leaveTypes),
+    type_name: leaveTypeLabelFor(
+      l.requested_type ?? l.type,
+      leaveTypes,
+      Boolean(options?.viewerId) && l.user_id === options?.viewerId
+    ),
     type_category: leaveTypeCategory(l.requested_type ?? l.type, leaveTypes),
   }))
 }
 
 /** Active leaves covering today across the org. */
-export async function listLeavesToday(): Promise<LeaveWithUser[]> {
+export async function listLeavesToday(viewerId?: string): Promise<LeaveWithUser[]> {
   const today = todayIST()
-  return listLeavesInRange(today, today)
+  return listLeavesInRange(today, today, { viewerId })
 }
 
 /** Upcoming leaves in next N days for given user_ids. */
 export async function listUpcomingLeaves(
   daysAhead: number,
-  userIds?: string[]
+  userIds?: string[],
+  viewerId?: string
 ): Promise<LeaveWithUser[]> {
-  return listLeavesInRange(todayIST(), istDatePlusDays(daysAhead), { userIds })
+  return listLeavesInRange(todayIST(), istDatePlusDays(daysAhead), { userIds, viewerId })
 }
 
+/**
+ * Pending leaves for review. Always labelled with the public name: this feeds
+ * approval surfaces, and nobody approves their own request.
+ */
 export async function listPendingLeaves(userIds?: string[]): Promise<LeaveWithUser[]> {
   const adminClient = createAdminClient()
   let query = adminClient
@@ -124,7 +141,7 @@ export async function listPendingLeaves(userIds?: string[]): Promise<LeaveWithUs
   return leaves.map((leave) => ({
     ...leave,
     user_full_name: nameMap.get(leave.user_id) ?? 'Unknown',
-    type_name: leaveTypeLabel(leave.requested_type ?? leave.type, leaveTypes),
+    type_name: leaveTypeLabelFor(leave.requested_type ?? leave.type, leaveTypes, false),
     type_category: leaveTypeCategory(leave.requested_type ?? leave.type, leaveTypes),
   }))
 }
