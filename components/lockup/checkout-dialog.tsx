@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Loader2, ScanLine, Trash2 } from 'lucide-react'
 import {
@@ -17,6 +17,7 @@ import { useStore } from '@/lib/store'
 import { checkoutItems, lookupItemByCode, type CheckoutWarning } from '@/lib/actions/lockup'
 import type { EquipmentItemRow } from '@/lib/queries/lockup'
 import { CategoryIcon, CodeChip, defaultDueLocal, duePresets, itemStatusLine } from './item-bits'
+import { scanFeedback } from '@/lib/lockup/scan-feedback'
 import { QrScanner } from './qr-scanner'
 
 export type CartItem = Pick<
@@ -62,6 +63,9 @@ export function CheckoutDialog({
   const [dueLocal, setDueLocal] = useState(defaultDue ?? defaultDueLocal())
   const [warnings, setWarnings] = useState<CheckoutWarning[] | null>(null)
   const [busy, setBusy] = useState(false)
+  // Claimed synchronously so a second read of the same sticker cannot slip
+  // past while the first is still resolving.
+  const claimed = useRef<Set<string>>(new Set(initialItems.map((i) => i.code)))
 
   // Reset per open
   const [wasOpen, setWasOpen] = useState(open)
@@ -81,13 +85,19 @@ export function CheckoutDialog({
   }, [dueLocal])
 
   async function addByCode(code: string) {
-    if (cart.some((c) => c.code === code)) return
+    if (claimed.current.has(code)) {
+      scanFeedback('duplicate')
+      return
+    }
+    claimed.current.add(code)
     setWarnings(null)
 
     // Instant path: the item is already loaded in the browser
     const known = knownItems?.find((k) => k.code === code)
     if (known) {
       if (known.status !== 'available') {
+        claimed.current.delete(code)
+        scanFeedback('error')
         pushToast({
           title: `${known.name} cannot be added`,
           body: itemStatusLine(known),
@@ -96,6 +106,7 @@ export function CheckoutDialog({
         return
       }
       setCart((prev) => (prev.some((c) => c.id === known.id) ? prev : [...prev, known]))
+      scanFeedback('added')
       return
     }
 
@@ -114,11 +125,15 @@ export function CheckoutDialog({
     try {
       const item = await lookupItemByCode(code)
       if (!item) {
+        claimed.current.delete(code)
+        scanFeedback('error')
         setCart((prev) => prev.filter((c) => c.id !== placeholder.id))
         pushToast({ title: `No item with code ${code}`, variant: 'error' })
         return
       }
       if (item.kind === 'assigned') {
+        claimed.current.delete(code)
+        scanFeedback('error')
         setCart((prev) => prev.filter((c) => c.id !== placeholder.id))
         pushToast({
           title: `${item.name} is an assigned device`,
@@ -128,6 +143,8 @@ export function CheckoutDialog({
         return
       }
       if (item.status !== 'available') {
+        claimed.current.delete(code)
+        scanFeedback('error')
         setCart((prev) => prev.filter((c) => c.id !== placeholder.id))
         pushToast({
           title: `${item.name} cannot be added`,
@@ -141,7 +158,10 @@ export function CheckoutDialog({
           ? prev.filter((c) => c.id !== placeholder.id)
           : prev.map((c) => (c.id === placeholder.id ? item : c))
       )
+      scanFeedback('added')
     } catch (err) {
+      claimed.current.delete(code)
+      scanFeedback('error')
       setCart((prev) => prev.filter((c) => c.id !== placeholder.id))
       pushToast({
         title: err instanceof Error ? err.message : 'Lookup failed',

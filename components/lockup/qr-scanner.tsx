@@ -79,7 +79,9 @@ export function QrScanner({
             if (code) {
               const now = Date.now()
               const last = lastSeen.current.get(code) ?? 0
-              if (now - last > 3000) {
+              // Long enough that holding the camera over one sticker does not
+              // keep re-reporting it; the consumer also refuses repeats.
+              if (now - last > 6000) {
                 lastSeen.current.set(code, now)
                 onCodeRef.current(code)
               }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
@@ -39,6 +39,7 @@ import type { Tables } from '@/lib/supabase/database.types'
 import { cn } from '@/lib/utils'
 import { CategoryIcon, CodeChip, defaultDueLocal, duePresets, fmtDayTime } from './item-bits'
 import { QrScanner } from './qr-scanner'
+import { scanFeedback, type ScanOutcome } from '@/lib/lockup/scan-feedback'
 
 /**
  * The scan station: one entry point for taking gear out and bringing it back.
@@ -192,6 +193,66 @@ function TakeRun({
   const all = [ctx.scanned, ...offered, ...extra]
   const takeable = all.filter((r) => !r.blocked_reason)
 
+  // Codes already added or still resolving. A ref, not state, because the
+  // scanner can fire again while resolveScan is still awaiting: reading a
+  // rendered list there is stale and lets the same sticker through twice.
+  const claimed = useRef<Set<string>>(new Set(all.map((r) => r.code)))
+  const [adding, setAdding] = useState(false)
+  const [flash, setFlash] = useState<{ text: string; outcome: ScanOutcome } | null>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const listEndRef = useRef<HTMLDivElement | null>(null)
+  const [justAdded, setJustAdded] = useState<string | null>(null)
+
+  function signal(outcome: ScanOutcome, text: string) {
+    scanFeedback(outcome)
+    setFlash({ text, outcome })
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(null), 2200)
+  }
+
+  // Keep the newest scan in view: past four items the list scrolls, and the
+  // person is holding a camera, not scrolling a list.
+  useEffect(() => {
+    if (extra.length > 0) listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [extra.length])
+
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current) }, [])
+
+  async function addScanned(code: string) {
+    if (claimed.current.has(code)) {
+      signal('duplicate', 'Already in the list')
+      return
+    }
+    claimed.current.add(code) // claim before awaiting, so a repeat scan loses
+    setAdding(true)
+    try {
+      const res = await resolveScan(code)
+      if (res.kind === 'checkout' || res.kind === 'pickup') {
+        setExtra((e) => [...e, res.scanned])
+        setPicked((p) => [...p, res.scanned.item_id])
+        setJustAdded(res.scanned.item_id)
+        signal('added', `Added ${res.scanned.name}`)
+      } else {
+        claimed.current.delete(code) // let them try again after fixing it
+        const text =
+          res.kind === 'not_found'
+            ? `No item with code ${code}`
+            : res.kind === 'unavailable'
+              ? `${res.scanned.name}: ${res.detail}`
+              : 'That one is already with you.'
+        signal('error', text)
+        pushToast({ title: text, variant: 'error' })
+      }
+    } catch (err) {
+      claimed.current.delete(code)
+      const text = err instanceof Error ? err.message : 'Could not read that code'
+      signal('error', text)
+      pushToast({ title: text, variant: 'error' })
+    } finally {
+      setAdding(false)
+    }
+  }
+
   async function submit(confirm: boolean) {
     const ids = picked.filter((id) => takeable.some((r) => r.item_id === id))
     if (ids.length === 0) return
@@ -240,6 +301,29 @@ function TakeRun({
         </DialogDescription>
       </DialogHeader>
 
+      {flash && (
+        <div
+          className={cn(
+            'flex items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] font-medium',
+            flash.outcome === 'added'
+              ? 'bg-emerald-50 text-emerald-800'
+              : flash.outcome === 'duplicate'
+                ? 'bg-amber-50 text-amber-800'
+                : 'bg-rose-50 text-rose-800'
+          )}
+        >
+          {flash.outcome === 'added' ? (
+            <Check className="h-4 w-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+          )}
+          <span className="min-w-0 truncate">{flash.text}</span>
+          <span className="ml-auto shrink-0 text-[11.5px] opacity-70">
+            {picked.length} picked
+          </span>
+        </div>
+      )}
+
       <ul className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
         {all.map((row) => {
           const isScanned = row.item_id === ctx.scanned.item_id
@@ -259,6 +343,7 @@ function TakeRun({
                 }
                 className={cn(
                   'flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors',
+                  justAdded === row.item_id && 'ring-2 ring-emerald-400',
                   blocked
                     ? 'cursor-not-allowed border-border bg-muted/40 opacity-60'
                     : on
@@ -293,30 +378,17 @@ function TakeRun({
             </li>
           )
         })}
+        <div ref={listEndRef} />
       </ul>
 
       {scanMore ? (
         <div className="space-y-2">
-          <QrScanner
-            onCode={async (code) => {
-              if (all.some((r) => r.code === code)) return
-              const res = await resolveScan(code)
-              if (res.kind === 'checkout' || res.kind === 'pickup') {
-                setExtra((e) => [...e, res.scanned])
-                setPicked((p) => [...p, res.scanned.item_id])
-              } else {
-                pushToast({
-                  title:
-                    res.kind === 'not_found'
-                      ? `No item with code ${code}`
-                      : res.kind === 'unavailable'
-                        ? `${res.scanned.name}: ${res.detail}`
-                        : 'That one is already with you.',
-                  variant: 'error',
-                })
-              }
-            }}
-          />
+          <QrScanner onCode={addScanned} paused={adding} />
+          {adding && (
+            <div className="flex items-center justify-center gap-2 rounded-lg bg-muted py-2 text-[12.5px] text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Looking that one up...
+            </div>
+          )}
           <Button variant="ghost" size="sm" className="w-full" onClick={() => setScanMore(false)}>
             Done scanning
           </Button>
