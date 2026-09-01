@@ -2295,6 +2295,61 @@ export async function updateItem(input: { itemId: string } & Partial<ItemFields>
 }
 
 /** Retire / mark lost / bring back to available. Closes any open checkout. */
+/**
+ * Permanently remove an item. This is for mistakes: a duplicate row, a bad AI
+ * extraction, something added twice. Gear that genuinely left service should be
+ * retired instead, which keeps its history readable.
+ *
+ * Every equipment_* table references items with ON DELETE CASCADE, so this also
+ * discards the item's checkouts, reservations, repairs, issues, purchase record
+ * and kit membership. The audit row is written first and outlives the item, so
+ * the deletion itself stays traceable.
+ */
+export async function deleteItem(itemId: string): Promise<void> {
+  const user = await requireCapability('manage_equipment')
+  const admin = createAdminClient()
+  const item = await getItemOrThrow(admin, itemId)
+
+  // Someone is physically holding it: sort the custody out before erasing it.
+  if (item.status === 'checked_out') {
+    throw new ActionError(
+      `${itemLabel(item)} is still checked out. Check it back in first, then delete it.`
+    )
+  }
+  if (item.current_holder_id) {
+    throw new ActionError(
+      `${itemLabel(item)} is still with someone. Hand it back first, then delete it.`
+    )
+  }
+
+  await writeAudit(
+    user.id,
+    'equipment.item_delete',
+    'equipment_item',
+    item.id,
+    { before: { name: item.name, code: item.code, category: item.category } },
+    `${user.full_name} permanently deleted ${itemLabel(item)}`
+  )
+
+  const { error } = await admin.from('equipment_items').delete().eq('id', item.id)
+  if (error) throw new ActionError(error.message)
+
+  // Best effort: drop the photo too, so the bucket does not collect orphans.
+  if (item.photo_url) {
+    const marker = '/equipment-photos/'
+    const at = item.photo_url.indexOf(marker)
+    if (at !== -1) {
+      const path = decodeURIComponent(item.photo_url.slice(at + marker.length))
+      await admin.storage
+        .from('equipment-photos')
+        .remove([path])
+        .catch(() => undefined)
+    }
+  }
+
+  await revalidateHR()
+}
+
 export async function setItemStatus(input: {
   itemId: string
   status: 'available' | 'retired' | 'lost'

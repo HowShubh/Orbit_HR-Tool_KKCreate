@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Boxes,
   ChevronDown,
+  Loader2,
   Pencil,
   Plus,
   QrCode,
@@ -16,6 +17,13 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,7 +36,7 @@ import { useStore } from '@/lib/store'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { EquipmentItemRow, KitRow, TechConsoleData } from '@/lib/queries/lockup'
 import { STATUS_LABELS } from '@/lib/lockup/constants'
-import { deleteKit, forceCheckin, setItemStatus } from '@/lib/actions/lockup'
+import { deleteItem, deleteKit, forceCheckin, setItemStatus } from '@/lib/actions/lockup'
 import { CategoryIcon, CodeChip, StatusBadge, itemStatusLine } from '../item-bits'
 import { ItemDialog } from './item-dialog'
 import { ImportDialog } from './import-dialog'
@@ -58,6 +66,8 @@ export function InventoryTable({
   const [importing, setImporting] = useState(false)
   const [labels, setLabels] = useState(false)
   const [repairItem, setRepairItem] = useState<EquipmentItemRow | null>(null)
+  const [deleting, setDeleting] = useState<EquipmentItemRow | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [kitDialog, setKitDialog] = useState<{ open: boolean; kit: KitRow | null }>({
     open: false,
     kit: null,
@@ -97,6 +107,20 @@ export function InventoryTable({
       router.refresh()
     } catch (err) {
       pushToast({ title: err instanceof Error ? err.message : 'Failed', variant: 'error' })
+    }
+  }
+
+  async function doDelete(item: EquipmentItemRow) {
+    setDeleteBusy(true)
+    try {
+      await deleteItem(item.id)
+      pushToast({ title: `${item.name} deleted`, variant: 'success' })
+      setDeleting(null)
+      router.refresh()
+    } catch (err) {
+      pushToast({ title: err instanceof Error ? err.message : 'Failed', variant: 'error' })
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -299,6 +323,13 @@ export function InventoryTable({
                             Lost
                           </DropdownMenuItem>
                         )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-rose-600"
+                          onClick={() => setDeleting(item)}
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete permanently
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                     <Button
@@ -341,6 +372,51 @@ export function InventoryTable({
           locations={locations}
         />
       )}
+      <Dialog open={Boolean(deleting)} onOpenChange={(o) => !deleteBusy && !o && setDeleting(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete {deleting?.name}?</DialogTitle>
+            <DialogDescription>
+              This cannot be undone. Its whole history goes with it: past checkouts, reservations,
+              repairs, reported issues and purchase details.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-800">
+            Deleting is for mistakes, like a duplicate row or a bad import. If this is real gear
+            that left service, close this and mark it <strong>Retired</strong> instead: it keeps
+            the history and stops it being booked.
+          </div>
+
+          {deleting?.code && (
+            <p className="text-[12.5px] text-muted-foreground">
+              Its QR code <span className="font-mono font-semibold">{deleting.code}</span> stops
+              working, so bin any printed sticker.
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={deleteBusy}
+              onClick={() => setDeleting(null)}
+            >
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={deleteBusy}
+              onClick={() => deleting && doDelete(deleting)}
+            >
+              {deleteBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete for good
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ImportDialog open={importing} onOpenChange={setImporting} />
       <KitDialog
         open={kitDialog.open}
