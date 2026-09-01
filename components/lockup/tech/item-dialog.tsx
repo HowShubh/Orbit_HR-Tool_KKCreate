@@ -76,6 +76,10 @@ export function ItemDialog({
   const [purchaseNotes, setPurchaseNotes] = useState(privateData?.purchase_notes ?? '')
   const [busy, setBusy] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  // While creating there is no item id to attach a photo to yet, so the picked
+  // file waits here and is uploaded right after the item is created.
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null)
 
   async function submit() {
     setBusy(true)
@@ -97,7 +101,21 @@ export function ItemDialog({
         await updateItem({ itemId: item.id, ...fields })
         pushToast({ title: `${name} updated`, variant: 'success' })
       } else {
-        await createItem({ ...fields, kind: effectiveKind })
+        const newItemId = await createItem({ ...fields, kind: effectiveKind })
+        if (pendingPhoto) {
+          try {
+            const photoData = new FormData()
+            photoData.set('file', pendingPhoto)
+            await uploadItemPhoto(newItemId, photoData)
+          } catch (photoErr) {
+            // The item is already saved; a failed photo must not lose it.
+            pushToast({
+              title: 'Item saved, but the photo did not upload',
+              body: photoErr instanceof Error ? photoErr.message : undefined,
+              variant: 'error',
+            })
+          }
+        }
         pushToast({
           title: `${name} added`,
           body: 'Print its QR label from the Labels button.',
@@ -114,7 +132,16 @@ export function ItemDialog({
   }
 
   async function onPhotoPicked(file: File | undefined) {
-    if (!file || !item) return
+    if (!file) return
+    if (!item) {
+      // Creating: remember it and show a local preview until save.
+      setPendingPhoto(file)
+      setPendingPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return URL.createObjectURL(file)
+      })
+      return
+    }
     setUploadingPhoto(true)
     try {
       const formData = new FormData()
@@ -142,9 +169,9 @@ export function ItemDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          {item && (
+          {(
             <div className="flex items-center gap-3">
-              <CategoryIcon category={category} photoUrl={item.photo_url} />
+              <CategoryIcon category={category} photoUrl={item ? item.photo_url : pendingPreview} />
               <input
                 ref={fileRef}
                 type="file"
@@ -164,7 +191,7 @@ export function ItemDialog({
                 ) : (
                   <ImagePlus className="h-4 w-4" />
                 )}
-                {item.photo_url ? 'Replace photo' : 'Add photo'}
+                {(item ? item.photo_url : pendingPreview) ? 'Replace photo' : 'Add photo'}
               </Button>
             </div>
           )}
