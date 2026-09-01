@@ -296,11 +296,34 @@ export type TechConsoleData = {
 
 type Admin = ReturnType<typeof createAdminClient>
 
+/**
+ * Every user's display name, fetched at most once per request. nameMap is
+ * called from roughly twenty places in a single Lockup render, and each call
+ * used to be its own round trip to Supabase (~300ms each, and they stack up
+ * sequentially inside query functions). The users table is small, so fetching
+ * it whole once and resolving names in memory is far cheaper than asking for
+ * subsets over and over.
+ */
+const allUsersById = cache(
+  async (): Promise<Map<string, Pick<Tables<'users'>, 'id' | 'full_name' | 'email' | 'slack_user_id'>>> => {
+    const adminClient = createAdminClient()
+    const { data } = await adminClient.from('users').select('id, full_name, email, slack_user_id')
+    return new Map((data ?? []).map((u) => [u.id, u]))
+  }
+)
+
+/** Names for a set of user ids. Reads from the per-request cache above, so
+ *  only the first caller in a render pays for the fetch. */
 async function nameMap(adminClient: Admin, ids: string[]): Promise<Map<string, string>> {
   const unique = Array.from(new Set(ids.filter(Boolean)))
   if (unique.length === 0) return new Map()
-  const { data } = await adminClient.from('users').select('id, full_name').in('id', unique)
-  return new Map((data ?? []).map((u) => [u.id, u.full_name]))
+  const all = await allUsersById()
+  const out = new Map<string, string>()
+  for (const id of unique) {
+    const user = all.get(id)
+    if (user) out.set(id, user.full_name)
+  }
+  return out
 }
 
 // The next four helpers back several query functions that often run within the
@@ -313,6 +336,16 @@ const locationMap = cache(async (): Promise<Map<string, string>> => {
   const adminClient = createAdminClient()
   const { data } = await adminClient.from('equipment_locations').select('id, label')
   return new Map((data ?? []).map((l) => [l.id, l.label]))
+})
+
+/** Every equipment row keyed by id, fetched once per request. Several query
+ *  functions each needed "the items behind these ids" in the same render and
+ *  were issuing their own subset query for it; the table is small, so one
+ *  shared fetch replaces a round trip per caller. */
+const rawItemsById = cache(async (): Promise<Map<string, Tables<'equipment_items'>>> => {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_items').select('*')
+  return new Map((data ?? []).map((i) => [i.id, i]))
 })
 
 const studioMap = cache(async (): Promise<Map<string, string>> => {
@@ -593,14 +626,17 @@ async function enrichItems(
 // Public queries
 // ============================================================
 
-export async function listEquipment(): Promise<EquipmentItemRow[]> {
+/** The full enriched inventory. Cached per request: the Lockup page, the Tech
+ *  Console, availability lookups and scan resolution all want the same list in
+ *  one render, and re-running it means refetching items plus every enrichment. */
+export const listEquipment = cache(async (): Promise<EquipmentItemRow[]> => {
   const adminClient = createAdminClient()
   const { data: items } = await adminClient
     .from('equipment_items')
     .select('*')
     .order('name')
   return enrichItems(adminClient, items ?? [])
-}
+})
 
 export async function getItemByCode(code: string): Promise<EquipmentItemRow | null> {
   const adminClient = createAdminClient()
@@ -816,9 +852,7 @@ export async function getMyReservations(userId: string): Promise<MyReservationRo
   const reservations = rows ?? []
   if (reservations.length === 0) return []
 
-  const itemIds = [...new Set(reservations.map((r) => r.item_id))]
-  const { data: itemRows } = await adminClient.from('equipment_items').select('*').in('id', itemIds)
-  const itemById = new Map((itemRows ?? []).map((i) => [i.id, i]))
+  const itemById = await rawItemsById()
 
   const shootIds = [
     ...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[]),
@@ -870,9 +904,7 @@ export async function getConsoleHolds(): Promise<ConsoleHoldRow[]> {
   const reservations = rows ?? []
   if (reservations.length === 0) return []
 
-  const itemIds = [...new Set(reservations.map((r) => r.item_id))]
-  const { data: itemRows } = await adminClient.from('equipment_items').select('*').in('id', itemIds)
-  const itemById = new Map((itemRows ?? []).map((i) => [i.id, i]))
+  const itemById = await rawItemsById()
 
   const shootIds = [...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[])]
   const shootNames = new Map<string, string>()
@@ -938,17 +970,17 @@ async function buildShootReservations(
   const list = reservations ?? []
   if (list.length === 0) return []
 
-  const itemIds = list.map((r) => r.item_id)
-  const [{ data: items }, reservationsByItem, checkouts, repairs] = await Promise.all([
-    adminClient.from('equipment_items').select('*').in('id', itemIds),
+  const [itemMap, reservationsByItem, checkouts, repairs] = await Promise.all([
+    rawItemsById(),
     activeReservationsByItem(),
     openCheckoutsByItem(),
     openRepairsByItem(),
   ])
-  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
   const names = await nameMap(adminClient, [
     ...list.map((r) => r.reserved_by),
-    ...(items ?? []).map((i) => i.current_holder_id).filter(Boolean) as string[],
+    ...(list
+      .map((r) => itemMap.get(r.item_id)?.current_holder_id)
+      .filter(Boolean) as string[]),
   ])
 
   return list.flatMap((r) => {
@@ -1033,11 +1065,7 @@ export async function listShoots(): Promise<ShootSummary[]> {
     ])
   const reservations = allReservations ?? []
 
-  const itemIds = Array.from(new Set(reservations.map((r) => r.item_id)))
-  const { data: items } = itemIds.length
-    ? await adminClient.from('equipment_items').select('*').in('id', itemIds)
-    : { data: [] as Tables<'equipment_items'>[] }
-  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+  const itemMap = await rawItemsById()
 
   return list.map((shoot) => {
     const shootReservations = reservations.filter((r) => r.shoot_id === shoot.id)
@@ -1311,21 +1339,58 @@ export async function getTechConsoleData(): Promise<TechConsoleData> {
   const adminClient = createAdminClient()
   const now = new Date()
 
-  const [items, { all: openCheckouts }, { data: openRepairs }, { data: openIssues }] =
-    await Promise.all([
-      listEquipment(),
-      openCheckoutsByItem(),
-      adminClient
-        .from('equipment_repairs')
-        .select('*')
-        .order('sent_at', { ascending: false })
-        .limit(50),
-      adminClient
-        .from('equipment_issues')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50),
-    ])
+  // Every fetch below is independent of the others, so they all go out at once.
+  // They used to run in six sequential waves, and at roughly 300ms per round
+  // trip to Supabase that dominated how long this console took to appear.
+  const [
+    items,
+    { all: openCheckouts },
+    { data: openRepairs },
+    { data: openIssues },
+    { data: recentCheckouts },
+    { data: freshRes },
+    { data: endedRes },
+    { data: locations },
+    { data: studioRows },
+    { data: upcomingBlocks },
+    { data: privateRows },
+  ] = await Promise.all([
+    listEquipment(),
+    openCheckoutsByItem(),
+    adminClient
+      .from('equipment_repairs')
+      .select('*')
+      .order('sent_at', { ascending: false })
+      .limit(50),
+    adminClient
+      .from('equipment_issues')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50),
+    adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .order('checked_out_at', { ascending: false })
+      .limit(30),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(40),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .not('resolved_at', 'is', null)
+      .order('resolved_at', { ascending: false })
+      .limit(40),
+    adminClient.from('equipment_locations').select('*').order('label'),
+    adminClient.from('equipment_studios').select('*').order('name'),
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('studio_id')
+      .gte('ends_at', new Date().toISOString()),
+    adminClient.from('equipment_private').select('*'),
+  ])
 
   const itemById = new Map(items.map((i) => [i.id, i]))
   const repairList = openRepairs ?? []
@@ -1337,11 +1402,6 @@ export async function getTechConsoleData(): Promise<TechConsoleData> {
   ])
 
   // Recent activity feed (last 25 events across checkouts, repairs, issues)
-  const { data: recentCheckouts } = await adminClient
-    .from('equipment_checkouts')
-    .select('*')
-    .order('checked_out_at', { ascending: false })
-    .limit(30)
   const activityNames = await nameMap(
     adminClient,
     (recentCheckouts ?? []).map((c) => c.holder_id)
@@ -1395,19 +1455,6 @@ export async function getTechConsoleData(): Promise<TechConsoleData> {
   // Reservation lifecycle. Two passes so a hold created long ago but cancelled
   // today still shows its recent ending. Pick-ups are left out: the checkout
   // event above already represents them.
-  const [{ data: freshRes }, { data: endedRes }] = await Promise.all([
-    adminClient
-      .from('equipment_reservations')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(40),
-    adminClient
-      .from('equipment_reservations')
-      .select('*')
-      .not('resolved_at', 'is', null)
-      .order('resolved_at', { ascending: false })
-      .limit(40),
-  ])
   const resById = new Map<string, Tables<'equipment_reservations'>>()
   for (const r of [...(freshRes ?? []), ...(endedRes ?? [])]) resById.set(r.id, r)
   const resList = [...resById.values()]
@@ -1436,30 +1483,18 @@ export async function getTechConsoleData(): Promise<TechConsoleData> {
   activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
   // Locations with item counts
-  const { data: locations } = await adminClient
-    .from('equipment_locations')
-    .select('*')
-    .order('label')
   const locationRows = (locations ?? []).map((l) => ({
     ...l,
     item_count: items.filter((i) => i.home_location_id === l.id).length,
   }))
 
   // Studios with upcoming booking counts
-  const [{ data: studioRows }, { data: upcomingBlocks }] = await Promise.all([
-    adminClient.from('equipment_studios').select('*').order('name'),
-    adminClient
-      .from('equipment_studio_blocks')
-      .select('studio_id')
-      .gte('ends_at', new Date().toISOString()),
-  ])
   const studios = (studioRows ?? []).map((s) => ({
     ...s,
     upcoming_blocks: (upcomingBlocks ?? []).filter((b) => b.studio_id === s.id).length,
   }))
 
   // Purchase data for the console (page is capability-gated)
-  const { data: privateRows } = await adminClient.from('equipment_private').select('*')
   const privateByItem: Record<string, Tables<'equipment_private'>> = {}
   for (const p of privateRows ?? []) privateByItem[p.item_id] = p
 
@@ -1711,41 +1746,46 @@ export async function getItemProfile(code: string): Promise<ItemProfile | null> 
     getItemHistory(item.id, 40),
   ])
 
-  // Holder + the shoot their checkout belongs to
+  // The holder, their shoot, this item's kits and every shoot behind a
+  // reservation used to be four round trips in series. They only depend on the
+  // batch above, not on each other, so they go together in one wave. The
+  // holder comes from the cached user map, costing nothing extra.
+  const kitIds = Array.from(new Set((kitRows ?? []).map((k) => k.kit_id)))
+  const shootIds = Array.from(
+    new Set([
+      ...(reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : [])),
+      ...(openCheckout?.shoot_id ? [openCheckout.shoot_id] : []),
+    ])
+  )
+
+  const [users, { data: kits }, { data: shoots }] = await Promise.all([
+    allUsersById(),
+    kitIds.length
+      ? adminClient.from('equipment_kits').select('id, name').in('id', kitIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    shootIds.length
+      ? adminClient
+          .from('equipment_shoots')
+          .select('id, name, location, starts_at, ends_at, status, owner_id')
+          .in('id', shootIds)
+      : Promise.resolve({
+          data: [] as Pick<
+            Tables<'equipment_shoots'>,
+            'id' | 'name' | 'location' | 'starts_at' | 'ends_at' | 'status' | 'owner_id'
+          >[],
+        }),
+  ])
+
+  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
+
   let holder: ItemProfile['holder'] = null
   let holderShoot: ItemProfile['holder_shoot'] = null
   if (openCheckout) {
-    const { data: person } = await adminClient
-      .from('users')
-      .select('id, full_name, email, slack_user_id')
-      .eq('id', openCheckout.holder_id)
-      .maybeSingle()
-    if (person) holder = person
-    if (openCheckout.shoot_id) {
-      const { data: shoot } = await adminClient
-        .from('equipment_shoots')
-        .select('id, name, location')
-        .eq('id', openCheckout.shoot_id)
-        .maybeSingle()
-      if (shoot) holderShoot = shoot
-    }
+    holder = users.get(openCheckout.holder_id) ?? null
+    const hs = openCheckout.shoot_id ? shootById.get(openCheckout.shoot_id) : undefined
+    if (hs) holderShoot = { id: hs.id, name: hs.name, location: hs.location }
   }
 
-  // Kits this item belongs to
-  const kitIds = Array.from(new Set((kitRows ?? []).map((k) => k.kit_id)))
-  const { data: kits } = kitIds.length
-    ? await adminClient.from('equipment_kits').select('id, name').in('id', kitIds)
-    : { data: [] as { id: string; name: string }[] }
-
-  // Upcoming: reservations (with their shoot window), the open repair, the due date
-  const shootIds = Array.from(new Set((reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
-  const { data: shoots } = shootIds.length
-    ? await adminClient
-        .from('equipment_shoots')
-        .select('id, name, starts_at, ends_at, status, owner_id')
-        .in('id', shootIds)
-    : { data: [] as Pick<Tables<'equipment_shoots'>, 'id' | 'name' | 'starts_at' | 'ends_at' | 'status' | 'owner_id'>[] }
-  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
   const ownerNames = await nameMap(adminClient, [
     ...(shoots ?? []).map((s) => s.owner_id),
     ...(reservations ?? []).map((r) => r.reserved_by),
