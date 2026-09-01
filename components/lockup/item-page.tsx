@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { ItemProfile } from '@/lib/queries/lockup'
 import { CATEGORY_LABELS } from '@/lib/lockup/constants'
+import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/lockup/cart'
 import { cn } from '@/lib/utils'
 import { CategoryIcon, CodeChip, fmtDay, fmtDayTime } from './item-bits'
@@ -41,6 +42,7 @@ export function ItemPage({
   canManageEquipment: boolean
 }) {
   const { item, holder, holder_shoot: holderShoot, kits, history, upcoming, days } = profile
+  const router = useRouter()
   const cart = useCart()
   const [issueOpen, setIssueOpen] = useState(false)
 
@@ -119,10 +121,19 @@ export function ItemPage({
               </Button>
             ) : (
               <>
-                <Button className="w-full" variant="secondary" asChild>
-                  <Link href="/lockup?tab=shoots">
-                    <Calendar className="h-4 w-4" /> Book it for later
-                  </Link>
+                <Button
+                  className="w-full"
+                  variant="secondary"
+                  onClick={() => {
+                    // Put it in the cart and open the reserve panel, rather
+                    // than dropping the person on a list of shoots to work out
+                    // for themselves. Holding unavailable gear is the point
+                    // here: the cart reserves, it never takes.
+                    cart.add(item.id)
+                    router.push('/lockup?cart=1')
+                  }}
+                >
+                  <Calendar className="h-4 w-4" /> Book it for later
                 </Button>
                 <p className="text-center text-[12px] text-muted-foreground">
                   {item.status === 'in_repair'
