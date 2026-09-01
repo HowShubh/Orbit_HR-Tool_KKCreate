@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Boxes,
+  CalendarClock,
   CheckCircle2,
   Clapperboard,
   Clock,
@@ -24,10 +25,12 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useStore } from '@/lib/store'
 import type {
+  ConsoleHoldRow,
   EquipmentItemRow,
   KitRow,
   OverdueGearRow,
   PendingApprovalRow,
+  ShootSummary,
   TechConsoleData,
 } from '@/lib/queries/lockup'
 import {
@@ -45,11 +48,15 @@ import {
 } from '@/lib/actions/lockup'
 import type { LockupSlackSettings } from '@/lib/slack-lockup'
 import { CodeChip, fmtDay, fmtDayTime, fmtShootWindow } from '../item-bits'
+import { DashboardTab } from './dashboard-tab'
 import { InventoryTable } from './inventory-table'
 import { DevicesTable } from './devices-table'
 import { OverdueTable } from './overdue-table'
+import { HoldsTable } from './holds-table'
+import { ShootsTable } from './shoots-table'
 import { KitDialog } from './kit-dialog'
 import { LockupSlackTab } from './slack-tab'
+import { LockupSettingsTab } from './settings-tab'
 
 function StatCard({
   icon: Icon,
@@ -87,6 +94,10 @@ const ACTIVITY_ICONS = {
   repair_back: Wrench,
   issue_open: Flag,
   issue_resolved: Flag,
+  reserved: Clock,
+  reservation_cancelled: Trash2,
+  reservation_expired: Clock,
+  reservation_rejected: AlertTriangle,
 } as const
 
 export function TechConsoleClient({
@@ -96,6 +107,8 @@ export function TechConsoleClient({
   kits,
   approvals,
   overdue,
+  holds,
+  shoots,
   qrBaseUrl,
   slackSettings,
   initialTab,
@@ -106,6 +119,8 @@ export function TechConsoleClient({
   kits: KitRow[]
   approvals: PendingApprovalRow[]
   overdue: OverdueGearRow[]
+  holds: ConsoleHoldRow[]
+  shoots: ShootSummary[]
   qrBaseUrl: string | null
   slackSettings: LockupSlackSettings
   initialTab?: string
@@ -113,8 +128,11 @@ export function TechConsoleClient({
   const router = useRouter()
   const { pushToast } = useStore()
   const validTabs = [
+    'dashboard',
     'inventory',
     'devices',
+    'shoots',
+    'holds',
     'approvals',
     'overdue',
     'kits',
@@ -122,10 +140,12 @@ export function TechConsoleClient({
     'repairs',
     'issues',
     'locations',
+    'settings',
     'slack',
   ]
+  const liveShootCount = shoots.filter((s) => s.status !== 'done').length
   const [tab, setTab] = useState(
-    initialTab && validTabs.includes(initialTab) ? initialTab : 'inventory'
+    initialTab && validTabs.includes(initialTab) ? initialTab : 'dashboard'
   )
   const pooledItems = items.filter((i) => i.kind !== 'assigned')
   const deviceItems = items.filter((i) => i.kind === 'assigned')
@@ -165,16 +185,50 @@ export function TechConsoleClient({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard icon={Boxes} value={data.stats.items} label="Items" tone="default" />
           <StatCard icon={Clock} value={data.stats.out_now} label="Out now" tone="blue" />
-          <button type="button" onClick={() => setTab('overdue')} className="text-left">
+          <button type="button" onClick={() => setTab('overdue')} className="w-full text-left">
             <StatCard icon={AlertTriangle} value={data.stats.overdue} label="Overdue" tone="red" />
           </button>
           <StatCard icon={Wrench} value={data.stats.in_repair} label="In repair" tone="amber" />
+          <button type="button" onClick={() => setTab('holds')} className="w-full text-left">
+            <StatCard icon={CalendarClock} value={holds.length} label="On hold" tone="blue" />
+          </button>
+          <button type="button" onClick={() => setTab('shoots')} className="w-full text-left">
+            <StatCard icon={Clapperboard} value={liveShootCount} label="Upcoming shoots" tone="default" />
+          </button>
+          <button type="button" onClick={() => setTab('approvals')} className="w-full text-left">
+            <StatCard
+              icon={CheckCircle2}
+              value={approvals.length}
+              label="Pending approvals"
+              tone="amber"
+            />
+          </button>
+          <button type="button" onClick={() => setTab('issues')} className="w-full text-left">
+            <StatCard icon={Flag} value={data.stats.open_issues} label="Open issues" tone="red" />
+          </button>
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex-wrap h-auto">
+            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="inventory">Inventory</TabsTrigger>
             <TabsTrigger value="devices">Devices</TabsTrigger>
+            <TabsTrigger value="shoots" className="gap-1.5">
+              Shoots
+              {liveShootCount > 0 && (
+                <Badge variant="muted" className="px-1.5 py-0 text-[10px]">
+                  {liveShootCount}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="holds" className="gap-1.5">
+              Holds
+              {holds.length > 0 && (
+                <Badge variant="info" className="px-1.5 py-0 text-[10px]">
+                  {holds.length}
+                </Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="approvals" className="gap-1.5">
               Approvals
               {approvals.length > 0 && (
@@ -209,9 +263,15 @@ export function TechConsoleClient({
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="locations">Locations</TabsTrigger>
+            <TabsTrigger value="locations">Places</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
             <TabsTrigger value="slack">Slack</TabsTrigger>
           </TabsList>
+
+          {/* -------- Dashboard (landing: quick-add + recent activity) -------- */}
+          <TabsContent value="dashboard" className="mt-4">
+            <DashboardTab data={data} people={people} onNavigate={setTab} />
+          </TabsContent>
 
           {/* -------- Inventory (pooled gear) -------- */}
           <TabsContent value="inventory" className="mt-4">
@@ -231,6 +291,16 @@ export function TechConsoleClient({
               privateByItem={data.privateByItem}
               people={people}
             />
+          </TabsContent>
+
+          {/* -------- Shoots (oversight, links to detail pages) -------- */}
+          <TabsContent value="shoots" className="mt-4">
+            <ShootsTable shoots={shoots} />
+          </TabsContent>
+
+          {/* -------- Holds (all active + pending reservations) -------- */}
+          <TabsContent value="holds" className="mt-4">
+            <HoldsTable rows={holds} />
           </TabsContent>
 
           {/* -------- Approvals (pending flagged-item requests) -------- */}
@@ -623,8 +693,12 @@ export function TechConsoleClient({
           </TabsContent>
 
           {/* -------- Slack bot controls -------- */}
+          <TabsContent value="settings" className="mt-4">
+            <LockupSettingsTab settings={slackSettings} people={people} />
+          </TabsContent>
+
           <TabsContent value="slack" className="mt-4">
-            <LockupSlackTab settings={slackSettings} people={people} />
+            <LockupSlackTab settings={slackSettings} />
           </TabsContent>
         </Tabs>
       </div>

@@ -35,6 +35,7 @@ The app expects these env vars (no `.env.example` is committed — get values fr
 - `LOCKUP_HOST` — optional; hostname of the standalone Lockup website (same deployment + database). When a request arrives on this host, middleware serves only the Lockup surface and the shell is branded Lockup.
 - `LOCKUP_SLACK_BOT_TOKEN` — optional; the **separate** Lockup Slack bot (`xoxb-…`, distinct from `SLACK_BOT_TOKEN`). All Lockup DMs (overdue, conflicts, repairs) silently no-op without it (`lib/slack-lockup.ts`).
 - `LOCKUP_SLACK_CHANNEL` — optional; public Lockup activity feed channel (off by default).
+- `OPENROUTER_API_KEY` — optional; enables the Tech Console's "Snap & extract" photo-to-inventory flow (gear photos are sent to a vision model via OpenRouter). When unset, that add-method reports it is off; manual and CSV add still work. Model choices live in `AI_EXTRACT_MODELS` (`lib/lockup/constants.ts`).
 
 ## Tech stack
 

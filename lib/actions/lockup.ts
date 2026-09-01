@@ -13,7 +13,7 @@ import {
   resolveSlackUserId,
 } from '@/lib/slack-lockup'
 import { generateItemCode } from '@/lib/lockup/codes'
-import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
+import { AI_EXTRACT_MODELS, EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
 import {
   getAvailabilityForWindow,
   getItemByCode,
@@ -2479,6 +2479,152 @@ export type ImportRow = {
 export type ImportResult = {
   created: number
   errors: { row: number; message: string }[]
+}
+
+// ============================================================
+// AI photo extraction (photos -> draft rows for review)
+// ============================================================
+
+export type ExtractedDraft = {
+  name: string
+  category: string
+  brand_model?: string
+  serial_number?: string
+  quantity?: number
+  notes?: string
+}
+
+type ChatPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
+/** Pull a JSON list of items out of a model's reply, tolerant of code fences
+ *  and prose around it. Categories are snapped to a known key or "other";
+ *  quantities are clamped. Nothing here trusts the model blindly. */
+function parseExtractedDrafts(text: string): ExtractedDraft[] {
+  if (!text) return []
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim()
+  let data: unknown
+  try {
+    data = JSON.parse(cleaned)
+  } catch {
+    const start = cleaned.search(/[[{]/)
+    const end = Math.max(cleaned.lastIndexOf(']'), cleaned.lastIndexOf('}'))
+    if (start === -1 || end <= start) return []
+    try {
+      data = JSON.parse(cleaned.slice(start, end + 1))
+    } catch {
+      return []
+    }
+  }
+  const arr: unknown[] = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { items?: unknown[] })?.items)
+      ? ((data as { items: unknown[] }).items)
+      : []
+  const validCat = new Set(EQUIPMENT_CATEGORIES.map((c) => c.key as string))
+  const out: ExtractedDraft[] = []
+  for (const raw of arr.slice(0, 100)) {
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as Record<string, unknown>
+    const name = String(r.name ?? '').trim()
+    if (!name) continue
+    const cat = String(r.category ?? '').trim().toLowerCase()
+    const qtyNum = Number(r.quantity)
+    const brand = r.brand_model ? String(r.brand_model).trim() : ''
+    const serial = r.serial_number ? String(r.serial_number).trim() : ''
+    const notes = r.notes ? String(r.notes).trim() : ''
+    out.push({
+      name: name.slice(0, 120),
+      category: validCat.has(cat) ? cat : 'other',
+      brand_model: brand ? brand.slice(0, 120) : undefined,
+      serial_number: serial ? serial.slice(0, 80) : undefined,
+      quantity: Number.isFinite(qtyNum) && qtyNum >= 1 && qtyNum <= 99 ? Math.floor(qtyNum) : 1,
+      notes: notes ? notes.slice(0, 300) : undefined,
+    })
+  }
+  return out
+}
+
+/**
+ * Read equipment out of one or more photos into draft rows the tech lead then
+ * reviews and edits before anything is created. Reaches the model through
+ * OpenRouter; stays off (with a clear message) until OPENROUTER_API_KEY is set,
+ * the same way the Slack integrations no-op without their tokens. This only
+ * reads photos, it never writes: creation happens later via importEquipmentCsv.
+ */
+export async function extractEquipmentFromPhotos(input: {
+  images: string[]
+  model: string
+}): Promise<ExtractedDraft[]> {
+  await requireCapability('manage_equipment')
+
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) {
+    throw new ActionError(
+      'Photo extraction is off. Add OPENROUTER_API_KEY to the environment to switch it on.'
+    )
+  }
+  if (!AI_EXTRACT_MODELS.some((m) => m.id === input.model)) {
+    throw new ActionError('Pick a supported AI model.')
+  }
+  const images = (input.images ?? []).filter((s) => typeof s === 'string' && s.startsWith('data:image/'))
+  if (images.length === 0) throw new ActionError('Add at least one photo first.')
+  if (images.length > 8) throw new ActionError('Up to 8 photos at a time.')
+
+  const categoryKeys = EQUIPMENT_CATEGORIES.map((c) => c.key).join(', ')
+  const system =
+    'You catalogue film and photo production gear from photographs for an inventory system. ' +
+    'Identify each DISTINCT piece of equipment visible across the images; group identical units with a quantity. ' +
+    `For every item give: name (short, e.g. "Sony A7S III"); category (exactly one of: ${categoryKeys}); ` +
+    'brand_model (e.g. "Sony ILCE-7SM3", only if visible); serial_number (only if clearly legible, never guessed); ' +
+    'quantity (integer, default 1); notes (visible condition or nothing). ' +
+    'Reply with ONLY a JSON object of the form {"items":[{"name":"","category":"","brand_model":"","serial_number":"","quantity":1,"notes":""}]}. ' +
+    'Use "other" when unsure of the category. Do not invent details you cannot see.'
+
+  const content: ChatPart[] = [
+    { type: 'text', text: 'Catalogue the equipment shown in these photos.' },
+    ...images.map((url): ChatPart => ({ type: 'image_url', image_url: { url } })),
+  ]
+
+  let res: Response
+  try {
+    res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.APP_BASE_URL ?? 'https://orbit.kkcreate.in',
+        'X-Title': 'KK Lockup',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        temperature: 0,
+        max_tokens: 2000,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content },
+        ],
+      }),
+    })
+  } catch {
+    throw new ActionError('Could not reach the AI service. Check the connection and try again.')
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new ActionError(`AI service error (${res.status}). ${detail.slice(0, 180)}`)
+  }
+  const json = (await res.json().catch(() => null)) as
+    | { choices?: { message?: { content?: string } }[] }
+    | null
+  const text = json?.choices?.[0]?.message?.content ?? ''
+  const drafts = parseExtractedDrafts(text)
+  if (drafts.length === 0) {
+    throw new ActionError(
+      'The model could not read any gear from those photos. Try clearer, closer shots.'
+    )
+  }
+  return drafts
 }
 
 export async function importEquipmentCsv(rows: ImportRow[]): Promise<ImportResult> {

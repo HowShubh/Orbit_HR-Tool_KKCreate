@@ -100,6 +100,27 @@ export type MyReservationRow = {
   home_location_label: string | null
 }
 
+/** One active/pending hold, org-wide, for the Tech Console's Holds tab. Like
+ *  MyReservationRow but carries who is holding it and whether it needs approval. */
+export type ConsoleHoldRow = {
+  id: string
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  status: 'active' | 'pending'
+  held_by_id: string
+  held_by_name: string
+  /** Standalone hold window; null/null when it's tied to a shoot (whole shoot). */
+  starts_at: string | null
+  ends_at: string | null
+  shoot_id: string | null
+  shoot_name: string | null
+  home_location_label: string | null
+  requires_approval: boolean
+}
+
 export type ShootConflict = {
   kind: 'in_repair' | 'still_out' | 'double_reserved' | 'unavailable'
   message: string
@@ -233,6 +254,10 @@ export type ActivityEvent = {
     | 'repair_back'
     | 'issue_open'
     | 'issue_resolved'
+    | 'reserved'
+    | 'reservation_cancelled'
+    | 'reservation_expired'
+    | 'reservation_rejected'
   item_id: string
   item_name: string
   item_code: string
@@ -833,6 +858,65 @@ export async function getMyReservations(userId: string): Promise<MyReservationRo
   return out
 }
 
+/** Every active + pending hold in the system, soonest window first. Powers the
+ *  Tech Console's Holds tab: who has set aside what, for when, shoot or not. */
+export async function getConsoleHolds(): Promise<ConsoleHoldRow[]> {
+  const adminClient = createAdminClient()
+  const { data: rows } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+    .order('starts_at', { ascending: true, nullsFirst: false })
+  const reservations = rows ?? []
+  if (reservations.length === 0) return []
+
+  const itemIds = [...new Set(reservations.map((r) => r.item_id))]
+  const { data: itemRows } = await adminClient.from('equipment_items').select('*').in('id', itemIds)
+  const itemById = new Map((itemRows ?? []).map((i) => [i.id, i]))
+
+  const shootIds = [...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[])]
+  const shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    for (const sh of shoots ?? []) shootNames.set(sh.id, sh.name)
+  }
+
+  const holderNames = await nameMap(
+    adminClient,
+    reservations.map((r) => r.reserved_by)
+  )
+  const locations = await locationMap()
+
+  const out: ConsoleHoldRow[] = []
+  for (const r of reservations) {
+    const item = itemById.get(r.item_id)
+    if (!item) continue
+    out.push({
+      id: r.id,
+      item_id: item.id,
+      item_code: item.code,
+      item_name: item.name,
+      category: item.category,
+      photo_url: item.photo_url,
+      status: r.status as 'active' | 'pending',
+      held_by_id: r.reserved_by,
+      held_by_name: holderNames.get(r.reserved_by) ?? 'Someone',
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      shoot_id: r.shoot_id,
+      shoot_name: r.shoot_id ? shootNames.get(r.shoot_id) ?? null : null,
+      home_location_label: item.home_location_id
+        ? locations.get(item.home_location_id) ?? null
+        : null,
+      requires_approval: item.requires_approval,
+    })
+  }
+  return out
+}
+
 // ============================================================
 // Shoots
 // ============================================================
@@ -1307,6 +1391,48 @@ export async function getTechConsoleData(): Promise<TechConsoleData> {
     pushActivity(i.created_at, 'issue_open', i.item_id, actor, `reported: ${i.note}`)
     if (i.resolved_at) pushActivity(i.resolved_at, 'issue_resolved', i.item_id, actor, 'issue resolved')
   }
+
+  // Reservation lifecycle. Two passes so a hold created long ago but cancelled
+  // today still shows its recent ending. Pick-ups are left out: the checkout
+  // event above already represents them.
+  const [{ data: freshRes }, { data: endedRes }] = await Promise.all([
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(40),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .not('resolved_at', 'is', null)
+      .order('resolved_at', { ascending: false })
+      .limit(40),
+  ])
+  const resById = new Map<string, Tables<'equipment_reservations'>>()
+  for (const r of [...(freshRes ?? []), ...(endedRes ?? [])]) resById.set(r.id, r)
+  const resList = [...resById.values()]
+  const resNames = await nameMap(
+    adminClient,
+    resList.map((r) => r.reserved_by)
+  )
+  for (const r of resList) {
+    const actor = resNames.get(r.reserved_by) ?? 'Unknown'
+    pushActivity(
+      r.created_at,
+      'reserved',
+      r.item_id,
+      actor,
+      r.status === 'pending' ? 'asked to reserve the item' : 'reserved the item'
+    )
+    if (r.resolved_at && r.status === 'cancelled') {
+      pushActivity(r.resolved_at, 'reservation_cancelled', r.item_id, actor, 'cancelled the hold')
+    } else if (r.resolved_at && r.status === 'expired') {
+      pushActivity(r.resolved_at, 'reservation_expired', r.item_id, actor, 'hold expired unpicked')
+    } else if (r.resolved_at && r.status === 'rejected') {
+      pushActivity(r.resolved_at, 'reservation_rejected', r.item_id, actor, 'reservation was declined')
+    }
+  }
+
   activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
   // Locations with item counts

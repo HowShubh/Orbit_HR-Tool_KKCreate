@@ -40,3 +40,18 @@ export const SHOOT_STATUS_LABELS: Record<ShootStatus, string> = {
 
 /** The product name. Shown in nav, Slack messages and the standalone site. */
 export const LOCKUP_NAME = 'Lockup'
+
+/**
+ * Vision models offered for photo-to-inventory extraction, reached through
+ * OpenRouter (one OPENROUTER_API_KEY, many providers). Slugs are OpenRouter's
+ * and can be swapped for whatever it currently offers without touching the
+ * flow. The list is shared by the picker UI and the server-side allow-list.
+ */
+export const AI_EXTRACT_MODELS = [
+  { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet · Anthropic' },
+  { id: 'openai/gpt-4o', label: 'GPT-4o · OpenAI' },
+  { id: 'qwen/qwen-2-vl-72b-instruct', label: 'Qwen2-VL 72B · open source' },
+  { id: 'meta-llama/llama-3.2-90b-vision-instruct', label: 'Llama 3.2 90B Vision · open source' },
+] as const
+
+export type AiExtractModelId = (typeof AI_EXTRACT_MODELS)[number]['id']
