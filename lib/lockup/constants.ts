@@ -47,11 +47,14 @@ export const LOCKUP_NAME = 'Lockup'
  * and can be swapped for whatever it currently offers without touching the
  * flow. The list is shared by the picker UI and the server-side allow-list.
  */
+/**
+ * Kept to a single model on purpose: GLM 5.3 Flash reads gear photos reliably
+ * and cheaply, and it was the one that held up in real use. The list stays an
+ * array so another model is a one-line addition, and the picker in the dialog
+ * reappears automatically as soon as there is more than one to choose from.
+ */
 export const AI_EXTRACT_MODELS = [
-  { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet · Anthropic' },
-  { id: 'openai/gpt-4o', label: 'GPT-4o · OpenAI' },
-  { id: 'qwen/qwen-2-vl-72b-instruct', label: 'Qwen2-VL 72B · open source' },
-  { id: 'meta-llama/llama-3.2-90b-vision-instruct', label: 'Llama 3.2 90B Vision · open source' },
+  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash · Z.ai' },
 ] as const
 
 export type AiExtractModelId = (typeof AI_EXTRACT_MODELS)[number]['id']

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, ImagePlus, Loader2, Plus, Sparkles, Trash2, X } from 'lucide-react'
+import { Camera, ImagePlus, Loader2, MapPin, Plus, Sparkles, Trash2, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import {
   type ImportRow,
 } from '@/lib/actions/lockup'
 import { AI_EXTRACT_MODELS, EQUIPMENT_CATEGORIES } from '@/lib/lockup/constants'
+import { cn } from '@/lib/utils'
 import type { Tables } from '@/lib/supabase/database.types'
 
 type ReviewRow = {
@@ -35,12 +36,36 @@ type ReviewRow = {
 const VALID_CATEGORIES = new Set(EQUIPMENT_CATEGORIES.map((c) => c.key as string))
 
 function rowError(r: ReviewRow): string | undefined {
-  if (!r.name.trim()) return 'Name?'
-  if (!VALID_CATEGORIES.has(r.category)) return 'Category?'
-  if (!r.location.trim()) return 'Location?'
-  if (r.quantity < 1 || r.quantity > 99) return 'Qty 1-99'
+  if (!r.name.trim()) return 'Needs a name'
+  if (!VALID_CATEGORIES.has(r.category)) return 'Pick a category'
+  if (!r.location.trim()) return 'Pick a shelf'
+  if (r.quantity < 1 || r.quantity > 99) return 'Qty must be 1 to 99'
   if (r.quantity > 1 && r.serial_number.trim()) return 'Serial needs qty 1'
   return undefined
+}
+
+const inputCls =
+  'h-8 w-full min-w-0 rounded-md border border-input bg-card px-2 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring'
+
+/** A compact labelled cell. The review step used to be one wide table that
+ *  overflowed the dialog; labelling each field lets the rows wrap instead. */
+function Field({
+  label,
+  className,
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={cn('block min-w-0', className)}>
+      <span className="mb-0.5 block text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      {children}
+    </label>
+  )
 }
 
 let seq = 0
@@ -98,6 +123,7 @@ export function SnapExtractDialog({
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [bulkLocation, setBulkLocation] = useState('')
 
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
@@ -108,6 +134,7 @@ export function SnapExtractDialog({
       setRows([])
       setResult(null)
       setBusy(false)
+      setBulkLocation('')
     }
   }
 
@@ -219,7 +246,7 @@ export function SnapExtractDialog({
             {step === 'upload'
               ? 'Photograph the gear, and the model reads it into a list you can fix before saving.'
               : step === 'review'
-                ? 'Check every row. Edit anything that is off, set a location, then create them all.'
+                ? 'Check each item, fix anything that is off, pick a shelf, then create them all.'
                 : 'Done.'}
           </DialogDescription>
         </DialogHeader>
@@ -275,21 +302,30 @@ export function SnapExtractDialog({
             </label>
 
             <div className="space-y-1.5">
-              <label htmlFor="ai-model" className="text-[12.5px] font-medium">
-                Model
-              </label>
-              <select
-                id="ai-model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="h-10 w-full rounded-lg border border-input bg-card px-3 text-[13.5px]"
-              >
-                {AI_EXTRACT_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+              {AI_EXTRACT_MODELS.length > 1 ? (
+                <>
+                  <label htmlFor="ai-model" className="text-[12.5px] font-medium">
+                    Model
+                  </label>
+                  <select
+                    id="ai-model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="h-10 w-full rounded-lg border border-input bg-card px-3 text-[13.5px]"
+                  >
+                    {AI_EXTRACT_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  Read by {AI_EXTRACT_MODELS[0].label}
+                </div>
+              )}
               <p className="text-[11.5px] text-muted-foreground">
                 Runs through OpenRouter. Needs OPENROUTER_API_KEY set, otherwise this stays off.
               </p>
@@ -309,114 +345,149 @@ export function SnapExtractDialog({
 
         {step === 'review' && (
           <div className="space-y-3">
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[720px] text-[12.5px]">
-                <thead className="bg-muted/40 text-left text-muted-foreground">
-                  <tr>
-                    <th className="px-2 py-2 font-medium">Name</th>
-                    <th className="px-2 py-2 font-medium">Category</th>
-                    <th className="px-2 py-2 font-medium">Brand / model</th>
-                    <th className="px-2 py-2 font-medium">Serial</th>
-                    <th className="px-2 py-2 font-medium">Qty</th>
-                    <th className="px-2 py-2 font-medium">Location</th>
-                    <th className="px-2 py-2 font-medium">Notes</th>
-                    <th className="px-2 py-2" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {rows.map((r) => {
-                    const err = rowError(r)
-                    return (
-                      <tr key={r.__id} className={err ? 'bg-rose-50/60' : undefined}>
-                        <td className="px-1.5 py-1">
-                          <input
-                            value={r.name}
-                            onChange={(e) => patch(r.__id, { name: e.target.value })}
-                            className="w-36 rounded-md border border-input bg-card px-2 py-1"
-                          />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <select
-                            value={r.category}
-                            onChange={(e) => patch(r.__id, { category: e.target.value })}
-                            className="w-28 rounded-md border border-input bg-card px-1.5 py-1"
-                          >
-                            {EQUIPMENT_CATEGORIES.map((c) => (
-                              <option key={c.key} value={c.key}>
-                                {c.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <input
-                            value={r.brand_model}
-                            onChange={(e) => patch(r.__id, { brand_model: e.target.value })}
-                            className="w-32 rounded-md border border-input bg-card px-2 py-1"
-                          />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <input
-                            value={r.serial_number}
-                            onChange={(e) => patch(r.__id, { serial_number: e.target.value })}
-                            className="w-24 rounded-md border border-input bg-card px-2 py-1"
-                          />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <input
-                            type="number"
-                            min={1}
-                            max={99}
-                            value={r.quantity}
-                            onChange={(e) => patch(r.__id, { quantity: Number(e.target.value) })}
-                            className="w-14 rounded-md border border-input bg-card px-2 py-1"
-                          />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <select
-                            value={r.location}
-                            onChange={(e) => patch(r.__id, { location: e.target.value })}
-                            className="w-28 rounded-md border border-input bg-card px-1.5 py-1"
-                          >
-                            <option value="">Pick…</option>
-                            {locations.map((l) => (
-                              <option key={l.id} value={l.label}>
-                                {l.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <input
-                            value={r.notes}
-                            onChange={(e) => patch(r.__id, { notes: e.target.value })}
-                            className="w-40 rounded-md border border-input bg-card px-2 py-1"
-                          />
-                        </td>
-                        <td className="px-1.5 py-1">
-                          <button
-                            type="button"
-                            aria-label="Remove row"
-                            onClick={() => setRows((p) => p.filter((x) => x.__id !== r.__id))}
-                            className="text-muted-foreground hover:text-rose-600"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            {/* Location is the usual blocker: every row needs one, and they are
+                nearly always the same shelf, so offer it once for all rows. */}
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="text-[12.5px] font-medium">Shelf for all items</span>
+              <select
+                value={bulkLocation}
+                onChange={(e) => {
+                  setBulkLocation(e.target.value)
+                  if (e.target.value) {
+                    setRows((prev) => prev.map((r) => ({ ...r, location: e.target.value })))
+                  }
+                }}
+                className="h-8 rounded-lg border border-input bg-card px-2 text-[12.5px]"
+              >
+                <option value="">Choose…</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.label}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11.5px] text-muted-foreground">
+                Sets every row; change any below.
+              </span>
             </div>
+
+            <ul className="space-y-2">
+              {rows.map((r, idx) => {
+                const err = rowError(r)
+                return (
+                  <li
+                    key={r.__id}
+                    className={cn(
+                      'rounded-xl border p-3',
+                      err ? 'border-amber-300 bg-amber-50/40' : 'border-border bg-card'
+                    )}
+                  >
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
+                        {idx + 1}
+                      </span>
+                      <span className="truncate text-[13px] font-semibold">
+                        {r.name.trim() || 'Unnamed item'}
+                      </span>
+                      {err ? (
+                        <span className="ml-auto shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                          {err}
+                        </span>
+                      ) : (
+                        <span className="ml-auto shrink-0 text-[11px] font-medium text-emerald-600">
+                          Ready
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Remove row ${idx + 1}`}
+                        onClick={() => setRows((p) => p.filter((x) => x.__id !== r.__id))}
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-rose-600"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+                      <Field label="Name" className="col-span-2">
+                        <input
+                          value={r.name}
+                          onChange={(e) => patch(r.__id, { name: e.target.value })}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="Category">
+                        <select
+                          value={r.category}
+                          onChange={(e) => patch(r.__id, { category: e.target.value })}
+                          className={inputCls}
+                        >
+                          {EQUIPMENT_CATEGORIES.map((c) => (
+                            <option key={c.key} value={c.key}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Brand / model">
+                        <input
+                          value={r.brand_model}
+                          onChange={(e) => patch(r.__id, { brand_model: e.target.value })}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="Serial">
+                        <input
+                          value={r.serial_number}
+                          onChange={(e) => patch(r.__id, { serial_number: e.target.value })}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="Qty">
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          value={r.quantity}
+                          onChange={(e) => patch(r.__id, { quantity: Number(e.target.value) })}
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="Shelf" className="col-span-2 sm:col-span-2">
+                        <select
+                          value={r.location}
+                          onChange={(e) => patch(r.__id, { location: e.target.value })}
+                          className={cn(inputCls, !r.location && 'border-amber-400')}
+                        >
+                          <option value="">Pick a shelf…</option>
+                          {locations.map((l) => (
+                            <option key={l.id} value={l.label}>
+                              {l.label}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Notes" className="col-span-2 sm:col-span-4">
+                        <input
+                          value={r.notes}
+                          onChange={(e) => patch(r.__id, { notes: e.target.value })}
+                          className={inputCls}
+                        />
+                      </Field>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" variant="outline" size="sm" onClick={addBlank}>
                 <Plus className="h-4 w-4" /> Add a row
               </Button>
               <span className="text-[12px] text-muted-foreground">
-                {goodCount} of {rows.length} ready · {totalUnits} item{totalUnits === 1 ? '' : 's'} to
-                create
+                {goodCount} of {rows.length} ready
+                {totalUnits > 0 && ` · ${totalUnits} item${totalUnits === 1 ? '' : 's'} to create`}
               </span>
               <button
                 type="button"
@@ -427,13 +498,27 @@ export function SnapExtractDialog({
               </button>
             </div>
 
+            {goodCount === 0 && rows.length > 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                Nothing is ready yet. Each row needs a name and a shelf: set one above for all of
+                them.
+              </p>
+            )}
+
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" disabled={busy} onClick={() => onOpenChange(false)}>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={busy}
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
               <Button className="flex-1" disabled={busy || goodCount === 0} onClick={create}>
                 {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                Create {totalUnits} item{totalUnits === 1 ? '' : 's'}
+                {goodCount === 0
+                  ? 'Fix the rows above'
+                  : `Create ${totalUnits} item${totalUnits === 1 ? '' : 's'}`}
               </Button>
             </div>
           </div>

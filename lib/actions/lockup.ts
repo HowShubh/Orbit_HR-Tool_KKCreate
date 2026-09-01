@@ -2600,7 +2600,12 @@ export async function extractEquipmentFromPhotos(input: {
       body: JSON.stringify({
         model: input.model,
         temperature: 0,
-        max_tokens: 2000,
+        // Reasoning models (Opus 5, GPT-5.6) spend part of the completion
+        // budget thinking. At 2000 the JSON came back truncated or empty while
+        // OpenRouter still billed the call, which looked like "the model does
+        // not work". Give the answer real headroom and keep reasoning short.
+        max_tokens: 8000,
+        reasoning: { effort: 'low' },
         messages: [
           { role: 'system', content: system },
           { role: 'user', content },
@@ -2615,13 +2620,35 @@ export async function extractEquipmentFromPhotos(input: {
     throw new ActionError(`AI service error (${res.status}). ${detail.slice(0, 180)}`)
   }
   const json = (await res.json().catch(() => null)) as
-    | { choices?: { message?: { content?: string } }[] }
+    | {
+        choices?: {
+          finish_reason?: string
+          message?: { content?: string; reasoning?: string }
+        }[]
+      }
     | null
-  const text = json?.choices?.[0]?.message?.content ?? ''
-  const drafts = parseExtractedDrafts(text)
+  const choice = json?.choices?.[0]
+  const text = choice?.message?.content ?? ''
+  // Some models put the JSON in their reasoning channel instead of content.
+  const drafts =
+    parseExtractedDrafts(text).length > 0
+      ? parseExtractedDrafts(text)
+      : parseExtractedDrafts(choice?.message?.reasoning ?? '')
+
   if (drafts.length === 0) {
+    const label = AI_EXTRACT_MODELS.find((m) => m.id === input.model)?.label ?? input.model
+    if (choice?.finish_reason === 'length') {
+      throw new ActionError(
+        `${label} ran out of room before it finished the list. Try fewer photos at once, or pick a different model.`
+      )
+    }
+    if (!text.trim()) {
+      throw new ActionError(
+        `${label} returned an empty reply. Try again, or pick a different model.`
+      )
+    }
     throw new ActionError(
-      'The model could not read any gear from those photos. Try clearer, closer shots.'
+      `${label} did not recognise any gear in those photos. Try closer, better-lit shots, or a different model.`
     )
   }
   return drafts
