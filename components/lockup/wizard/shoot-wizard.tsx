@@ -247,24 +247,37 @@ export function ShootWizard({
     studios.find((s) => s.id === studioId)?.name ?? 'Studio'
 
   const stepNav = (
-    <div className="flex items-center justify-between gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={step === 1 || busy}
-        onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
-      >
-        <ArrowLeft className="h-4 w-4" /> Back
-      </Button>
-      {step < 3 ? (
-        <Button type="button" disabled={busy} onClick={() => setStep((s) => (s === 1 ? 2 : 3))}>
-          Next: {step === 1 ? 'Studio' : 'Gear'} <ArrowRight className="h-4 w-4" />
-        </Button>
-      ) : (
-        <Button type="button" disabled={!canSubmit} onClick={() => setReviewOpen(true)}>
-          Review your plan <ArrowRight className="h-4 w-4" />
-        </Button>
+    <div className="space-y-2">
+      {step === 3 && !canSubmit && (
+        <button
+          type="button"
+          onClick={() => setStep(1)}
+          className="block w-full text-right text-[11.5px] font-medium text-amber-600 hover:underline"
+        >
+          {!windowValid
+            ? 'Check the shoot dates: the end must be after the start.'
+            : 'Name your shoot in step 1 to continue.'}
+        </button>
       )}
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={step === 1 || busy}
+          onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Button>
+        {step < 3 ? (
+          <Button type="button" disabled={busy} onClick={() => setStep((s) => (s === 1 ? 2 : 3))}>
+            Next: {step === 1 ? 'Studio' : 'Gear'} <ArrowRight className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button type="button" disabled={!canSubmit} onClick={() => setReviewOpen(true)}>
+            Review your plan <ArrowRight className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
     </div>
   )
 
