@@ -370,6 +370,7 @@ export function InventoryTable({
           item={editing}
           privateData={editing ? privateByItem[editing.id] ?? null : null}
           locations={locations}
+          onRequestDelete={editing ? () => setDeleting(editing) : undefined}
         />
       )}
       <Dialog open={Boolean(deleting)} onOpenChange={(o) => !deleteBusy && !o && setDeleting(null)}>

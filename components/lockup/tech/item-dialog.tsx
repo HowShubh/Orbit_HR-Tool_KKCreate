@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ImagePlus, Loader2 } from 'lucide-react'
+import { ImagePlus, Loader2, Trash2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,7 @@ export function ItemDialog({
   locations,
   kind = 'pooled',
   people = [],
+  onRequestDelete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -52,6 +53,9 @@ export function ItemDialog({
   kind?: 'pooled' | 'assigned'
   /** Active users for the owner picker (assigned devices). */
   people?: { id: string; full_name: string }[]
+  /** When editing, offers a delete here too. The parent owns the confirm step,
+   *  so this dialog never destroys anything on its own. */
+  onRequestDelete?: () => void
 }) {
   const router = useRouter()
   const { pushToast } = useStore()
@@ -351,6 +355,20 @@ export function ItemDialog({
             {item ? 'Save changes' : 'Add item'}
           </Button>
         </div>
+
+        {item && onRequestDelete && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              onOpenChange(false)
+              onRequestDelete()
+            }}
+            className="mx-auto flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-rose-600"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete this item
+          </button>
+        )}
       </DialogContent>
     </Dialog>
   )
