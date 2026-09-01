@@ -4,11 +4,13 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
+  Boxes,
   ChevronDown,
   Pencil,
   Plus,
   QrCode,
   Search,
+  Trash2,
   Upload,
   Wrench,
 } from 'lucide-react'
@@ -24,23 +26,26 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useStore } from '@/lib/store'
 import type { Tables } from '@/lib/supabase/database.types'
-import type { EquipmentItemRow, TechConsoleData } from '@/lib/queries/lockup'
+import type { EquipmentItemRow, KitRow, TechConsoleData } from '@/lib/queries/lockup'
 import { STATUS_LABELS } from '@/lib/lockup/constants'
-import { forceCheckin, setItemStatus } from '@/lib/actions/lockup'
+import { deleteKit, forceCheckin, setItemStatus } from '@/lib/actions/lockup'
 import { CategoryIcon, CodeChip, StatusBadge, itemStatusLine } from '../item-bits'
 import { ItemDialog } from './item-dialog'
 import { ImportDialog } from './import-dialog'
+import { KitDialog } from './kit-dialog'
 import { SendToRepairDialog } from './send-repair-dialog'
 import { LabelDownloadDialog } from './label-download'
 
 /** Tech Console inventory: the management surface per the reference UX. */
 export function InventoryTable({
   items,
+  kits,
   locations,
   privateByItem,
   qrBaseUrl,
 }: {
   items: EquipmentItemRow[]
+  kits: KitRow[]
   locations: Tables<'equipment_locations'>[]
   privateByItem: TechConsoleData['privateByItem']
   qrBaseUrl: string | null
@@ -53,6 +58,24 @@ export function InventoryTable({
   const [importing, setImporting] = useState(false)
   const [labels, setLabels] = useState(false)
   const [repairItem, setRepairItem] = useState<EquipmentItemRow | null>(null)
+  const [kitDialog, setKitDialog] = useState<{ open: boolean; kit: KitRow | null }>({
+    open: false,
+    kit: null,
+  })
+  const [busyKitId, setBusyKitId] = useState<string | null>(null)
+
+  async function doDeleteKit(kit: KitRow) {
+    setBusyKitId(kit.id)
+    try {
+      await deleteKit(kit.id)
+      pushToast({ title: 'Kit deleted', variant: 'success' })
+      router.refresh()
+    } catch (err) {
+      pushToast({ title: err instanceof Error ? err.message : 'Failed', variant: 'error' })
+    } finally {
+      setBusyKitId(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -111,6 +134,61 @@ export function InventoryTable({
             <Plus className="h-4 w-4" /> Add item
           </Button>
         </div>
+      </div>
+
+      {/* Kits: built from these same items, so they live right here. */}
+      <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[13px] font-semibold">
+            <Boxes className="h-4 w-4 text-muted-foreground" />
+            Kits
+            <span className="text-[12px] font-normal text-muted-foreground">({kits.length})</span>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setKitDialog({ open: true, kit: null })}>
+            <Plus className="h-4 w-4" /> New kit
+          </Button>
+        </div>
+        {kits.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">
+            A kit is a one-tap selection shortcut in shoot planning: bundle gear people always take
+            together, like a podcast setup. Custody stays per item.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {kits.map((kit) => (
+              <div
+                key={kit.id}
+                className="group flex items-center gap-1.5 rounded-lg border border-border bg-background py-1 pl-2.5 pr-1"
+              >
+                <button
+                  type="button"
+                  onClick={() => setKitDialog({ open: true, kit })}
+                  className="flex items-center gap-1.5 text-left"
+                  title={kit.items.map((i) => i.name).join(', ') || 'empty'}
+                >
+                  <span className="text-[12.5px] font-medium">{kit.name}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {kit.items.length} item{kit.items.length === 1 ? '' : 's'}
+                  </span>
+                  <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete kit ${kit.name}`}
+                  disabled={busyKitId === kit.id}
+                  onClick={() => {
+                    if (window.confirm(`Delete kit ${kit.name}? Items themselves are untouched.`)) {
+                      void doDeleteKit(kit)
+                    }
+                  }}
+                  className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-rose-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -264,6 +342,12 @@ export function InventoryTable({
         />
       )}
       <ImportDialog open={importing} onOpenChange={setImporting} />
+      <KitDialog
+        open={kitDialog.open}
+        onOpenChange={(open) => setKitDialog((s) => ({ ...s, open }))}
+        kit={kitDialog.kit}
+        pooledItems={items}
+      />
       <LabelDownloadDialog
         open={labels}
         onOpenChange={setLabels}

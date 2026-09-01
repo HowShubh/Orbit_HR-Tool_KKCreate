@@ -37,7 +37,6 @@ import {
   approveReservation,
   createLocation,
   createStudio,
-  deleteKit,
   deleteLocation,
   deleteStudio,
   receiveFromRepair,
@@ -54,7 +53,6 @@ import { DevicesTable } from './devices-table'
 import { OverdueTable } from './overdue-table'
 import { HoldsTable } from './holds-table'
 import { ShootsTable } from './shoots-table'
-import { KitDialog } from './kit-dialog'
 import { LockupSlackTab } from './slack-tab'
 import { LockupSettingsTab } from './settings-tab'
 
@@ -78,10 +76,10 @@ function StatCard({
           ? 'text-amber-600'
           : 'text-slate-700'
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-2">
-      <Icon className={`h-5 w-5 ${toneClass}`} />
-      <div className="text-2xl font-bold leading-none">{value}</div>
-      <div className="text-[12.5px] text-muted-foreground">{label}</div>
+    <div className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-card px-3.5 py-2.5">
+      <Icon className={`h-4 w-4 shrink-0 ${toneClass}`} />
+      <span className="text-[17px] font-bold leading-none">{value}</span>
+      <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">{label}</span>
     </div>
   )
 }
@@ -135,7 +133,6 @@ export function TechConsoleClient({
     'holds',
     'approvals',
     'overdue',
-    'kits',
     'activity',
     'repairs',
     'issues',
@@ -152,10 +149,6 @@ export function TechConsoleClient({
   const [busyId, setBusyId] = useState<string | null>(null)
   const [newLocation, setNewLocation] = useState('')
   const [newStudio, setNewStudio] = useState('')
-  const [kitDialog, setKitDialog] = useState<{ open: boolean; kit: KitRow | null }>({
-    open: false,
-    kit: null,
-  })
 
   const openIssues = data.issues.filter((i) => i.status === 'open')
   const openRepairs = data.repairs.filter((r) => !r.returned_at)
@@ -245,7 +238,6 @@ export function TechConsoleClient({
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="kits">Kits</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="repairs" className="gap-1.5">
               Repairs
@@ -277,6 +269,7 @@ export function TechConsoleClient({
           <TabsContent value="inventory" className="mt-4">
             <InventoryTable
               items={pooledItems}
+              kits={kits}
               locations={data.locations}
               privateByItem={data.privateByItem}
               qrBaseUrl={qrBaseUrl}
@@ -373,59 +366,6 @@ export function TechConsoleClient({
           </TabsContent>
 
           {/* -------- Kits -------- */}
-          <TabsContent value="kits" className="mt-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[12.5px] text-muted-foreground">
-                A kit is a one-tap selection shortcut in shoot planning. Custody stays per item.
-              </p>
-              <Button size="sm" onClick={() => setKitDialog({ open: true, kit: null })}>
-                <Plus className="h-4 w-4" /> New kit
-              </Button>
-            </div>
-            {kits.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-[13px] text-muted-foreground">
-                No kits yet. Bundle gear people always take together, like a podcast setup.
-              </div>
-            )}
-            <ul className="space-y-2">
-              {kits.map((kit) => (
-                <li
-                  key={kit.id}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-                >
-                  <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold">{kit.name}</div>
-                    <div className="truncate text-[12.5px] text-muted-foreground">
-                      {kit.items.map((i) => i.name).join(', ') || 'empty'}
-                      {kit.notes && <> · {kit.notes}</>}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setKitDialog({ open: true, kit })}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-rose-600"
-                    disabled={busyId === kit.id}
-                    onClick={() => {
-                      if (window.confirm(`Delete kit ${kit.name}? Items themselves are untouched.`)) {
-                        run(kit.id, () => deleteKit(kit.id), 'Kit deleted')
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </TabsContent>
-
           {/* -------- Activity -------- */}
           <TabsContent value="activity" className="mt-4">
             <ol className="relative space-y-3 border-l border-border pl-5 ml-2">
@@ -703,12 +643,6 @@ export function TechConsoleClient({
         </Tabs>
       </div>
 
-      <KitDialog
-        open={kitDialog.open}
-        onOpenChange={(open) => setKitDialog((s) => ({ ...s, open }))}
-        kit={kitDialog.kit}
-        pooledItems={pooledItems}
-      />
     </div>
   )
 }
