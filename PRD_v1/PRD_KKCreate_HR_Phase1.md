@@ -1,9 +1,11 @@
 # KK Create HR System — Phase 1 PRD (Leave Management + Foundation)
 
+> Historical v1. Use `PRD_KKCreate_HR_Phase1_v2.md` plus `PRD_Addendum_Bootstrap.md` as the current MVP source of truth. Current MVP testing uses Supabase email/password auth first, then moves to Google OAuth-only after Core HR + Leave + Attendance/WFO + Comp-off + Org + Permissions are validated.
+
 **Owner:** Shubham
 **Status:** Ready for implementation
 **Target launch:** June 1
-**Scope:** Web app, mobile-responsive. No native app, no Slack, no email in this phase.
+**Scope:** Web app, mobile-responsive. No native app, no Slack, no external email notifications in this phase.
 
 ---
 
@@ -33,7 +35,7 @@ This phase ships **leave management end-to-end** plus a **read-only org tree**. 
 - **Frontend:** Next.js 14+ (App Router), TypeScript, Tailwind CSS, shadcn/ui
 - **Hosting:** Vercel
 - **Backend / DB:** Supabase (Postgres, Auth, Realtime, Storage, Edge Functions, Row-Level Security)
-- **Auth:** Supabase Auth → Google OAuth only (everyone has a company Google account)
+- **Auth:** Supabase Auth → email/password for MVP testing; Google OAuth-only after validation
 - **State / Data:** TanStack Query for server state; React Context for auth session
 - **Forms:** React Hook Form + Zod validation
 - **Date handling:** `date-fns` (no `moment`)
@@ -335,7 +337,7 @@ Implement these as Supabase RLS policies. Test thoroughly.
 Mobile-first responsive. Every screen must work cleanly at 375px width.
 
 ### 8.1 Auth
-- `/login` — Google sign-in button only. After auth, check if user exists in `users` table. If not, show "Your account hasn't been set up yet. Please contact HR." (HR creates user rows manually for MVP.)
+- `/login` — email/password sign-in for MVP testing. After auth, check if user exists in `users` table. If not, show "Your account hasn't been set up yet. Please contact HR." (HR creates user rows manually for MVP.)
 
 ### 8.2 Layout (authenticated)
 - Top nav: Logo, current page title, notifications bell, profile dropdown (photo, name, role)
@@ -424,7 +426,7 @@ Table with: timestamp, actor, action, entity, before/after diff (expandable JSON
 
 ### 8.10 Profile (`/profile`)
 
-- Edit photo, phone, email
+- Edit photo and phone. Email is the auth identity and is not self-editable in MVP.
 - Toggle notifications muted
 - View own teams, manager, role (read-only)
 
@@ -510,7 +512,7 @@ Server-side actions write `audit_log` rows where applicable using a centralized 
 
 ## 11. Acceptance criteria (Phase 1 ships when all of these pass)
 
-1. ✅ A user can sign in with their company Google account.
+1. ✅ A user can sign in with HR-created email/password credentials.
 2. ✅ Non-onboarded users see a clear "contact HR" message.
 3. ✅ HR can create a user, set role, manager, teams, and per-type leave allocations.
 4. ✅ HR can mark a user as exited; their data persists, login is revoked.
@@ -561,7 +563,7 @@ Build in this order. Don't skip ahead.
 1. Supabase project setup, schema migrations, seed holidays
 2. RLS policies + test queries from anon role
 3. Next.js scaffold, Tailwind, shadcn, Supabase client setup
-4. Google OAuth login + protected layout
+4. Email/password login + protected layout
 5. User management (HR can create/edit users) — needed before anything else can be tested
 6. Org tree page (read-only, validates user data is correct)
 7. Apply Leave modal + create leave API + balance computation

@@ -1,0 +1,12 @@
+email,type,date,half_day,reason
+ananya@kkcreate.in,leave,2026-06-02,,Full-day leave
+ananya@kkcreate.in,leave,2026-06-03,first_half,Half-day leave first_half = morning off
+ananya@kkcreate.in,leave,2026-06-04,second_half,Half-day leave second_half = afternoon off
+rahul@kkcreate.in,wfh,2026-06-05,,Full-day WFH
+rahul@kkcreate.in,wfh,2026-06-08,first_half,Half-day WFH morning
+rahul@kkcreate.in,wfh,2026-06-09,second_half,Half-day WFH afternoon
+stuti@kkcreate.in,leave,2026-06-11,,(reason can be blank for leaves)
+mamta@kkcreate.in,leave,2026-06-15,,Multi-day leave is one row per day (day 1 of 2)
+mamta@kkcreate.in,leave,2026-06-16,,Multi-day leave is one row per day (day 2 of 2)
+pranshu@kkcreate.in,compoff_leave,2026-06-18,,Comp-off leave taken (grant it first via the Comp-off CSV)
+pranshu@kkcreate.in,compoff_wfh,2026-06-19,,Comp-off WFH taken (grant it first via the Comp-off CSV)

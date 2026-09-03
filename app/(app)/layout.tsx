@@ -1,12 +1,63 @@
-import { Sidebar } from "@/components/layout/sidebar";
-import { BottomNav } from "@/components/layout/bottom-nav";
+import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { siteFromHost } from '@/lib/lockup/site'
+import {
+  getCurrentUser,
+  getCurrentUserTeamContext,
+} from '@/lib/auth/get-current-user'
+import { listMyNotifications } from '@/lib/queries/notifications'
+import { countCompoffPendingForApprover } from '@/lib/queries/compoff'
+import { listMyCapabilityKeys } from '@/lib/queries/capabilities'
+import { AppShell } from '@/components/layout/app-shell'
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const adminClient = createAdminClient()
+
+  // Bootstrap state needs to be checked before user lookup so we don't trip on missing users row
+  const [stateResult, user] = await Promise.all([
+    adminClient.from('system_state').select('bootstrap_state').single(),
+    getCurrentUser(),
+  ])
+
+  const stateRow = stateResult.data
+
+  // Hard-block only for the very first state — we need a founder before anything else
+  if (stateRow?.bootstrap_state === 'awaiting_root_admin') {
+    redirect('/setup')
+  }
+
+  if (!user) {
+    redirect('/login?error=not_onboarded')
+  }
+
+  if (user.status === 'exited') {
+    redirect('/login?error=account_exited')
+  }
+
+  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount, grantedCapabilityKeys] =
+    await Promise.all([
+      getCurrentUserTeamContext(user.id),
+      listMyNotifications(user.id, 20),
+      countCompoffPendingForApprover(user.id),
+      listMyCapabilityKeys(user.id),
+    ])
+
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar />
-      <main className="flex-1 min-w-0 pb-20 lg:pb-0">{children}</main>
-      <BottomNav />
-    </div>
-  );
+    <AppShell
+      currentUser={user}
+      ledTeamIds={ledTeamIds}
+      membersByTeam={membersByTeam}
+      grantedCapabilityKeys={grantedCapabilityKeys}
+      notifications={notifications}
+      pendingCompoffCount={pendingCompoffCount}
+      site={siteFromHost(headers().get('host'))}
+    >
+      {children}
+    </AppShell>
+  )
 }

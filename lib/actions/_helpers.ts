@@ -1,0 +1,123 @@
+'use server'
+
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getCurrentUser } from '@/lib/auth/get-current-user'
+import type { Database, Tables } from '@/lib/supabase/database.types'
+import { revalidatePath } from 'next/cache'
+import { ActionError } from './errors'
+
+export async function requireUser(): Promise<Tables<'users'>> {
+  // Delegates to the React.cache-wrapped getCurrentUser so the layout and the
+  // page share ONE auth round trip + users fetch per request, instead of each
+  // paying their own (this used to cost an extra ~2 network calls per page).
+  const user = await getCurrentUser()
+  if (!user) throw new ActionError('Not authenticated', 'unauthenticated')
+  if (user.status === 'exited') throw new ActionError('Account exited', 'exited')
+  return user
+}
+
+export async function requireCapability(
+  capability:
+    | 'view_leaves' | 'edit_leaves'
+    | 'view_balance' | 'edit_balance'
+    | 'approve_compoff'
+    | 'manage_holidays' | 'view_audit_log'
+    | 'manage_users' | 'manage_capabilities'
+    | 'run_annual_reset' | 'manage_equipment',
+  targetUserId?: string
+): Promise<Tables<'users'>> {
+  const user = await requireUser()
+  const role = user.role
+  const isFounder = role === 'founder'
+  const isHR = role === 'hr'
+  const isTeamLead = role === 'team_lead'
+
+  if (capability === 'manage_capabilities') {
+    if (!isFounder) throw new ActionError('Founders only', 'forbidden')
+    return user
+  }
+  if (capability === 'manage_equipment') {
+    // Global, but individually grantable (the Tech Lead is not HR), so unlike
+    // the role-only branches below this one also honors user_capabilities rows.
+    if (isFounder || isHR) return user
+    const adminClient = createAdminClient()
+    const { data: grants } = await adminClient
+      .from('user_capabilities')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('capability_key', 'manage_equipment')
+      .limit(1)
+    if (grants && grants.length > 0) return user
+    throw new ActionError('Equipment manager, HR or founder only', 'forbidden')
+  }
+  if (
+    capability === 'manage_holidays' ||
+    capability === 'manage_users' ||
+    capability === 'view_audit_log' ||
+    capability === 'run_annual_reset' ||
+    capability === 'edit_leaves'
+  ) {
+    if (!isFounder && !isHR) throw new ActionError('HR or founder only', 'forbidden')
+    return user
+  }
+
+  // edit_balance, view_leaves, view_balance, approve_compoff are scoped:
+  // Founder/HR pass globally; team leads pass for users in their led teams;
+  // anyone passes for themselves.
+
+  if (isFounder || isHR) return user
+  if (targetUserId === user.id) return user
+
+  if (isTeamLead && targetUserId) {
+    const adminClient = createAdminClient()
+    const { data: ledTeams } = await adminClient
+      .from('teams')
+      .select('id')
+      .eq('team_lead_id', user.id)
+    const ledIds = (ledTeams ?? []).map((t) => t.id)
+    if (ledIds.length === 0) throw new ActionError('No teams led', 'forbidden')
+
+    const { data: tm } = await adminClient
+      .from('team_members')
+      .select('id')
+      .eq('user_id', targetUserId)
+      .in('team_id', ledIds)
+      .is('left_at', null)
+      .limit(1)
+
+    if (!tm || tm.length === 0) {
+      throw new ActionError('Target not in your teams', 'forbidden')
+    }
+    return user
+  }
+
+  throw new ActionError('Insufficient permissions', 'forbidden')
+}
+
+export async function writeAudit(
+  actor_id: string,
+  action: string,
+  entity_type: string,
+  entity_id: string,
+  diff?: Database['public']['Tables']['audit_log']['Insert']['diff'],
+  note?: string
+): Promise<void> {
+  const adminClient = createAdminClient()
+  await adminClient.from('audit_log').insert({
+    actor_id,
+    action,
+    entity_type,
+    entity_id,
+    diff: diff ?? null,
+    note: note ?? null,
+  })
+}
+
+/**
+ * Invalidate the whole app's RSC cache. Use after any mutation so that
+ * navigating to other pages (Dashboard, Calendar, My Leaves, etc.) shows
+ * fresh data — not a stale snapshot from before the change.
+ */
+export async function revalidateHR() {
+  revalidatePath('/', 'layout')
+}

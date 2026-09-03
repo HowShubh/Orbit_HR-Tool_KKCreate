@@ -1,0 +1,8 @@
+full_name,email,password,role,manager_email,primary_team_name,designation,joined_at,date_of_birth
+Kavya Karnatac,kavya@kkcreate.in,,founder,,,Co-founder,2023-01-02,1995-03-21
+Varun Pandey,varun@kkcreate.in,,founder,,,Co-founder,2023-01-02,1994-07-09
+Lokesh Yadav,lokesh@kkcreate.in,,founder,,,Co-founder,2023-01-02,1993-11-30
+Pranshu Madaan,pranshu@kkcreate.in,,team_lead,kavya@kkcreate.in,Short-form KKC+Learn,Team Lead,2023-06-15,1996-02-14
+Jaskirat Kaur,jaskirat@kkcreate.in,,hr,varun@kkcreate.in,HR and Operations,HR Manager,2024-01-10,1997-05-19
+Ananya Ray,ananya@kkcreate.in,,employee,pranshu@kkcreate.in,Short-form KKC+Learn,Sr. Short-form Writer,2024-08-01,1999-09-25
+Rahul Sharma,rahul@kkcreate.in,,employee,pranshu@kkcreate.in,Short-form KKC+Learn,Short-form Writer,2025-02-03,2000-12-06

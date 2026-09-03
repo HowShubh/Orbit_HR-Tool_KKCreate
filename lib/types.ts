@@ -2,7 +2,7 @@ export type Role = "employee" | "team_lead" | "hr" | "founder";
 
 export type LeaveType = "wfh" | "leave" | "compoff_wfh" | "compoff_leave";
 
-export type LeaveStatus = "active" | "deleted";
+export type LeaveStatus = "active" | "pending" | "delete_requested" | "rejected" | "deleted";
 
 export type DayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
 
@@ -19,6 +19,7 @@ export interface User {
   primary_team_id: string;
   team_ids: string[];
   notifications_muted?: boolean;
+  photo_url?: string | null;
 }
 
 export interface Team {
@@ -78,6 +79,7 @@ export interface Notification {
   title: string;
   body: string;
   link_url?: string;
+  related_entity_type?: string;
   related_entity_id?: string;
   read_at?: string;
   created_at: string;
@@ -93,3 +95,5 @@ export interface AuditEntry {
   note?: string;
   created_at: string;
 }
+
+export type { CanHelpers } from '@/lib/capabilities/can'
