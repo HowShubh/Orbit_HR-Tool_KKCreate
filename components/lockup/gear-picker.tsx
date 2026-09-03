@@ -6,7 +6,7 @@ import { Boxes, Check, Plus, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
 import { cn } from '@/lib/utils'
-import { CATEGORY_ICONS, CodeChip } from './item-bits'
+import { CATEGORY_ICONS, CodeChip, PhotoHover } from './item-bits'
 
 /**
  * The gear picker used in BOTH places gear is chosen: browsing Lockup, and
@@ -246,14 +246,16 @@ function Row({
   const Icon = CATEGORY_ICONS[row.category]
   const body = (
     <>
-      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-muted">
-        {row.photo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={row.photo_url} alt="" className="h-full w-full rounded-xl object-cover" />
-        ) : (
-          <Icon className="h-5 w-5 text-muted-foreground" />
-        )}
-      </div>
+      <PhotoHover photoUrl={row.photo_url}>
+        <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-muted">
+          {row.photo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={row.photo_url} alt="" className="h-full w-full rounded-xl object-cover" />
+          ) : (
+            <Icon className="h-5 w-5 text-muted-foreground" />
+          )}
+        </span>
+      </PhotoHover>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-[14.5px] font-semibold">{row.name}</span>

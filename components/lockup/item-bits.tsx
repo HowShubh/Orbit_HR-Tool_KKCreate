@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   Aperture,
   Battery,
@@ -242,4 +243,57 @@ export function duePresets(): DuePreset[] {
     presets.push({ label: 'This week', sub: 'Fri 7 PM', value: toDueLocal(fridayDue) })
   }
   return presets
+}
+
+
+/**
+ * Enlarge a gear photo while the pointer rests on its thumbnail.
+ *
+ * List thumbnails are 44px, which is enough to tell two cameras apart but not
+ * to actually look at the thing. The preview is positioned fixed on purpose:
+ * these lists scroll inside their own columns, and an absolutely positioned
+ * popover would be clipped by that overflow. Pointer-events are off so it can
+ * never swallow the click underneath, and it is hidden below lg where there is
+ * no hover to speak of.
+ */
+export function PhotoHover({
+  photoUrl,
+  children,
+}: {
+  photoUrl: string | null | undefined
+  children: React.ReactNode
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  if (!photoUrl) return <>{children}</>
+
+  const SIZE = 224
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={(e) => {
+        const r = e.currentTarget.getBoundingClientRect()
+        setPos({ x: r.right + 10, y: r.top - 8 })
+      }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos && (
+        <span
+          className="pointer-events-none fixed z-50 hidden lg:block"
+          style={{
+            left: Math.max(8, Math.min(pos.x, window.innerWidth - SIZE - 16)),
+            top: Math.max(8, Math.min(pos.y, window.innerHeight - SIZE - 16)),
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photoUrl}
+            alt=""
+            style={{ width: SIZE, height: SIZE }}
+            className="rounded-xl border border-border bg-card object-cover shadow-xl"
+          />
+        </span>
+      )}
+    </span>
+  )
 }
