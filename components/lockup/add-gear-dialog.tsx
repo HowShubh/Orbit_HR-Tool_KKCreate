@@ -98,6 +98,17 @@ export function AddGearDialog({
         const r = byId.get(m.item_id)
         return r && isAddable(r) ? [m.item_id] : []
       }),
+      members: kit.items.map((m) => {
+        const r = byId.get(m.item_id)
+        return {
+          id: m.item_id,
+          name: m.name,
+          code: m.code,
+          category: m.category,
+          free: Boolean(r && isAddable(r)),
+          holderName: null,
+        }
+      }),
     }))
   }, [kits, byId])
 

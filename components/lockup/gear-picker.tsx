@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Boxes, Check, Plus, Search } from 'lucide-react'
+import { Boxes, Check, ChevronDown, Plus, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { EQUIPMENT_CATEGORIES, type EquipmentCategory } from '@/lib/lockup/constants'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,16 @@ export type PickerKit = {
   total: number
   /** Ids that can actually be added right now. */
   addableIds: string[]
+  /** What is actually in the kit. A kit card used to show only a count, so
+   *  there was no way to find out what you were about to add. */
+  members: {
+    id: string
+    name: string
+    code: string
+    category: EquipmentCategory
+    free: boolean
+    holderName: string | null
+  }[]
 }
 
 export function GearPicker({
@@ -69,6 +79,7 @@ export function GearPicker({
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<'all' | EquipmentCategory>('all')
   const [view, setView] = useState<'all' | 'kits'>('all')
+  const [openKits, setOpenKits] = useState<Set<string>>(new Set())
 
   const categories = useMemo(() => {
     const counts = new Map<EquipmentCategory, number>()
@@ -159,17 +170,39 @@ export function GearPicker({
               return (
                 <li
                   key={kit.id}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-card py-2.5 pl-3.5 pr-3"
+                  className="rounded-xl border border-border bg-card py-2.5 pl-3.5 pr-3"
                 >
+                  <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10">
                     <Boxes className="h-5 w-5 text-primary" />
                   </div>
-                  <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenKits((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(kit.id)) next.delete(kit.id)
+                        else next.add(kit.id)
+                        return next
+                      })
+                    }
+                    aria-expanded={openKits.has(kit.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <div className="truncate text-[14.5px] font-semibold">{kit.name}</div>
-                    <div className="text-[12.5px] text-muted-foreground">
+                    <div className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
                       {kit.total} item{kit.total === 1 ? '' : 's'}
+                      <ChevronDown
+                        className={cn(
+                          'h-3.5 w-3.5 transition-transform',
+                          openKits.has(kit.id) && 'rotate-180'
+                        )}
+                      />
+                      <span className="underline-offset-2 hover:underline">
+                        {openKits.has(kit.id) ? 'hide' : 'see what is inside'}
+                      </span>
                     </div>
-                  </div>
+                  </button>
                   <span
                     className={cn(
                       'shrink-0 text-[12.5px] font-medium',
@@ -190,6 +223,35 @@ export function GearPicker({
                     label={`Add ${kit.name}`}
                     onClick={() => onAddMany(kit.addableIds)}
                   />
+                  </div>
+
+                  {openKits.has(kit.id) && (
+                    <ul className="mt-2.5 space-y-1 border-t border-border pt-2.5">
+                      {kit.members.map((m) => {
+                        const MemberIcon = CATEGORY_ICONS[m.category]
+                        return (
+                          <li key={m.id} className="flex items-center gap-2 pl-1 text-[12.5px]">
+                            <MemberIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate font-medium">{m.name}</span>
+                            <CodeChip code={m.code} />
+                            <span
+                              className={cn(
+                                'ml-auto shrink-0 text-[11.5px] font-medium',
+                                m.free ? 'text-emerald-700' : 'text-amber-700'
+                              )}
+                            >
+                              {m.free ? 'free' : m.holderName ? `with ${m.holderName}` : 'not free'}
+                            </span>
+                          </li>
+                        )
+                      })}
+                      {kit.members.length === 0 && (
+                        <li className="pl-1 text-[12px] text-muted-foreground">
+                          This kit has no items yet.
+                        </li>
+                      )}
+                    </ul>
+                  )}
                 </li>
               )
             })}

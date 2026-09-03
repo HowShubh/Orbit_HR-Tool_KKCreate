@@ -96,6 +96,17 @@ export function StepGear({
         const row = byId.get(m.item_id)
         return row && isAddable(row) ? [m.item_id] : []
       }),
+      members: kit.items.map((m) => {
+        const row = byId.get(m.item_id)
+        return {
+          id: m.item_id,
+          name: m.name,
+          code: m.code,
+          category: m.category,
+          free: Boolean(row && isAddable(row)),
+          holderName: null,
+        }
+      }),
     }))
   }, [kits, availabilityRows])
 

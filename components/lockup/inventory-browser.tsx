@@ -71,6 +71,19 @@ export function InventoryBrowser({
       addableIds: kit.items
         .filter((m) => (byId.get(m.item_id)?.status ?? m.status) === 'available')
         .map((m) => m.item_id),
+      // Live status wins over the snapshot stored on the kit row, so an
+      // expanded kit shows what is actually free right now.
+      members: kit.items.map((m) => {
+        const live = byId.get(m.item_id)
+        return {
+          id: m.item_id,
+          name: m.name,
+          code: m.code,
+          category: m.category,
+          free: (live?.status ?? m.status) === 'available',
+          holderName: live?.holder_name ?? null,
+        }
+      }),
     }))
   }, [kits, items])
 
