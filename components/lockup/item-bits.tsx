@@ -259,17 +259,50 @@ export function duePresets(): DuePreset[] {
 export function PhotoHover({
   photoUrl,
   children,
+  mode = 'thumb',
+  className,
 }: {
   photoUrl: string | null | undefined
   children: React.ReactNode
+  /**
+   * 'thumb' anchors a small preview beside a list thumbnail. 'full' centres the
+   * whole picture, uncropped, for places that already show a cropped version
+   * and where the point of hovering is to finally see all of it.
+   */
+  mode?: 'thumb' | 'full'
+  className?: string
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const [shown, setShown] = useState(false)
   if (!photoUrl) return <>{children}</>
 
   const SIZE = 224
+
+  if (mode === 'full') {
+    return (
+      <span
+        className={cn('relative block', className)}
+        onMouseEnter={() => setShown(true)}
+        onMouseLeave={() => setShown(false)}
+      >
+        {children}
+        {shown && (
+          <span className="pointer-events-none fixed inset-0 z-50 hidden place-items-center bg-black/60 p-8 lg:grid">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photoUrl}
+              alt=""
+              className="max-h-[80vh] max-w-[80vw] rounded-2xl bg-card object-contain shadow-2xl"
+            />
+          </span>
+        )}
+      </span>
+    )
+  }
+
   return (
     <span
-      className="relative inline-flex shrink-0"
+      className={cn('relative inline-flex shrink-0', className)}
       onMouseEnter={(e) => {
         const r = e.currentTarget.getBoundingClientRect()
         setPos({ x: r.right + 10, y: r.top - 8 })

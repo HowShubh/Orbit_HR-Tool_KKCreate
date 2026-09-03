@@ -2,18 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import {
-  ArrowLeft,
-  Boxes,
-  Calendar,
-  Check,
-  Clock,
-  Flag,
-  MapPin,
-  MessageSquare,
-  Plus,
-  Wrench,
-} from 'lucide-react'
+import { ArrowLeft, Boxes, Calendar, Check, Clock, Flag, MapPin, Maximize2, MessageSquare, Plus, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Tables } from '@/lib/supabase/database.types'
 import type { ItemProfile } from '@/lib/queries/lockup'
@@ -21,7 +10,7 @@ import { CATEGORY_LABELS } from '@/lib/lockup/constants'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/lockup/cart'
 import { cn } from '@/lib/utils'
-import { CategoryIcon, CodeChip, fmtDay, fmtDayTime } from './item-bits'
+import { CategoryIcon, CodeChip, PhotoHover, fmtDay, fmtDayTime } from './item-bits'
 import { ReportIssueDialog } from './report-issue-dialog'
 
 /**
@@ -100,14 +89,25 @@ export function ItemPage({
 
         {/* ---- Photo, actions, details ---- */}
         <div className="order-1 space-y-4 lg:order-2">
-          <div className="grid h-44 place-items-center overflow-hidden rounded-2xl border border-border bg-card">
-            {item.photo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
-            ) : (
-              <CategoryIcon category={item.category} photoUrl={null} size="lg" />
-            )}
-          </div>
+          <PhotoHover photoUrl={item.photo_url} mode="full">
+            <span className="group/photo relative grid h-44 cursor-zoom-in place-items-center overflow-hidden rounded-2xl border border-border bg-card">
+              {item.photo_url ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.photo_url}
+                    alt={item.name}
+                    className="h-full w-full object-cover"
+                  />
+                  <span className="pointer-events-none absolute bottom-2 right-2 hidden items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-[11px] font-medium text-white lg:group-hover/photo:flex">
+                    <Maximize2 className="h-3 w-3" /> Hover to see all of it
+                  </span>
+                </>
+              ) : (
+                <CategoryIcon category={item.category} photoUrl={null} size="lg" />
+              )}
+            </span>
+          </PhotoHover>
 
           <div className="space-y-2">
             {isFree ? (
