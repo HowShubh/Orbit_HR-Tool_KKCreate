@@ -2,10 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import Papa from 'papaparse'
 import { useRouter } from 'next/navigation'
 import {
   Boxes,
   ChevronDown,
+  Download,
   Loader2,
   Pencil,
   Plus,
@@ -110,6 +112,60 @@ export function InventoryTable({
     }
   }
 
+  /**
+   * Download what the table is currently showing as a CSV.
+   *
+   * Columns that also exist in the importer keep its exact names and values
+   * (category as its key, location as the shelf label), so an exported file can
+   * be edited in Sheets and imported straight back. The rest are there to read:
+   * status, who holds it, purchase details. Photos are a URL, since a CSV
+   * cannot carry an image.
+   */
+  function exportCsv() {
+    if (filtered.length === 0) {
+      pushToast({ title: 'Nothing to export', variant: 'info' })
+      return
+    }
+    const rows = filtered.map((i) => {
+      const priv = privateByItem[i.id]
+      return {
+        code: i.code,
+        name: i.name,
+        category: i.category,
+        brand_model: i.brand_model ?? '',
+        serial_number: i.serial_number ?? '',
+        location: i.home_location_label ?? '',
+        quantity: 1,
+        status: i.status,
+        holder: i.holder_name ?? '',
+        currently_at: i.current_location_label ?? '',
+        due_at: i.due_at ?? '',
+        needs_approval: i.requires_approval ? 'yes' : 'no',
+        notes: i.notes ?? '',
+        purchase_date: priv?.purchase_date ?? '',
+        purchase_price_inr: priv?.purchase_price_inr ?? '',
+        purchase_notes: priv?.purchase_notes ?? '',
+        photo_url: i.photo_url ?? '',
+      }
+    })
+
+    // Excel and Sheets need the BOM to read UTF-8 names correctly.
+    const csv = '\uFEFF' + Papa.unparse(rows)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lockup-inventory-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    pushToast({
+      title: `Exported ${rows.length} item${rows.length === 1 ? '' : 's'}`,
+      variant: 'success',
+    })
+  }
+
   async function doDelete(item: EquipmentItemRow) {
     setDeleteBusy(true)
     try {
@@ -150,6 +206,17 @@ export function InventoryTable({
         <div className="flex gap-2 justify-end">
           <Button variant="outline" onClick={() => setLabels(true)}>
             <QrCode className="h-4 w-4" /> Labels
+          </Button>
+          <Button
+            variant="outline"
+            onClick={exportCsv}
+            title={
+              query.trim()
+                ? 'Exports the items matching your search'
+                : 'Exports every item in this list'
+            }
+          >
+            <Download className="h-4 w-4" /> Export CSV
           </Button>
           <Button variant="outline" onClick={() => setImporting(true)}>
             <Upload className="h-4 w-4" /> Import CSV
