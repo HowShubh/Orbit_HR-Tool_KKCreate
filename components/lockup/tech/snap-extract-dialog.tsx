@@ -31,6 +31,9 @@ type ReviewRow = {
   quantity: number
   location: string
   notes: string
+  /** The photo this item was read from, kept so the created item shows a real
+   *  picture instead of a category icon. */
+  photo?: string
 }
 
 const VALID_CATEGORIES = new Set(EQUIPMENT_CATEGORIES.map((c) => c.key as string))
@@ -164,6 +167,12 @@ export function SnapExtractDialog({
           quantity: d.quantity ?? 1,
           location: onlyLocation,
           notes: d.notes ?? '',
+          photo:
+            d.photo_index !== undefined && images[d.photo_index]
+              ? images[d.photo_index]
+              : images.length === 1
+                ? images[0]
+                : undefined,
         }))
       )
       setStep('review')
@@ -209,6 +218,7 @@ export function SnapExtractDialog({
         location: r.location.trim(),
         quantity: r.quantity,
         notes: r.notes.trim() || undefined,
+        photo_data_url: r.photo,
       }))
       const res = await importEquipmentCsv(payload)
       setResult(res)
@@ -384,9 +394,18 @@ export function SnapExtractDialog({
                     )}
                   >
                     <div className="mb-2 flex items-center gap-2">
-                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
-                        {idx + 1}
-                      </span>
+                      {r.photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={r.photo}
+                          alt=""
+                          className="h-8 w-8 shrink-0 rounded-md border border-border object-cover"
+                        />
+                      ) : (
+                        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
+                          {idx + 1}
+                        </span>
+                      )}
                       <span className="truncate text-[13px] font-semibold">
                         {r.name.trim() || 'Unnamed item'}
                       </span>

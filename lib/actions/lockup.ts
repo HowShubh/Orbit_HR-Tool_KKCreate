@@ -2522,6 +2522,9 @@ export async function deleteLocation(locationId: string): Promise<void> {
 export type ImportRow = {
   name: string
   category: string
+  /** Optional data URL. Snap & extract passes the photo the item was read
+   *  from; the CSV importer never sets this. */
+  photo_data_url?: string
   brand_model?: string
   serial_number?: string
   location: string
@@ -2547,6 +2550,9 @@ export type ExtractedDraft = {
   serial_number?: string
   quantity?: number
   notes?: string
+  /** Index of the photo this item was recognised in, so the created item can
+   *  keep that picture instead of falling back to a category icon. */
+  photo_index?: number
 }
 
 type ChatPart =
@@ -2589,6 +2595,7 @@ function parseExtractedDrafts(text: string): ExtractedDraft[] {
     const brand = r.brand_model ? String(r.brand_model).trim() : ''
     const serial = r.serial_number ? String(r.serial_number).trim() : ''
     const notes = r.notes ? String(r.notes).trim() : ''
+    const idxNum = Number(r.photo_index)
     out.push({
       name: name.slice(0, 120),
       category: validCat.has(cat) ? cat : 'other',
@@ -2596,6 +2603,7 @@ function parseExtractedDrafts(text: string): ExtractedDraft[] {
       serial_number: serial ? serial.slice(0, 80) : undefined,
       quantity: Number.isFinite(qtyNum) && qtyNum >= 1 && qtyNum <= 99 ? Math.floor(qtyNum) : 1,
       notes: notes ? notes.slice(0, 300) : undefined,
+      photo_index: Number.isInteger(idxNum) && idxNum >= 0 ? idxNum : undefined,
     })
   }
   return out
@@ -2633,12 +2641,16 @@ export async function extractEquipmentFromPhotos(input: {
     'Identify each DISTINCT piece of equipment visible across the images; group identical units with a quantity. ' +
     `For every item give: name (short, e.g. "Sony A7S III"); category (exactly one of: ${categoryKeys}); ` +
     'brand_model (e.g. "Sony ILCE-7SM3", only if visible); serial_number (only if clearly legible, never guessed); ' +
-    'quantity (integer, default 1); notes (visible condition or nothing). ' +
-    'Reply with ONLY a JSON object of the form {"items":[{"name":"","category":"","brand_model":"","serial_number":"","quantity":1,"notes":""}]}. ' +
+    'quantity (integer, default 1); notes (visible condition or nothing); '+
+    'photo_index (0-based index of the photo you saw this item in). ' +
+    'Reply with ONLY a JSON object of the form {"items":[{"name":"","category":"","brand_model":"","serial_number":"","quantity":1,"notes":"","photo_index":0}]}. ' +
     'Use "other" when unsure of the category. Do not invent details you cannot see.'
 
   const content: ChatPart[] = [
-    { type: 'text', text: 'Catalogue the equipment shown in these photos.' },
+    {
+      type: 'text',
+      text: `Catalogue the equipment shown in these ${images.length} photo(s), numbered 0 to ${images.length - 1} in order.`,
+    },
     ...images.map((url): ChatPart => ({ type: 'image_url', image_url: { url } })),
   ]
 
@@ -2709,6 +2721,32 @@ export async function extractEquipmentFromPhotos(input: {
   return drafts
 }
 
+/** Put a base64 data URL into the photo bucket and point the item at it.
+ *  Best effort: a photo that will not upload must never fail the item. */
+async function attachPhotoDataUrl(
+  admin: Admin,
+  itemId: string,
+  dataUrl: string
+): Promise<void> {
+  try {
+    const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(dataUrl)
+    if (!match) return
+    const [, mime, b64] = match
+    const buffer = Buffer.from(b64, 'base64')
+    if (buffer.byteLength > 5 * 1024 * 1024) return
+    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'
+    const path = `items/${itemId}/${Date.now()}.${ext}`
+    const { error } = await admin.storage
+      .from('equipment-photos')
+      .upload(path, buffer, { contentType: mime, upsert: false })
+    if (error) return
+    const { data: pub } = admin.storage.from('equipment-photos').getPublicUrl(path)
+    await admin.from('equipment_items').update({ photo_url: pub.publicUrl }).eq('id', itemId)
+  } catch {
+    // Ignore: the item is created either way.
+  }
+}
+
 export async function importEquipmentCsv(rows: ImportRow[]): Promise<ImportResult> {
   const user = await requireCapability('manage_equipment')
   const admin = createAdminClient()
@@ -2771,6 +2809,9 @@ export async function importEquipmentCsv(rows: ImportRow[]): Promise<ImportResul
             purchase_date: row.purchase_date || null,
             purchase_price_inr: row.purchase_price_inr ?? null,
           })
+        }
+        if (row.photo_data_url) {
+          await attachPhotoDataUrl(admin, item.id, row.photo_data_url)
         }
         created++
       } catch (err) {
