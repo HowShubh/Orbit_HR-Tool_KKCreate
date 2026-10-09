@@ -10,6 +10,7 @@ import {
   CalendarCheck,
   CalendarDays,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
   CheckCircle2,
   Clock3,
@@ -982,6 +983,9 @@ function PendingApprovalsCard({
   const router = useRouter()
   const { pushToast } = useStore()
   const [isPending, startTransition] = useTransition()
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? approvals : approvals.slice(0, 5)
+  const hiddenCount = approvals.length - 5
 
   function decide(grantId: string, decision: 'approved' | 'rejected') {
     let reason: string | undefined
@@ -1012,7 +1016,7 @@ function PendingApprovalsCard({
         <Badge variant="warning">{approvals.length}</Badge>
       </CardHeader>
       <CardContent className="space-y-3">
-        {approvals.slice(0, 5).map((approval) => (
+        {visible.map((approval) => (
           <div
             key={approval.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-white/80 p-3"
@@ -1048,10 +1052,17 @@ function PendingApprovalsCard({
             </div>
           </div>
         ))}
-        {approvals.length > 5 && (
-          <p className="text-[12px] text-amber-800">
-            +{approvals.length - 5} more pending comp-off request{approvals.length - 5 !== 1 ? 's' : ''}.
-          </p>
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="flex items-center gap-1 text-[12px] font-medium text-amber-800 hover:text-amber-950"
+          >
+            {showAll
+              ? 'Show fewer'
+              : `Show ${hiddenCount} more pending comp-off request${hiddenCount !== 1 ? 's' : ''}`}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAll ? 'rotate-180' : ''}`} />
+          </button>
         )}
       </CardContent>
     </Card>
