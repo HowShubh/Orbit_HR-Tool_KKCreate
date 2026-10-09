@@ -104,7 +104,13 @@ export async function listPendingApprovalsForReviewer(
   // Step E: bucket leaves by request_id (or per-leave for legacy)
   const buckets = new Map<string, typeof leaves>()
   for (const l of leaves) {
-    const key = l.request_id ?? `legacy:${l.id}`
+    // A deletion request is one day inside an already-approved request, so the
+    // parent request is still 'active'. Give each its own card, decided per leave
+    // by approveLeaveDeletion / rejectLeaveDeletion.
+    const key =
+      l.status === 'delete_requested'
+        ? `delete:${l.id}`
+        : l.request_id ?? `legacy:${l.id}`
     const arr = buckets.get(key) ?? []
     arr.push(l)
     buckets.set(key, arr)
@@ -182,7 +188,9 @@ export async function listPendingApprovalsForReviewer(
         const mid = managerIdByUser.get(first.user_id)
         return mid ? managerNameById.get(mid) ?? null : null
       })(),
-      status: (parent?.status ?? first.status) as LeaveRequestWithDays['status'],
+      status: (first.status === 'delete_requested'
+        ? 'delete_requested'
+        : parent?.status ?? first.status) as LeaveRequestWithDays['status'],
       reason: parent?.reason ?? first.reason ?? null,
       created_at: parent?.created_at ?? first.created_at,
       decided_at: parent?.decided_at ?? null,

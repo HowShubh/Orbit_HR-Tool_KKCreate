@@ -479,6 +479,23 @@ async function bumpUsed(
 }
 
 // Map the RAISE messages from the atomic leave RPCs to friendly errors.
+// When a request's last remaining day is deleted, close the request too, so it
+// doesn't linger as 'pending' / 'active' with nothing left in it.
+async function closeRequestIfEmpty(
+  adminClient: ReturnType<typeof createAdminClient>,
+  requestId: string | null
+) {
+  if (!requestId) return
+  const { count } = await adminClient
+    .from('leaves')
+    .select('id', { count: 'exact', head: true })
+    .eq('request_id', requestId)
+    .neq('status', 'deleted')
+  if (count === 0) {
+    await adminClient.from('leave_requests').update({ status: 'deleted' }).eq('id', requestId)
+  }
+}
+
 function rpcErrorToAction(message: string | undefined, fallback: string): ActionError {
   const m = message ?? ''
   if (m.includes('INSUFFICIENT_BALANCE')) {
@@ -1890,6 +1907,7 @@ export async function approveLeaveDeletion(leaveId: string) {
     p_actor: actor.id,
   })
   if (rpcError) throw rpcErrorToAction(rpcError.message, 'Approve leave deletion failed')
+  await closeRequestIfEmpty(adminClient, leave.request_id)
 
   const { data: updated } = await adminClient.from('leaves').select('*').eq('id', leaveId).single()
   if (!updated) throw new ActionError('Approve leave deletion failed')
@@ -2002,6 +2020,7 @@ export async function deleteLeave(leaveId: string) {
     p_actor: user.id,
   })
   if (rpcError) throw rpcErrorToAction(rpcError.message, 'Delete leave failed')
+  await closeRequestIfEmpty(adminClient, leave.request_id)
 
   await writeAudit(user.id, 'leave.delete', 'leave', leaveId, { before: leave })
 
