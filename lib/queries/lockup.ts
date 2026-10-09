@@ -1,0 +1,2225 @@
+import { cache } from 'react'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getLockupSlackSettings, type LockupSlackSettings } from '@/lib/slack-lockup'
+import type { Tables } from '@/lib/supabase/database.types'
+import type { EquipmentCategory, EquipmentStatus, ShootStatus } from '@/lib/lockup/constants'
+
+// ============================================================
+// Shared shapes
+// ============================================================
+
+export type ReservationBadge = {
+  id: string
+  /** Null for a standalone hold (no shoot). */
+  shoot_id: string | null
+  /** Shoot name, or "personal hold" wording for a standalone reservation. */
+  shoot_name: string
+  /** The shoot's own window, for display ("for X, 25 to 26 Aug"). */
+  shoot_starts_at: string
+  shoot_ends_at: string
+  /** What the item is ACTUALLY held for: the reservation's own window when it
+   *  has one, otherwise the shoot's. This is what conflicts compare. */
+  holds_from: string
+  holds_to: string
+  /** True when this hold is narrower than the shoot it belongs to. */
+  custom_window: boolean
+  reserved_by: string
+  reserved_by_name: string
+  /** 'pending' = flagged item awaiting manager approval; still real intent. */
+  status: 'active' | 'pending'
+}
+
+export type EquipmentItemRow = Tables<'equipment_items'> & {
+  home_location_label: string | null
+  /** Where the item was actually last dropped (may differ from its home shelf).
+   *  Null while checked out. This is what "Available in ..." should show. */
+  current_location_label: string | null
+  /** Long-term owner name (assigned devices only). */
+  assignee_name: string | null
+  holder_name: string | null
+  /** Open checkout (when checked out) */
+  due_at: string | null
+  checked_out_at: string | null
+  checkout_shoot_name: string | null
+  /** Open repair (when in repair) */
+  repair_expected_back_on: string | null
+  repair_vendor: string | null
+  /** Active reservations on upcoming/running shoots */
+  active_reservations: ReservationBadge[]
+}
+
+export type MyGearRow = {
+  checkout_id: string
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  home_location_label: string | null
+  checked_out_at: string
+  due_at: string | null
+  overdue: boolean
+  shoot_name: string | null
+}
+
+/** A device the current user holds — either their own assigned one (resting)
+ *  or one they borrowed from someone else. */
+export type MyDeviceRow = {
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  assignee_id: string | null
+  assignee_name: string | null
+}
+
+export type MyDevices = {
+  assignedToMe: MyDeviceRow[]
+  borrowedByMe: MyDeviceRow[]
+}
+
+/** A reservation the current user is holding: gear set aside for a shoot, or
+ *  a standalone "pick up on this date" window hold. Powers the "Reserved gear"
+ *  section of the With me tab. */
+export type MyReservationRow = {
+  id: string
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  status: 'active' | 'pending'
+  /** Standalone hold window; null/null when it's tied to a shoot. */
+  starts_at: string | null
+  ends_at: string | null
+  /** Shoot it's reserved for; null for a standalone window hold. */
+  shoot_id: string | null
+  shoot_name: string | null
+  /** Where to collect it from. */
+  home_location_label: string | null
+}
+
+/** One active/pending hold, org-wide, for the Tech Console's Holds tab. Like
+ *  MyReservationRow but carries who is holding it and whether it needs approval. */
+export type ConsoleHoldRow = {
+  id: string
+  item_id: string
+  item_code: string
+  item_name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  status: 'active' | 'pending'
+  held_by_id: string
+  held_by_name: string
+  /** Standalone hold window; null/null when it's tied to a shoot (whole shoot). */
+  starts_at: string | null
+  ends_at: string | null
+  shoot_id: string | null
+  shoot_name: string | null
+  home_location_label: string | null
+  requires_approval: boolean
+}
+
+export type ShootConflict = {
+  kind: 'in_repair' | 'still_out' | 'double_reserved' | 'unavailable'
+  message: string
+  /** Compact badge form of message, e.g. "out til Fri 14" / "reserved: Ep 43". */
+  short: string
+}
+
+export type ShootReservationRow = {
+  id: string
+  status: Tables<'equipment_reservations'>['status']
+  reserved_by: string
+  reserved_by_name: string
+  item: {
+    id: string
+    code: string
+    name: string
+    category: EquipmentCategory
+    photo_url: string | null
+    status: EquipmentStatus
+    holder_name: string | null
+    due_at: string | null
+    repair_expected_back_on: string | null
+  }
+  conflict: ShootConflict | null
+}
+
+export type StudioBlockRow = {
+  id: string
+  studio_id: string
+  studio_name: string
+  starts_at: string
+  ends_at: string
+}
+
+export type StudioScheduleEntry = StudioBlockRow & {
+  /** Null for a standalone hold: someone blocked the room without a shoot. */
+  shoot_id: string | null
+  /** The shoot's name, or the hold's own title. Always something to show. */
+  shoot_name: string
+  created_by: string
+  created_by_name: string
+}
+
+export type ShootSummary = {
+  id: string
+  name: string
+  location: string | null
+  starts_at: string
+  ends_at: string
+  owner_id: string
+  owner_name: string
+  status: ShootStatus
+  /** planned shoots whose window has started display as active */
+  effective_status: ShootStatus
+  reserved_count: number
+  picked_up_count: number
+  conflict_count: number
+  notes: string | null
+  studio_blocks: StudioBlockRow[]
+}
+
+export type ShootEditor = {
+  editor_row_id: string
+  user_id: string
+  full_name: string
+}
+
+export type ShootDetail = ShootSummary & {
+  reservations: ShootReservationRow[]
+  editors: ShootEditor[]
+}
+
+export type AvailabilityRow = {
+  item_id: string
+  code: string
+  name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  status: EquipmentStatus
+  home_location_label: string | null
+  requires_approval: boolean
+  available: boolean
+  conflict: ShootConflict | null
+  already_reserved_for_shoot: boolean
+}
+
+export type KitRow = {
+  id: string
+  name: string
+  notes: string | null
+  items: {
+    item_id: string
+    code: string
+    name: string
+    category: EquipmentCategory
+    status: EquipmentStatus
+    requires_approval: boolean
+  }[]
+}
+
+export type PendingApprovalRow = {
+  reservation_id: string
+  created_at: string
+  reserved_by: string
+  reserved_by_name: string
+  item: {
+    id: string
+    code: string
+    name: string
+    category: EquipmentCategory
+    photo_url: string | null
+  }
+  /** Null for a standalone hold; then `window` carries the times. */
+  shoot: {
+    id: string
+    name: string
+    starts_at: string
+    ends_at: string
+  } | null
+  /** A standalone hold's own window (null for shoot reservations). */
+  window: { starts_at: string; ends_at: string } | null
+}
+
+export type ActivityEvent = {
+  at: string
+  kind:
+    | 'checkout'
+    | 'return'
+    | 'transfer'
+    | 'repair_sent'
+    | 'repair_back'
+    | 'issue_open'
+    | 'issue_resolved'
+    | 'reserved'
+    | 'reservation_cancelled'
+    | 'reservation_expired'
+    | 'reservation_rejected'
+  item_id: string
+  item_name: string
+  item_code: string
+  actor_name: string
+  detail: string
+}
+
+export type TechConsoleData = {
+  stats: {
+    items: number
+    out_now: number
+    overdue: number
+    in_repair: number
+    open_issues: number
+  }
+  repairs: (Tables<'equipment_repairs'> & {
+    item_name: string
+    item_code: string
+    sent_by_name: string
+  })[]
+  issues: (Tables<'equipment_issues'> & {
+    item_name: string
+    item_code: string
+    reported_by_name: string
+  })[]
+  activity: ActivityEvent[]
+  locations: (Tables<'equipment_locations'> & { item_count: number })[]
+  studios: (Tables<'equipment_studios'> & { upcoming_blocks: number })[]
+  /** item_id -> purchase data, only loaded for the console (capability-gated page) */
+  privateByItem: Record<string, Tables<'equipment_private'>>
+}
+
+// ============================================================
+// Internal helpers
+// ============================================================
+
+type Admin = ReturnType<typeof createAdminClient>
+
+/**
+ * Every user's display name, fetched at most once per request. nameMap is
+ * called from roughly twenty places in a single Lockup render, and each call
+ * used to be its own round trip to Supabase (~300ms each, and they stack up
+ * sequentially inside query functions). The users table is small, so fetching
+ * it whole once and resolving names in memory is far cheaper than asking for
+ * subsets over and over.
+ */
+const allUsersById = cache(
+  async (): Promise<Map<string, Pick<Tables<'users'>, 'id' | 'full_name' | 'email' | 'slack_user_id'>>> => {
+    const adminClient = createAdminClient()
+    const { data } = await adminClient.from('users').select('id, full_name, email, slack_user_id')
+    return new Map((data ?? []).map((u) => [u.id, u]))
+  }
+)
+
+/** Names for a set of user ids. Reads from the per-request cache above, so
+ *  only the first caller in a render pays for the fetch. */
+async function nameMap(adminClient: Admin, ids: string[]): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(ids.filter(Boolean)))
+  if (unique.length === 0) return new Map()
+  const all = await allUsersById()
+  const out = new Map<string, string>()
+  for (const id of unique) {
+    const user = all.get(id)
+    if (user) out.set(id, user.full_name)
+  }
+  return out
+}
+
+// The next four helpers back several query functions that often run within the
+// same page render (listEquipment + listShoots on /lockup, for example). They
+// are wrapped in React.cache so one request fetches each table at most ONCE,
+// no matter how many query functions need it. The cache lives per request, so
+// no staleness survives a mutation + revalidate.
+
+const locationMap = cache(async (): Promise<Map<string, string>> => {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_locations').select('id, label')
+  return new Map((data ?? []).map((l) => [l.id, l.label]))
+})
+
+/** Every equipment row keyed by id, fetched once per request. Several query
+ *  functions each needed "the items behind these ids" in the same render and
+ *  were issuing their own subset query for it; the table is small, so one
+ *  shared fetch replaces a round trip per caller. */
+const rawItemsById = cache(async (): Promise<Map<string, Tables<'equipment_items'>>> => {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_items').select('*')
+  return new Map((data ?? []).map((i) => [i.id, i]))
+})
+
+const studioMap = cache(async (): Promise<Map<string, string>> => {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_studios').select('id, name')
+  return new Map((data ?? []).map((s) => [s.id, s.name]))
+})
+
+/** Studio blocks for a set of shoots, grouped by shoot id, names resolved. */
+async function studioBlocksByShoot(
+  adminClient: Admin,
+  shootIds: string[]
+): Promise<Map<string, StudioBlockRow[]>> {
+  if (shootIds.length === 0) return new Map()
+  const [{ data: blocks }, studios] = await Promise.all([
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('*')
+      .in('shoot_id', shootIds)
+      .order('starts_at'),
+    studioMap(),
+  ])
+  const byShoot = new Map<string, StudioBlockRow[]>()
+  for (const b of blocks ?? []) {
+    // Standalone holds have no shoot to group under.
+    if (!b.shoot_id) continue
+    const list = byShoot.get(b.shoot_id) ?? []
+    list.push({
+      id: b.id,
+      studio_id: b.studio_id,
+      studio_name: studios.get(b.studio_id) ?? 'Studio',
+      starts_at: b.starts_at,
+      ends_at: b.ends_at,
+    })
+    byShoot.set(b.shoot_id, list)
+  }
+  return byShoot
+}
+
+function shootWindowOverlaps(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string
+): boolean {
+  return new Date(aStart) <= new Date(bEnd) && new Date(bStart) <= new Date(aEnd)
+}
+
+function effectiveShootStatus(shoot: Tables<'equipment_shoots'>): ShootStatus {
+  if (shoot.status === 'cancelled' || shoot.status === 'done') return shoot.status
+  const now = new Date()
+  if (now < new Date(shoot.starts_at)) return 'planned'
+  if (now <= new Date(shoot.ends_at)) return 'active'
+  return 'done'
+}
+
+/** Conflict of one item against one shoot window, given open checkout/repair
+ *  info and the item's other active reservations. */
+function computeConflict(args: {
+  itemStatus: EquipmentStatus
+  dueAt: string | null
+  /** Who physically has it — named in the message so you know who to ask. */
+  holderName?: string | null
+  repairBackOn: string | null
+  shootStartsAt: string
+  shootEndsAt: string
+  otherReservations: ReservationBadge[]
+}): ShootConflict | null {
+  const { itemStatus, dueAt, holderName, repairBackOn, shootStartsAt, shootEndsAt, otherReservations } =
+    args
+
+  if (itemStatus === 'retired' || itemStatus === 'lost') {
+    return { kind: 'unavailable', message: `Item is marked ${itemStatus}`, short: itemStatus }
+  }
+  if (itemStatus === 'in_repair') {
+    if (!repairBackOn) {
+      return {
+        kind: 'in_repair',
+        message: 'In repair, no expected return date',
+        short: 'in repair',
+      }
+    }
+    if (new Date(repairBackOn) >= new Date(shootStartsAt)) {
+      return {
+        kind: 'in_repair',
+        message: `In repair, expected back ${formatDay(repairBackOn)}`,
+        short: `repair til ${formatDay(repairBackOn)}`,
+      }
+    }
+  }
+  if (itemStatus === 'checked_out' && dueAt && new Date(dueAt) > new Date(shootStartsAt)) {
+    return {
+      kind: 'still_out',
+      message: holderName
+        ? `${holderName} has it until ${formatDayTime(dueAt)}`
+        : `Checked out until ${formatDayTime(dueAt)}`,
+      short: holderName ? `${holderName} til ${formatDay(dueAt)}` : `out til ${formatDay(dueAt)}`,
+    }
+  }
+  const clash = otherReservations.find((r) =>
+    shootWindowOverlaps(shootStartsAt, shootEndsAt, r.holds_from, r.holds_to)
+  )
+  if (clash) {
+    // A narrow hold is stated to the minute, so people can see the gap they
+    // could still use; a whole-shoot hold reads by day.
+    const when = clash.custom_window
+      ? `${formatDayTime(clash.holds_from)} to ${formatDayTime(clash.holds_to)}`
+      : `${formatDay(clash.holds_from)} to ${formatDay(clash.holds_to)}`
+    return {
+      kind: 'double_reserved',
+      message: `${clash.reserved_by_name} has it for ${clash.shoot_name} (${when})`,
+      short: `${clash.reserved_by_name}: ${clash.shoot_name}`,
+    }
+  }
+  return null
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'Asia/Kolkata',
+  })
+}
+
+function formatDayTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  })
+}
+
+/** Live (active + pending-approval) reservations joined with their (not
+ *  cancelled/done) shoots, grouped by item. Pending counts as intent for
+ *  conflict purposes. */
+const activeReservationsByItem = cache(async (): Promise<Map<string, ReservationBadge[]>> => {
+  const adminClient = createAdminClient()
+  const { data: reservations } = await adminClient
+    .from('equipment_reservations')
+    .select('id, item_id, shoot_id, reserved_by, status, starts_at, ends_at')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+  if (!reservations || reservations.length === 0) return new Map()
+
+  const shootIds = Array.from(new Set(reservations.flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
+  const { data: shoots } = shootIds.length
+    ? await adminClient
+        .from('equipment_shoots')
+        .select('id, name, starts_at, ends_at, status')
+        .in('id', shootIds)
+    : { data: [] as Pick<Tables<'equipment_shoots'>, 'id' | 'name' | 'starts_at' | 'ends_at' | 'status'>[] }
+  const shootMap = new Map((shoots ?? []).map((s) => [s.id, s]))
+  const names = await nameMap(adminClient, reservations.map((r) => r.reserved_by))
+
+  const byItem = new Map<string, ReservationBadge[]>()
+  for (const r of reservations) {
+    const reserverName = names.get(r.reserved_by) ?? 'Unknown'
+    let badge: ReservationBadge | null = null
+    if (r.shoot_id) {
+      const shoot = shootMap.get(r.shoot_id)
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+      badge = {
+        id: r.id,
+        shoot_id: r.shoot_id,
+        shoot_name: shoot.name,
+        shoot_starts_at: shoot.starts_at,
+        shoot_ends_at: shoot.ends_at,
+        holds_from: r.starts_at ?? shoot.starts_at,
+        holds_to: r.ends_at ?? shoot.ends_at,
+        custom_window: Boolean(r.starts_at && r.ends_at),
+        reserved_by: r.reserved_by,
+        reserved_by_name: reserverName,
+        status: r.status as 'active' | 'pending',
+      }
+    } else if (r.starts_at && r.ends_at) {
+      // Standalone hold: someone booked it for a plain window, no shoot.
+      badge = {
+        id: r.id,
+        shoot_id: null,
+        shoot_name: `${reserverName}'s hold`,
+        shoot_starts_at: r.starts_at,
+        shoot_ends_at: r.ends_at,
+        holds_from: r.starts_at,
+        holds_to: r.ends_at,
+        custom_window: true,
+        reserved_by: r.reserved_by,
+        reserved_by_name: reserverName,
+        status: r.status as 'active' | 'pending',
+      }
+    }
+    if (!badge) continue
+    const list = byItem.get(r.item_id) ?? []
+    list.push(badge)
+    byItem.set(r.item_id, list)
+  }
+  return byItem
+})
+
+/** Open checkouts (returned_at IS NULL) keyed by item, with shoot names. */
+const openCheckoutsByItem = cache(async () => {
+  const adminClient = createAdminClient()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .is('returned_at', null)
+  const list = checkouts ?? []
+  const shootIds = Array.from(new Set(list.map((c) => c.shoot_id).filter(Boolean))) as string[]
+  let shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
+  }
+  return {
+    byItem: new Map(list.map((c) => [c.item_id, c])),
+    shootNames,
+    all: list,
+  }
+})
+
+const openRepairsByItem = cache(async () => {
+  const adminClient = createAdminClient()
+  const { data: repairs } = await adminClient
+    .from('equipment_repairs')
+    .select('*')
+    .is('returned_at', null)
+  return new Map((repairs ?? []).map((r) => [r.item_id, r]))
+})
+
+async function enrichItems(
+  adminClient: Admin,
+  items: Tables<'equipment_items'>[]
+): Promise<EquipmentItemRow[]> {
+  const [locations, reservations, checkouts, repairs] = await Promise.all([
+    locationMap(),
+    activeReservationsByItem(),
+    openCheckoutsByItem(),
+    openRepairsByItem(),
+  ])
+  const names = await nameMap(adminClient, [
+    ...(items.map((i) => i.current_holder_id).filter(Boolean) as string[]),
+    ...(items.map((i) => i.assignee_id).filter(Boolean) as string[]),
+  ])
+
+  return items.map((item) => {
+    const checkout = checkouts.byItem.get(item.id) ?? null
+    const repair = repairs.get(item.id) ?? null
+    return {
+      ...item,
+      home_location_label: item.home_location_id
+        ? locations.get(item.home_location_id) ?? null
+        : null,
+      current_location_label: item.current_location_id
+        ? locations.get(item.current_location_id) ?? null
+        : null,
+      assignee_name: item.assignee_id ? names.get(item.assignee_id) ?? null : null,
+      holder_name: item.current_holder_id
+        ? names.get(item.current_holder_id) ?? null
+        : null,
+      due_at: checkout?.due_at ?? null,
+      checked_out_at: checkout?.checked_out_at ?? null,
+      checkout_shoot_name: checkout?.shoot_id
+        ? checkouts.shootNames.get(checkout.shoot_id) ?? null
+        : null,
+      repair_expected_back_on: repair?.expected_back_on ?? null,
+      repair_vendor: repair?.vendor ?? null,
+      active_reservations: reservations.get(item.id) ?? [],
+    }
+  })
+}
+
+// ============================================================
+// Public queries
+// ============================================================
+
+/** The full enriched inventory. Cached per request: the Lockup page, the Tech
+ *  Console, availability lookups and scan resolution all want the same list in
+ *  one render, and re-running it means refetching items plus every enrichment. */
+export const listEquipment = cache(async (): Promise<EquipmentItemRow[]> => {
+  const adminClient = createAdminClient()
+  const { data: items } = await adminClient
+    .from('equipment_items')
+    .select('*')
+    .order('name')
+  return enrichItems(adminClient, items ?? [])
+})
+
+export async function getItemByCode(code: string): Promise<EquipmentItemRow | null> {
+  const adminClient = createAdminClient()
+  const { data: item } = await adminClient
+    .from('equipment_items')
+    .select('*')
+    .eq('code', code.toUpperCase())
+    .maybeSingle()
+  if (!item) return null
+  const [enriched] = await enrichItems(adminClient, [item])
+  return enriched ?? null
+}
+
+export type ItemHistoryEvent = {
+  at: string
+  kind: 'checkout' | 'return' | 'transfer' | 'repair_sent' | 'repair_back' | 'issue_open' | 'issue_resolved'
+  text: string
+}
+
+/** Chronological history of one item (newest first), assembled from checkouts,
+ *  repairs and issues. */
+/**
+ * An item's past, capped to the last 90 days. The item page shows a handful and
+ * expands to the rest of that window — the point is a readable page, not an
+ * archive, and 90 days is also how long shoots survive before retention deletes
+ * them, so the two windows agree.
+ */
+export async function getItemHistory(itemId: string, limit = 25): Promise<ItemHistoryEvent[]> {
+  const adminClient = createAdminClient()
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const [{ data: checkouts }, { data: repairs }, { data: issues }, locations] = await Promise.all([
+    adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .eq('item_id', itemId)
+      .gte('checked_out_at', since)
+      .order('checked_out_at', { ascending: false })
+      .limit(limit),
+    adminClient
+      .from('equipment_repairs')
+      .select('*')
+      .eq('item_id', itemId)
+      .gte('sent_at', since)
+      .order('sent_at', { ascending: false })
+      .limit(limit),
+    adminClient
+      .from('equipment_issues')
+      .select('*')
+      .eq('item_id', itemId)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    locationMap(),
+  ])
+
+  const userIds = [
+    ...(checkouts ?? []).map((c) => c.holder_id),
+    ...(repairs ?? []).map((r) => r.sent_by),
+    ...(issues ?? []).map((i) => i.reported_by),
+  ]
+  const names = await nameMap(adminClient, userIds)
+  const name = (id: string) => names.get(id) ?? 'Unknown'
+
+  const events: ItemHistoryEvent[] = []
+  for (const c of checkouts ?? []) {
+    events.push({
+      at: c.checked_out_at,
+      kind: c.transferred_from_checkout_id ? 'transfer' : 'checkout',
+      text: c.transferred_from_checkout_id
+        ? `${name(c.holder_id)} took over`
+        : c.due_at
+          ? `${name(c.holder_id)} checked out, due ${formatDayTime(c.due_at)}`
+          : `${name(c.holder_id)} borrowed it`,
+    })
+    if (c.returned_at) {
+      const loc = c.returned_location_id ? locations.get(c.returned_location_id) : null
+      events.push({
+        at: c.returned_at,
+        kind: 'return',
+        // Pooled gear returns to a cupboard; assigned devices go back to the owner.
+        text: `${name(c.holder_id)} ${loc ? `checked in to ${loc}` : 'handed it back'}`,
+      })
+    }
+  }
+  for (const r of repairs ?? []) {
+    events.push({
+      at: r.sent_at,
+      kind: 'repair_sent',
+      text: `${name(r.sent_by)} sent for repair${r.vendor ? ` (${r.vendor})` : ''}${
+        r.expected_back_on ? `, expected back ${formatDay(r.expected_back_on)}` : ''
+      }`,
+    })
+    if (r.returned_at) {
+      events.push({ at: r.returned_at, kind: 'repair_back', text: 'Back from repair' })
+    }
+  }
+  for (const i of issues ?? []) {
+    events.push({
+      at: i.created_at,
+      kind: 'issue_open',
+      text: `${name(i.reported_by)} reported a problem: ${i.note}`,
+    })
+    if (i.resolved_at) {
+      events.push({ at: i.resolved_at, kind: 'issue_resolved', text: 'Problem resolved' })
+    }
+  }
+  return events
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, limit)
+}
+
+export async function getMyGear(userId: string): Promise<MyGearRow[]> {
+  const adminClient = createAdminClient()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .eq('holder_id', userId)
+    .is('returned_at', null)
+    .order('due_at')
+  const list = checkouts ?? []
+  if (list.length === 0) return []
+
+  const [{ data: items }, locations] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('*')
+      .in('id', list.map((c) => c.item_id)),
+    locationMap(),
+  ])
+  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+
+  const shootIds = Array.from(new Set(list.map((c) => c.shoot_id).filter(Boolean))) as string[]
+  let shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
+  }
+
+  const now = new Date()
+  return list.flatMap((c) => {
+    const item = itemMap.get(c.item_id)
+    // Assigned-device loans surface in "My Devices", not the pooled gear list.
+    if (!item || item.kind === 'assigned') return []
+    return [
+      {
+        checkout_id: c.id,
+        item_id: item.id,
+        item_code: item.code,
+        item_name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        home_location_label: item.home_location_id
+          ? locations.get(item.home_location_id) ?? null
+          : null,
+        checked_out_at: c.checked_out_at,
+        due_at: c.due_at,
+        overdue: c.due_at ? new Date(c.due_at) < now : false,
+        shoot_name: c.shoot_id ? shootNames.get(c.shoot_id) ?? null : null,
+      },
+    ]
+  })
+}
+
+/** The devices a person currently has: their own assigned ones, plus any they
+ *  borrowed from someone else. Powers the dashboard "Device With Me" view. */
+export async function getMyDevices(userId: string): Promise<MyDevices> {
+  const adminClient = createAdminClient()
+  // Everything assigned that is either owned by me, or physically with me.
+  const { data: rows } = await adminClient
+    .from('equipment_items')
+    .select('*')
+    .eq('kind', 'assigned')
+    .or(`assignee_id.eq.${userId},current_holder_id.eq.${userId}`)
+    .order('name')
+  const items = rows ?? []
+  if (items.length === 0) return { assignedToMe: [], borrowedByMe: [] }
+
+  const assigneeNames = await nameMap(
+    adminClient,
+    items.map((i) => i.assignee_id).filter(Boolean) as string[]
+  )
+  const toRow = (i: (typeof items)[number]): MyDeviceRow => ({
+    item_id: i.id,
+    item_code: i.code,
+    item_name: i.name,
+    category: i.category,
+    photo_url: i.photo_url,
+    assignee_id: i.assignee_id,
+    assignee_name: i.assignee_id ? assigneeNames.get(i.assignee_id) ?? null : null,
+  })
+
+  const assignedToMe = items.filter((i) => i.assignee_id === userId).map(toRow)
+  // Borrowed = physically with me but owned by someone else (or unassigned).
+  const borrowedByMe = items
+    .filter((i) => i.current_holder_id === userId && i.assignee_id !== userId)
+    .map(toRow)
+  return { assignedToMe, borrowedByMe }
+}
+
+/** Active + pending reservations this person is holding, newest window first.
+ *  Includes both shoot reservations and standalone window holds. */
+export async function getMyReservations(userId: string): Promise<MyReservationRow[]> {
+  const adminClient = createAdminClient()
+  const { data: rows } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .eq('reserved_by', userId)
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+    .order('starts_at', { ascending: true, nullsFirst: false })
+  const reservations = rows ?? []
+  if (reservations.length === 0) return []
+
+  const itemById = await rawItemsById()
+
+  const shootIds = [
+    ...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[]),
+  ]
+  const shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    for (const sh of shoots ?? []) shootNames.set(sh.id, sh.name)
+  }
+
+  const locations = await locationMap()
+
+  const out: MyReservationRow[] = []
+  for (const r of reservations) {
+    const item = itemById.get(r.item_id)
+    if (!item) continue
+    out.push({
+      id: r.id,
+      item_id: item.id,
+      item_code: item.code,
+      item_name: item.name,
+      category: item.category,
+      photo_url: item.photo_url,
+      status: r.status as 'active' | 'pending',
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      shoot_id: r.shoot_id,
+      shoot_name: r.shoot_id ? shootNames.get(r.shoot_id) ?? null : null,
+      home_location_label: item.home_location_id
+        ? locations.get(item.home_location_id) ?? null
+        : null,
+    })
+  }
+  return out
+}
+
+/** Every active + pending hold in the system, soonest window first. Powers the
+ *  Tech Console's Holds tab: who has set aside what, for when, shoot or not. */
+export async function getConsoleHolds(): Promise<ConsoleHoldRow[]> {
+  const adminClient = createAdminClient()
+  const { data: rows } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[])
+    .order('starts_at', { ascending: true, nullsFirst: false })
+  const reservations = rows ?? []
+  if (reservations.length === 0) return []
+
+  const itemById = await rawItemsById()
+
+  const shootIds = [...new Set(reservations.map((r) => r.shoot_id).filter(Boolean) as string[])]
+  const shootNames = new Map<string, string>()
+  if (shootIds.length > 0) {
+    const { data: shoots } = await adminClient
+      .from('equipment_shoots')
+      .select('id, name')
+      .in('id', shootIds)
+    for (const sh of shoots ?? []) shootNames.set(sh.id, sh.name)
+  }
+
+  const holderNames = await nameMap(
+    adminClient,
+    reservations.map((r) => r.reserved_by)
+  )
+  const locations = await locationMap()
+
+  const out: ConsoleHoldRow[] = []
+  for (const r of reservations) {
+    const item = itemById.get(r.item_id)
+    if (!item) continue
+    out.push({
+      id: r.id,
+      item_id: item.id,
+      item_code: item.code,
+      item_name: item.name,
+      category: item.category,
+      photo_url: item.photo_url,
+      status: r.status as 'active' | 'pending',
+      held_by_id: r.reserved_by,
+      held_by_name: holderNames.get(r.reserved_by) ?? 'Someone',
+      starts_at: r.starts_at,
+      ends_at: r.ends_at,
+      shoot_id: r.shoot_id,
+      shoot_name: r.shoot_id ? shootNames.get(r.shoot_id) ?? null : null,
+      home_location_label: item.home_location_id
+        ? locations.get(item.home_location_id) ?? null
+        : null,
+      requires_approval: item.requires_approval,
+    })
+  }
+  return out
+}
+
+// ============================================================
+// Shoots
+// ============================================================
+
+async function buildShootReservations(
+  adminClient: Admin,
+  shoot: Tables<'equipment_shoots'>
+): Promise<ShootReservationRow[]> {
+  const { data: reservations } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .eq('shoot_id', shoot.id)
+    .in('status', ['active', 'pending', 'picked_up'] as unknown as (
+      | 'active'
+      | 'pending'
+      | 'picked_up'
+    )[])
+    .order('created_at')
+  const list = reservations ?? []
+  if (list.length === 0) return []
+
+  const [itemMap, reservationsByItem, checkouts, repairs] = await Promise.all([
+    rawItemsById(),
+    activeReservationsByItem(),
+    openCheckoutsByItem(),
+    openRepairsByItem(),
+  ])
+  const names = await nameMap(adminClient, [
+    ...list.map((r) => r.reserved_by),
+    ...(list
+      .map((r) => itemMap.get(r.item_id)?.current_holder_id)
+      .filter(Boolean) as string[]),
+  ])
+
+  return list.flatMap((r) => {
+    const item = itemMap.get(r.item_id)
+    if (!item) return []
+    const checkout = checkouts.byItem.get(item.id) ?? null
+    const repair = repairs.get(item.id) ?? null
+    const others = (reservationsByItem.get(item.id) ?? []).filter((b) => b.id !== r.id)
+    const conflict =
+      r.status === 'picked_up'
+        ? null
+        : computeConflict({
+            itemStatus: item.status,
+            dueAt: checkout?.due_at ?? null,
+            holderName: item.current_holder_id ? names.get(item.current_holder_id) : null,
+            repairBackOn: repair?.expected_back_on ?? null,
+            shootStartsAt: shoot.starts_at,
+            shootEndsAt: shoot.ends_at,
+            otherReservations: others,
+          })
+    return [
+      {
+        id: r.id,
+        status: r.status,
+        reserved_by: r.reserved_by,
+        reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
+        item: {
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          category: item.category,
+          photo_url: item.photo_url,
+          status: item.status,
+          holder_name: item.current_holder_id
+            ? names.get(item.current_holder_id) ?? null
+            : null,
+          due_at: checkout?.due_at ?? null,
+          repair_expected_back_on: repair?.expected_back_on ?? null,
+        },
+        conflict,
+      },
+    ]
+  })
+}
+
+export async function listShoots(): Promise<ShootSummary[]> {
+  const adminClient = createAdminClient()
+  // Finished shoots stay browsable for three months, so "what did we shoot
+  // last month, and who had what" is answerable in the app rather than only
+  // through a direct link someone saved. Older than that, the detail page
+  // still opens by URL and item timelines keep their shoot names forever.
+  const archiveCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: shoots } = await adminClient
+    .from('equipment_shoots')
+    .select('*')
+    .neq('status', 'cancelled')
+    .gte('ends_at', archiveCutoff)
+    .order('starts_at', { ascending: false })
+    .limit(120)
+  const list = shoots ?? []
+  if (list.length === 0) return []
+
+  // Batched on purpose: one round trip per table, NOT per shoot. Latency to
+  // Supabase dominates page time, so per-shoot loops are the enemy here.
+  const shootIds = list.map((s) => s.id)
+  const [{ data: allReservations }, reservationsByItem, checkouts, repairs, names, studioBlocks] =
+    await Promise.all([
+      adminClient
+        .from('equipment_reservations')
+        .select('*')
+        .in('shoot_id', shootIds)
+        .in('status', ['active', 'pending', 'picked_up'] as unknown as (
+          | 'active'
+          | 'pending'
+          | 'picked_up'
+        )[]),
+      activeReservationsByItem(),
+      openCheckoutsByItem(),
+      openRepairsByItem(),
+      nameMap(adminClient, list.map((s) => s.owner_id)),
+      studioBlocksByShoot(adminClient, shootIds),
+    ])
+  const reservations = allReservations ?? []
+
+  const itemMap = await rawItemsById()
+
+  return list.map((shoot) => {
+    const shootReservations = reservations.filter((r) => r.shoot_id === shoot.id)
+    let conflictCount = 0
+    for (const r of shootReservations) {
+      if (r.status !== 'active') continue
+      const item = itemMap.get(r.item_id)
+      if (!item) continue
+      const checkout = checkouts.byItem.get(item.id) ?? null
+      const repair = repairs.get(item.id) ?? null
+      const others = (reservationsByItem.get(item.id) ?? []).filter((b) => b.id !== r.id)
+      const conflict = computeConflict({
+        itemStatus: item.status,
+        dueAt: checkout?.due_at ?? null,
+        holderName: item.current_holder_id ? names.get(item.current_holder_id) : null,
+        repairBackOn: repair?.expected_back_on ?? null,
+        shootStartsAt: shoot.starts_at,
+        shootEndsAt: shoot.ends_at,
+        otherReservations: others,
+      })
+      if (conflict) conflictCount++
+    }
+    return {
+      id: shoot.id,
+      name: shoot.name,
+      location: shoot.location,
+      starts_at: shoot.starts_at,
+      ends_at: shoot.ends_at,
+      owner_id: shoot.owner_id,
+      owner_name: names.get(shoot.owner_id) ?? 'Unknown',
+      status: shoot.status,
+      effective_status: effectiveShootStatus(shoot),
+      reserved_count: shootReservations.length,
+      picked_up_count: shootReservations.filter((r) => r.status === 'picked_up').length,
+      conflict_count: conflictCount,
+      notes: shoot.notes,
+      studio_blocks: studioBlocks.get(shoot.id) ?? [],
+    }
+  })
+}
+
+export async function getShootDetail(shootId: string): Promise<ShootDetail | null> {
+  const adminClient = createAdminClient()
+  const { data: shoot } = await adminClient
+    .from('equipment_shoots')
+    .select('*')
+    .eq('id', shootId)
+    .maybeSingle()
+  if (!shoot) return null
+
+  const [reservations, { data: editorRows }, studioBlocks] = await Promise.all([
+    buildShootReservations(adminClient, shoot),
+    adminClient
+      .from('equipment_shoot_editors')
+      .select('id, user_id')
+      .eq('shoot_id', shoot.id)
+      .order('created_at'),
+    studioBlocksByShoot(adminClient, [shoot.id]),
+  ])
+  const names = await nameMap(adminClient, [
+    shoot.owner_id,
+    ...(editorRows ?? []).map((e) => e.user_id),
+  ])
+  return {
+    id: shoot.id,
+    name: shoot.name,
+    location: shoot.location,
+    starts_at: shoot.starts_at,
+    ends_at: shoot.ends_at,
+    owner_id: shoot.owner_id,
+    owner_name: names.get(shoot.owner_id) ?? 'Unknown',
+    status: shoot.status,
+    effective_status: effectiveShootStatus(shoot),
+    reserved_count: reservations.length,
+    picked_up_count: reservations.filter((r) => r.status === 'picked_up').length,
+    conflict_count: reservations.filter((r) => r.conflict).length,
+    notes: shoot.notes,
+    studio_blocks: studioBlocks.get(shoot.id) ?? [],
+    reservations,
+    editors: (editorRows ?? []).map((e) => ({
+      editor_row_id: e.id,
+      user_id: e.user_id,
+      full_name: names.get(e.user_id) ?? 'Unknown',
+    })),
+  }
+}
+
+/** Every reservable item with its availability against an arbitrary time
+ *  window. Backs the wizard's gear step (no shoot exists yet) and, via
+ *  getAvailabilityForShoot, the detail-page reservation picker. */
+export async function getAvailabilityForWindow(
+  startsAt: string,
+  endsAt: string,
+  excludeShootId?: string
+): Promise<AvailabilityRow[]> {
+  const items = await listEquipment()
+  return items
+    // Assigned devices are never reservable for shoots.
+    .filter((i) => i.kind !== 'assigned' && i.status !== 'retired' && i.status !== 'lost')
+    .map((item) => {
+      const forThisShoot = excludeShootId
+        ? item.active_reservations.some((r) => r.shoot_id === excludeShootId)
+        : false
+      const others = excludeShootId
+        ? item.active_reservations.filter((r) => r.shoot_id !== excludeShootId)
+        : item.active_reservations
+      const conflict = computeConflict({
+        itemStatus: item.status,
+        dueAt: item.due_at,
+        holderName: item.holder_name,
+        repairBackOn: item.repair_expected_back_on,
+        shootStartsAt: startsAt,
+        shootEndsAt: endsAt,
+        otherReservations: others,
+      })
+      return {
+        item_id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        status: item.status,
+        home_location_label: item.home_location_label,
+        requires_approval: item.requires_approval,
+        available: !conflict,
+        conflict,
+        already_reserved_for_shoot: forThisShoot,
+      }
+    })
+}
+
+/** Every item with its availability against a shoot's window, for the
+ *  reservation picker. */
+export async function getAvailabilityForShoot(shootId: string): Promise<AvailabilityRow[]> {
+  const adminClient = createAdminClient()
+  const { data: shoot } = await adminClient
+    .from('equipment_shoots')
+    .select('*')
+    .eq('id', shootId)
+    .maybeSingle()
+  if (!shoot) return []
+  return getAvailabilityForWindow(shoot.starts_at, shoot.ends_at, shootId)
+}
+
+// ============================================================
+// Kits
+// ============================================================
+
+/** All kits with their member items, alphabetical. Availability against a
+ *  window is derived client-side by joining member item_ids against
+ *  getAvailabilityForWindow rows. */
+export async function listKits(): Promise<KitRow[]> {
+  const adminClient = createAdminClient()
+  const [{ data: kits }, { data: members }] = await Promise.all([
+    adminClient.from('equipment_kits').select('*').order('name'),
+    adminClient.from('equipment_kit_items').select('*'),
+  ])
+  const kitList = kits ?? []
+  if (kitList.length === 0) return []
+
+  const itemIds = Array.from(new Set((members ?? []).map((m) => m.item_id)))
+  const { data: items } = itemIds.length
+    ? await adminClient
+        .from('equipment_items')
+        .select('id, code, name, category, status, requires_approval')
+        .in('id', itemIds)
+    : { data: [] as Pick<
+        Tables<'equipment_items'>,
+        'id' | 'code' | 'name' | 'category' | 'status' | 'requires_approval'
+      >[] }
+  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+
+  return kitList.map((kit) => ({
+    id: kit.id,
+    name: kit.name,
+    notes: kit.notes,
+    items: (members ?? [])
+      .filter((m) => m.kit_id === kit.id)
+      .flatMap((m) => {
+        const item = itemMap.get(m.item_id)
+        if (!item) return []
+        return [
+          {
+            item_id: item.id,
+            code: item.code,
+            name: item.name,
+            category: item.category,
+            status: item.status,
+            requires_approval: item.requires_approval,
+          },
+        ]
+      }),
+  }))
+}
+
+// ============================================================
+// Reservation approvals
+// ============================================================
+
+/** Pending flagged-item requests for the Tech Console queue, oldest first. */
+export async function listPendingApprovals(): Promise<PendingApprovalRow[]> {
+  const adminClient = createAdminClient()
+  const { data: reservations } = await adminClient
+    .from('equipment_reservations')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at')
+  const list = reservations ?? []
+  if (list.length === 0) return []
+
+  const itemIds = Array.from(new Set(list.map((r) => r.item_id)))
+  const shootIds = Array.from(new Set(list.flatMap((r) => (r.shoot_id ? [r.shoot_id] : []))))
+  const [{ data: items }, { data: shoots }, names] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url')
+      .in('id', itemIds),
+    adminClient
+      .from('equipment_shoots')
+      .select('id, name, starts_at, ends_at, status')
+      .in('id', shootIds),
+    nameMap(adminClient, list.map((r) => r.reserved_by)),
+  ])
+  const itemMap = new Map((items ?? []).map((i) => [i.id, i]))
+  const shootMap = new Map((shoots ?? []).map((s) => [s.id, s]))
+
+  return list.flatMap((r) => {
+    const item = itemMap.get(r.item_id)
+    if (!item) return []
+    const shoot = r.shoot_id ? shootMap.get(r.shoot_id) : null
+    // A shoot request on a cancelled/done shoot is moot; hide it. A standalone
+    // hold needs its own window present.
+    if (r.shoot_id) {
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') return []
+    } else if (!r.starts_at || !r.ends_at) {
+      return []
+    }
+    return [
+      {
+        reservation_id: r.id,
+        created_at: r.created_at,
+        reserved_by: r.reserved_by,
+        reserved_by_name: names.get(r.reserved_by) ?? 'Unknown',
+        item: {
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          category: item.category,
+          photo_url: item.photo_url,
+        },
+        shoot: shoot
+          ? {
+              id: shoot.id,
+              name: shoot.name,
+              starts_at: shoot.starts_at,
+              ends_at: shoot.ends_at,
+            }
+          : null,
+        window:
+          r.starts_at && r.ends_at ? { starts_at: r.starts_at, ends_at: r.ends_at } : null,
+      },
+    ]
+  })
+}
+
+// ============================================================
+// Tech Console
+// ============================================================
+
+export async function getTechConsoleData(): Promise<TechConsoleData> {
+  const adminClient = createAdminClient()
+  const now = new Date()
+
+  // Every fetch below is independent of the others, so they all go out at once.
+  // They used to run in six sequential waves, and at roughly 300ms per round
+  // trip to Supabase that dominated how long this console took to appear.
+  const [
+    items,
+    { all: openCheckouts },
+    { data: openRepairs },
+    { data: openIssues },
+    { data: recentCheckouts },
+    { data: freshRes },
+    { data: endedRes },
+    { data: locations },
+    { data: studioRows },
+    { data: upcomingBlocks },
+    { data: privateRows },
+  ] = await Promise.all([
+    listEquipment(),
+    openCheckoutsByItem(),
+    adminClient
+      .from('equipment_repairs')
+      .select('*')
+      .order('sent_at', { ascending: false })
+      .limit(50),
+    adminClient
+      .from('equipment_issues')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50),
+    adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .order('checked_out_at', { ascending: false })
+      .limit(30),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(40),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .not('resolved_at', 'is', null)
+      .order('resolved_at', { ascending: false })
+      .limit(40),
+    adminClient.from('equipment_locations').select('*').order('label'),
+    adminClient.from('equipment_studios').select('*').order('name'),
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('studio_id')
+      .gte('ends_at', new Date().toISOString()),
+    adminClient.from('equipment_private').select('*'),
+  ])
+
+  const itemById = new Map(items.map((i) => [i.id, i]))
+  const repairList = openRepairs ?? []
+  const issueList = openIssues ?? []
+
+  const names = await nameMap(adminClient, [
+    ...repairList.map((r) => r.sent_by),
+    ...issueList.map((i) => i.reported_by),
+  ])
+
+  // Recent activity feed (last 25 events across checkouts, repairs, issues)
+  const activityNames = await nameMap(
+    adminClient,
+    (recentCheckouts ?? []).map((c) => c.holder_id)
+  )
+  const activity: ActivityEvent[] = []
+  const pushActivity = (
+    at: string,
+    kind: ActivityEvent['kind'],
+    itemId: string,
+    actorName: string,
+    detail: string
+  ) => {
+    const item = itemById.get(itemId)
+    if (!item) return
+    activity.push({
+      at,
+      kind,
+      item_id: itemId,
+      item_name: item.name,
+      item_code: item.code,
+      actor_name: actorName,
+      detail,
+    })
+  }
+  for (const c of recentCheckouts ?? []) {
+    const actor = activityNames.get(c.holder_id) ?? 'Unknown'
+    pushActivity(
+      c.checked_out_at,
+      c.transferred_from_checkout_id ? 'transfer' : 'checkout',
+      c.item_id,
+      actor,
+      c.transferred_from_checkout_id
+        ? 'took over the item'
+        : c.due_at
+          ? `checked out, due ${formatDayTime(c.due_at)}`
+          : 'borrowed the device'
+    )
+    if (c.returned_at) pushActivity(c.returned_at, 'return', c.item_id, actor, 'checked in')
+  }
+  for (const r of repairList) {
+    const actor = names.get(r.sent_by) ?? 'Unknown'
+    pushActivity(r.sent_at, 'repair_sent', r.item_id, actor, 'sent for repair')
+    if (r.returned_at) pushActivity(r.returned_at, 'repair_back', r.item_id, actor, 'back from repair')
+  }
+  for (const i of issueList) {
+    const actor = names.get(i.reported_by) ?? 'Unknown'
+    pushActivity(i.created_at, 'issue_open', i.item_id, actor, `reported: ${i.note}`)
+    if (i.resolved_at) pushActivity(i.resolved_at, 'issue_resolved', i.item_id, actor, 'issue resolved')
+  }
+
+  // Reservation lifecycle. Two passes so a hold created long ago but cancelled
+  // today still shows its recent ending. Pick-ups are left out: the checkout
+  // event above already represents them.
+  const resById = new Map<string, Tables<'equipment_reservations'>>()
+  for (const r of [...(freshRes ?? []), ...(endedRes ?? [])]) resById.set(r.id, r)
+  const resList = [...resById.values()]
+  const resNames = await nameMap(
+    adminClient,
+    resList.map((r) => r.reserved_by)
+  )
+  for (const r of resList) {
+    const actor = resNames.get(r.reserved_by) ?? 'Unknown'
+    pushActivity(
+      r.created_at,
+      'reserved',
+      r.item_id,
+      actor,
+      r.status === 'pending' ? 'asked to reserve the item' : 'reserved the item'
+    )
+    if (r.resolved_at && r.status === 'cancelled') {
+      pushActivity(r.resolved_at, 'reservation_cancelled', r.item_id, actor, 'cancelled the hold')
+    } else if (r.resolved_at && r.status === 'expired') {
+      pushActivity(r.resolved_at, 'reservation_expired', r.item_id, actor, 'hold expired unpicked')
+    } else if (r.resolved_at && r.status === 'rejected') {
+      pushActivity(r.resolved_at, 'reservation_rejected', r.item_id, actor, 'reservation was declined')
+    }
+  }
+
+  activity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+
+  // Locations with item counts
+  const locationRows = (locations ?? []).map((l) => ({
+    ...l,
+    item_count: items.filter((i) => i.home_location_id === l.id).length,
+  }))
+
+  // Studios with upcoming booking counts
+  const studios = (studioRows ?? []).map((s) => ({
+    ...s,
+    upcoming_blocks: (upcomingBlocks ?? []).filter((b) => b.studio_id === s.id).length,
+  }))
+
+  // Purchase data for the console (page is capability-gated)
+  const privateByItem: Record<string, Tables<'equipment_private'>> = {}
+  for (const p of privateRows ?? []) privateByItem[p.item_id] = p
+
+  return {
+    stats: {
+      items: items.filter(
+        (i) => i.kind === 'pooled' && i.status !== 'retired' && i.status !== 'lost'
+      ).length,
+      out_now: openCheckouts.length,
+      overdue: openCheckouts.filter((c) => c.due_at && new Date(c.due_at) < now).length,
+      in_repair: items.filter((i) => i.status === 'in_repair').length,
+      open_issues: issueList.filter((i) => i.status === 'open').length,
+    },
+    repairs: repairList.map((r) => ({
+      ...r,
+      item_name: itemById.get(r.item_id)?.name ?? 'Unknown item',
+      item_code: itemById.get(r.item_id)?.code ?? '',
+      sent_by_name: names.get(r.sent_by) ?? 'Unknown',
+    })),
+    issues: issueList.map((i) => ({
+      ...i,
+      item_name: itemById.get(i.item_id)?.name ?? 'Unknown item',
+      item_code: itemById.get(i.item_id)?.code ?? '',
+      reported_by_name: names.get(i.reported_by) ?? 'Unknown',
+    })),
+    activity: activity.slice(0, 25),
+    locations: locationRows,
+    studios,
+    privateByItem,
+  }
+}
+
+export async function listLockupLocations(): Promise<Tables<'equipment_locations'>[]> {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_locations').select('*').order('label')
+  return data ?? []
+}
+
+export async function listStudios(): Promise<Tables<'equipment_studios'>[]> {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('equipment_studios').select('*').order('name')
+  return data ?? []
+}
+
+/** Upcoming studio bookings (running or future), for the schedule view on the
+ *  shoots tab. Cancelled shoots free their studio (blocks are deleted), so no
+ *  filtering is needed here beyond time. */
+/**
+ * Studio bookings around today. The Studio tab pages backwards as well as
+ * forwards, so this deliberately reaches into the PAST: it used to return only
+ * `ends_at >= now`, which meant paging back a week showed an empty grid even
+ * though the room had been booked solid.
+ */
+export async function getStudioSchedule(): Promise<StudioScheduleEntry[]> {
+  const adminClient = createAdminClient()
+  const from = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString() // 8 weeks back
+  const to = new Date(Date.now() + 84 * 24 * 60 * 60 * 1000).toISOString() // 12 weeks on
+  const [{ data: blocks }, studios] = await Promise.all([
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('*')
+      .lt('starts_at', to)
+      .gt('ends_at', from)
+      .order('starts_at')
+      .limit(400),
+    studioMap(),
+  ])
+  const list = blocks ?? []
+  if (list.length === 0) return []
+
+  const shootIds = Array.from(
+    new Set(list.flatMap((b) => (b.shoot_id ? [b.shoot_id] : [])))
+  )
+  const [{ data: shoots }, bookerNames] = await Promise.all([
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    nameMap(adminClient, list.map((b) => b.created_by)),
+  ])
+  const shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
+
+  return list.map((b) => ({
+    id: b.id,
+    studio_id: b.studio_id,
+    studio_name: studios.get(b.studio_id) ?? 'Studio',
+    starts_at: b.starts_at,
+    ends_at: b.ends_at,
+    shoot_id: b.shoot_id,
+    // A standalone hold shows its own title; a shoot block shows the shoot.
+    shoot_name: b.shoot_id
+      ? shootNames.get(b.shoot_id) ?? 'A shoot'
+      : b.title?.trim() || 'Studio hold',
+    created_by: b.created_by,
+    created_by_name: bookerNames.get(b.created_by) ?? 'Someone',
+  }))
+}
+
+/** Studio bookings inside a window (default: last 7 days to +60 days), for
+ *  the wizard's week grid. Wide on purpose so the client can flip weeks
+ *  without refetching. */
+export async function getStudioBlocksRange(
+  fromIso?: string,
+  toIso?: string
+): Promise<StudioScheduleEntry[]> {
+  const adminClient = createAdminClient()
+  const from = fromIso ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const to = toIso ?? new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
+  const [{ data: blocks }, studios] = await Promise.all([
+    adminClient
+      .from('equipment_studio_blocks')
+      .select('*')
+      .lt('starts_at', to)
+      .gt('ends_at', from)
+      .order('starts_at'),
+    studioMap(),
+  ])
+  const list = blocks ?? []
+  if (list.length === 0) return []
+
+  const shootIds = Array.from(
+    new Set(list.flatMap((b) => (b.shoot_id ? [b.shoot_id] : [])))
+  )
+  const [{ data: shoots }, bookerNames] = await Promise.all([
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    nameMap(adminClient, list.map((b) => b.created_by)),
+  ])
+  const shootNames = new Map((shoots ?? []).map((s) => [s.id, s.name]))
+
+  return list.map((b) => ({
+    id: b.id,
+    studio_id: b.studio_id,
+    studio_name: studios.get(b.studio_id) ?? 'Studio',
+    starts_at: b.starts_at,
+    ends_at: b.ends_at,
+    shoot_id: b.shoot_id,
+    // A standalone hold shows its own title; a shoot block shows the shoot.
+    shoot_name: b.shoot_id
+      ? shootNames.get(b.shoot_id) ?? 'A shoot'
+      : b.title?.trim() || 'Studio hold',
+    created_by: b.created_by,
+    created_by_name: bookerNames.get(b.created_by) ?? 'Someone',
+  }))
+}
+
+/** Small helper for nav/dashboard badges. */
+export async function countMyOpenCheckouts(userId: string): Promise<number> {
+  const adminClient = createAdminClient()
+  const { count } = await adminClient
+    .from('equipment_checkouts')
+    .select('id', { count: 'exact', head: true })
+    .eq('holder_id', userId)
+    .is('returned_at', null)
+  return count ?? 0
+}
+
+/** Lockup Slack feature toggles for the Tech Console Slack tab. */
+export async function getLockupSettings(): Promise<LockupSlackSettings> {
+  const admin = createAdminClient()
+  return getLockupSlackSettings(admin)
+}
+
+// ============================================================
+// Item profile page (/lockup/items/[code])
+// ============================================================
+
+export type ItemUpcomingEvent = {
+  at: string
+  ends_at: string | null
+  kind: 'reservation' | 'repair_due' | 'due_back'
+  text: string
+  sub: string | null
+}
+
+/** One day the item is spoken for, for the month grid. */
+export type ItemDayState = { day: string; state: 'busy' | 'repair' }
+
+export type ItemProfile = {
+  item: EquipmentItemRow
+  /** Whoever physically has it right now, with enough to contact them. */
+  holder: {
+    id: string
+    full_name: string
+    email: string | null
+    slack_user_id: string | null
+  } | null
+  /** The shoot the current checkout belongs to, when it has one. */
+  holder_shoot: { id: string; name: string; location: string | null } | null
+  kits: { id: string; name: string }[]
+  history: ItemHistoryEvent[]
+  upcoming: ItemUpcomingEvent[]
+  /** Days in the next ~8 weeks that are already spoken for. */
+  days: ItemDayState[]
+}
+
+function istDayKey(iso: string | Date): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+}
+
+/** Every IST day touched by [start, end], inclusive. */
+function daySpan(startIso: string, endIso: string): string[] {
+  const out: string[] = []
+  const end = istDayKey(endIso)
+  const cursor = new Date(`${istDayKey(startIso)}T00:00:00Z`)
+  for (let i = 0; i < 120; i++) {
+    const key = cursor.toISOString().slice(0, 10)
+    out.push(key)
+    if (key >= end) break
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return out
+}
+
+/**
+ * Everything the item page shows: the live answer (free / who has it / when it
+ * frees up), how to reach that person, what is coming, and the trail behind it.
+ */
+export async function getItemProfile(code: string): Promise<ItemProfile | null> {
+  const item = await getItemByCode(code)
+  if (!item) return null
+
+  const adminClient = createAdminClient()
+  const [
+    { data: openCheckout },
+    { data: reservations },
+    { data: openRepair },
+    { data: kitRows },
+    history,
+  ] = await Promise.all([
+    adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .eq('item_id', item.id)
+      .is('returned_at', null)
+      .maybeSingle(),
+    adminClient
+      .from('equipment_reservations')
+      .select('*')
+      .eq('item_id', item.id)
+      .in('status', ['active', 'pending'] as unknown as ('active' | 'pending')[]),
+    adminClient
+      .from('equipment_repairs')
+      .select('*')
+      .eq('item_id', item.id)
+      .is('returned_at', null)
+      .maybeSingle(),
+    adminClient.from('equipment_kit_items').select('kit_id').eq('item_id', item.id),
+    getItemHistory(item.id, 40),
+  ])
+
+  // The holder, their shoot, this item's kits and every shoot behind a
+  // reservation used to be four round trips in series. They only depend on the
+  // batch above, not on each other, so they go together in one wave. The
+  // holder comes from the cached user map, costing nothing extra.
+  const kitIds = Array.from(new Set((kitRows ?? []).map((k) => k.kit_id)))
+  const shootIds = Array.from(
+    new Set([
+      ...(reservations ?? []).flatMap((r) => (r.shoot_id ? [r.shoot_id] : [])),
+      ...(openCheckout?.shoot_id ? [openCheckout.shoot_id] : []),
+    ])
+  )
+
+  const [users, { data: kits }, { data: shoots }] = await Promise.all([
+    allUsersById(),
+    kitIds.length
+      ? adminClient.from('equipment_kits').select('id, name').in('id', kitIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    shootIds.length
+      ? adminClient
+          .from('equipment_shoots')
+          .select('id, name, location, starts_at, ends_at, status, owner_id')
+          .in('id', shootIds)
+      : Promise.resolve({
+          data: [] as Pick<
+            Tables<'equipment_shoots'>,
+            'id' | 'name' | 'location' | 'starts_at' | 'ends_at' | 'status' | 'owner_id'
+          >[],
+        }),
+  ])
+
+  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
+
+  let holder: ItemProfile['holder'] = null
+  let holderShoot: ItemProfile['holder_shoot'] = null
+  if (openCheckout) {
+    holder = users.get(openCheckout.holder_id) ?? null
+    const hs = openCheckout.shoot_id ? shootById.get(openCheckout.shoot_id) : undefined
+    if (hs) holderShoot = { id: hs.id, name: hs.name, location: hs.location }
+  }
+
+  const ownerNames = await nameMap(adminClient, [
+    ...(shoots ?? []).map((s) => s.owner_id),
+    ...(reservations ?? []).map((r) => r.reserved_by),
+  ])
+
+  const upcoming: ItemUpcomingEvent[] = []
+  const days: ItemDayState[] = []
+
+  if (openCheckout?.due_at) {
+    upcoming.push({
+      at: openCheckout.due_at,
+      ends_at: null,
+      kind: 'due_back',
+      text: 'Due back',
+      sub: holder ? `from ${holder.full_name}` : null,
+    })
+    for (const day of daySpan(openCheckout.checked_out_at, openCheckout.due_at)) {
+      days.push({ day, state: 'busy' })
+    }
+  }
+
+  for (const r of reservations ?? []) {
+    const pend = r.status === 'pending' ? 'awaiting approval · ' : ''
+    if (r.shoot_id) {
+      const shoot = shootById.get(r.shoot_id)
+      if (!shoot || shoot.status === 'cancelled' || shoot.status === 'done') continue
+      const from = r.starts_at ?? shoot.starts_at
+      const to = r.ends_at ?? shoot.ends_at
+      upcoming.push({
+        at: from,
+        ends_at: to,
+        kind: 'reservation',
+        text: shoot.name,
+        sub: `${pend}${ownerNames.get(shoot.owner_id) ?? 'someone'}`,
+      })
+      for (const day of daySpan(from, to)) days.push({ day, state: 'busy' })
+    } else if (r.starts_at && r.ends_at) {
+      // Standalone hold: someone reserved it for a plain window, no shoot.
+      upcoming.push({
+        at: r.starts_at,
+        ends_at: r.ends_at,
+        kind: 'reservation',
+        text: 'Held (no shoot)',
+        sub: `${pend}${ownerNames.get(r.reserved_by) ?? 'someone'}`,
+      })
+      for (const day of daySpan(r.starts_at, r.ends_at)) days.push({ day, state: 'busy' })
+    }
+  }
+
+  if (openRepair) {
+    upcoming.push({
+      at: openRepair.expected_back_on ?? openRepair.sent_at,
+      ends_at: null,
+      kind: 'repair_due',
+      text: openRepair.expected_back_on ? 'Expected back from repair' : 'In repair, no date yet',
+      sub: openRepair.vendor,
+    })
+    const until = openRepair.expected_back_on
+      ? `${openRepair.expected_back_on}T23:59:00+05:30`
+      : new Date(Date.now() + 14 * 86400000).toISOString()
+    for (const day of daySpan(openRepair.sent_at, until)) days.push({ day, state: 'repair' })
+  }
+
+  upcoming.sort((a, b) => a.at.localeCompare(b.at))
+
+  return {
+    item,
+    holder,
+    holder_shoot: holderShoot,
+    kits: kits ?? [],
+    history,
+    upcoming,
+    days,
+  }
+}
+
+/** Gear still physically out for a shoot, blocking its cancel/delete. */
+export type OutstandingGearRow = {
+  checkout_id: string
+  item_id: string
+  code: string
+  name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  home_location_label: string | null
+  holder_id: string
+  holder_name: string
+  checked_out_at: string
+  due_at: string | null
+  overdue: boolean
+}
+
+/**
+ * Items picked up for this shoot and not yet brought back. A shoot cannot be
+ * cancelled or deleted while any of these exist: doing so would strand the gear
+ * with no record of why someone is holding it.
+ */
+export async function getShootOutstandingGear(shootId: string): Promise<OutstandingGearRow[]> {
+  const adminClient = createAdminClient()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .eq('shoot_id', shootId)
+    .is('returned_at', null)
+  const list = checkouts ?? []
+  if (list.length === 0) return []
+
+  const [{ data: items }, names, locations] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url, home_location_id')
+      .in('id', list.map((c) => c.item_id)),
+    nameMap(adminClient, list.map((c) => c.holder_id)),
+    locationMap(),
+  ])
+  const itemById = new Map((items ?? []).map((i) => [i.id, i]))
+  const now = new Date()
+
+  return list.flatMap((c) => {
+    const item = itemById.get(c.item_id)
+    if (!item) return []
+    return [
+      {
+        checkout_id: c.id,
+        item_id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        home_location_label: item.home_location_id
+          ? locations.get(item.home_location_id) ?? null
+          : null,
+        holder_id: c.holder_id,
+        holder_name: names.get(c.holder_id) ?? 'Someone',
+        checked_out_at: c.checked_out_at,
+        due_at: c.due_at,
+        overdue: Boolean(c.due_at && new Date(c.due_at) < now),
+      },
+    ]
+  })
+}
+
+export type OverdueGearRow = OutstandingGearRow & {
+  days_late: number
+  shoot_name: string | null
+  holder_slack_id: string | null
+}
+
+/**
+ * Everything past its due date, worst first. The Tech Console had only a COUNT
+ * of these, which is not chaseable: you cannot ask for a camera back without
+ * knowing who has it and how late they are.
+ */
+export async function getOverdueGear(): Promise<OverdueGearRow[]> {
+  const adminClient = createAdminClient()
+  const nowIso = new Date().toISOString()
+  const { data: checkouts } = await adminClient
+    .from('equipment_checkouts')
+    .select('*')
+    .is('returned_at', null)
+    .not('due_at', 'is', null)
+    .lt('due_at', nowIso)
+    .order('due_at')
+  const list = checkouts ?? []
+  if (list.length === 0) return []
+
+  const shootIds = Array.from(new Set(list.flatMap((c) => (c.shoot_id ? [c.shoot_id] : []))))
+  const [{ data: items }, { data: holders }, { data: shoots }, locations] = await Promise.all([
+    adminClient
+      .from('equipment_items')
+      .select('id, code, name, category, photo_url, home_location_id')
+      .in('id', list.map((c) => c.item_id)),
+    adminClient
+      .from('users')
+      .select('id, full_name, slack_user_id')
+      .in('id', Array.from(new Set(list.map((c) => c.holder_id)))),
+    shootIds.length
+      ? adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    locationMap(),
+  ])
+  const itemById = new Map((items ?? []).map((i) => [i.id, i]))
+  const holderById = new Map((holders ?? []).map((h) => [h.id, h]))
+  const shootById = new Map((shoots ?? []).map((s) => [s.id, s]))
+  const now = Date.now()
+
+  return list.flatMap((c) => {
+    const item = itemById.get(c.item_id)
+    if (!item || !c.due_at) return []
+    const holder = holderById.get(c.holder_id)
+    return [
+      {
+        checkout_id: c.id,
+        item_id: item.id,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+        photo_url: item.photo_url,
+        home_location_label: item.home_location_id
+          ? locations.get(item.home_location_id) ?? null
+          : null,
+        holder_id: c.holder_id,
+        holder_name: holder?.full_name ?? 'Someone',
+        holder_slack_id: holder?.slack_user_id ?? null,
+        checked_out_at: c.checked_out_at,
+        due_at: c.due_at,
+        overdue: true,
+        days_late: Math.max(1, Math.floor((now - new Date(c.due_at).getTime()) / 86400000)),
+        shoot_name: c.shoot_id ? shootById.get(c.shoot_id)?.name ?? null : null,
+      },
+    ]
+  })
+}
+
+// ============================================================
+// Scan station: what should happen when this code is scanned?
+// ============================================================
+
+export type ScanRow = {
+  item_id: string
+  code: string
+  name: string
+  category: EquipmentCategory
+  photo_url: string | null
+  /** Why it cannot be taken/returned right now, if it cannot. */
+  blocked_reason: string | null
+  requires_approval: boolean
+  home_location_label: string | null
+  home_location_id: string | null
+}
+
+export type ScanCheckoutRow = ScanRow & { in_shoot: boolean }
+
+export type ScanReturnRow = ScanRow & {
+  checkout_id: string
+  due_at: string | null
+  overdue: boolean
+  shoot_name: string | null
+  /** Shelf it was taken from; drives the "you took it from L1" warning. */
+  picked_up_location_id: string | null
+  picked_up_location_label: string | null
+  /** Assigned devices go back to a person, not a shelf. */
+  is_device: boolean
+  device_owner_name: string | null
+}
+
+export type ScanContext =
+  | { kind: 'not_found'; code: string }
+  /** Held by the person scanning: they are bringing things back. */
+  | { kind: 'return'; scanned: ScanReturnRow; alsoWithYou: ScanReturnRow[] }
+  /** Reserved for a shoot happening now: offer the whole shoot's gear. */
+  | { kind: 'pickup'; scanned: ScanCheckoutRow; shoot: { id: string; name: string; starts_at: string; ends_at: string }; alsoReserved: ScanCheckoutRow[] }
+  /** Nothing special: plain take-it-now, keep scanning to add more. */
+  | { kind: 'checkout'; scanned: ScanCheckoutRow; kit: { id: string; name: string; items: ScanCheckoutRow[] } | null }
+  /** Someone else has it, it is in repair, retired, etc. */
+  | { kind: 'unavailable'; scanned: ScanRow; detail: string }
+
+function scanBase(
+  item: EquipmentItemRow,
+  locations: Map<string, string>
+): ScanRow {
+  return {
+    item_id: item.id,
+    code: item.code,
+    name: item.name,
+    category: item.category,
+    photo_url: item.photo_url,
+    blocked_reason: null,
+    requires_approval: item.requires_approval,
+    home_location_label: item.home_location_id
+      ? locations.get(item.home_location_id) ?? null
+      : null,
+    home_location_id: item.home_location_id,
+  }
+}
+
+/**
+ * One scan, one answer. Decides which flow the person is in from the state of
+ * the item they just scanned, rather than making them choose a mode up front:
+ *   - they are holding it            -> return, with everything else they hold
+ *   - it is reserved for a live shoot -> pickup, with the rest of that shoot
+ *   - it is free                      -> plain checkout, plus its kit if any
+ */
+export async function getScanContext(code: string, userId: string): Promise<ScanContext> {
+  const adminClient = createAdminClient()
+  const item = await getItemByCode(code.trim().toUpperCase())
+  const locations = await locationMap()
+  if (!item) return { kind: 'not_found', code: code.trim().toUpperCase() }
+
+  const base = scanBase(item, locations)
+
+  // ---- Are they holding it? Then this is a return run. ----
+  if (item.status === 'checked_out' && item.current_holder_id === userId) {
+    const { data: mine } = await adminClient
+      .from('equipment_checkouts')
+      .select('*')
+      .eq('holder_id', userId)
+      .is('returned_at', null)
+    const list = mine ?? []
+    const itemIds = list.map((c) => c.item_id)
+    const [{ data: rows }, { data: shoots }] = await Promise.all([
+      itemIds.length
+        ? adminClient
+            .from('equipment_items')
+            .select('id, code, name, category, photo_url, home_location_id, requires_approval, kind, assignee_id')
+            .in('id', itemIds)
+        : Promise.resolve({ data: [] as never[] }),
+      Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    ])
+    void shoots
+    const shootIds = Array.from(new Set(list.flatMap((c) => (c.shoot_id ? [c.shoot_id] : []))))
+    const { data: shootRows } = shootIds.length
+      ? await adminClient.from('equipment_shoots').select('id, name').in('id', shootIds)
+      : { data: [] as { id: string; name: string }[] }
+    const shootName = new Map((shootRows ?? []).map((s) => [s.id, s.name]))
+    const ownerNames = await nameMap(
+      adminClient,
+      (rows ?? []).flatMap((r) => (r.assignee_id ? [r.assignee_id] : []))
+    )
+    const rowById = new Map((rows ?? []).map((r) => [r.id, r]))
+    const now = Date.now()
+
+    const build = (c: (typeof list)[number]): ScanReturnRow | null => {
+      const r = rowById.get(c.item_id)
+      if (!r) return null
+      return {
+        item_id: r.id,
+        code: r.code,
+        name: r.name,
+        category: r.category,
+        photo_url: r.photo_url,
+        blocked_reason: null,
+        requires_approval: r.requires_approval,
+        home_location_label: r.home_location_id ? locations.get(r.home_location_id) ?? null : null,
+        home_location_id: r.home_location_id,
+        checkout_id: c.id,
+        due_at: c.due_at,
+        overdue: Boolean(c.due_at && new Date(c.due_at).getTime() < now),
+        shoot_name: c.shoot_id ? shootName.get(c.shoot_id) ?? null : null,
+        picked_up_location_id: c.picked_up_location_id,
+        picked_up_location_label: c.picked_up_location_id
+          ? locations.get(c.picked_up_location_id) ?? null
+          : null,
+        is_device: r.kind === 'assigned',
+        device_owner_name: r.assignee_id ? ownerNames.get(r.assignee_id) ?? null : null,
+      }
+    }
+
+    const all = list.flatMap((c) => { const b = build(c); return b ? [b] : [] })
+    const scanned = all.find((r) => r.item_id === item.id)
+    if (scanned) {
+      return { kind: 'return', scanned, alsoWithYou: all.filter((r) => r.item_id !== item.id) }
+    }
+  }
+
+  // ---- Someone else has it, or it cannot leave the shelf ----
+  if (item.status !== 'available') {
+    const detail =
+      item.status === 'checked_out'
+        ? `${item.holder_name ?? 'Someone'} has it${item.due_at ? `, due back ${formatDayTime(item.due_at)}` : ''}.`
+        : item.status === 'in_repair'
+          ? `It is in repair${item.repair_expected_back_on ? `, expected back ${formatDay(item.repair_expected_back_on)}` : ''}.`
+          : `It is marked ${item.status}.`
+    return { kind: 'unavailable', scanned: base, detail }
+  }
+
+  // ---- Reserved for a shoot that is live (or starts within 24h)? ----
+  const now = Date.now()
+  const live = item.active_reservations.find((r) => {
+    if (r.status !== 'active' || !r.shoot_id) return false
+    return (
+      now >= new Date(r.shoot_starts_at).getTime() - 24 * 60 * 60 * 1000 &&
+      now <= new Date(r.shoot_ends_at).getTime()
+    )
+  })
+
+  const toCheckoutRow = async (ids: string[], inShoot: boolean): Promise<ScanCheckoutRow[]> => {
+    if (ids.length === 0) return []
+    const all = await listEquipment()
+    return all
+      .filter((i) => ids.includes(i.id))
+      .map((i) => ({
+        ...scanBase(i, locations),
+        in_shoot: inShoot,
+        blocked_reason:
+          i.status === 'available'
+            ? null
+            : i.status === 'checked_out'
+              ? `${i.holder_name ?? 'someone'} already took it`
+              : i.status === 'in_repair'
+                ? 'in repair'
+                : `marked ${i.status}`,
+      }))
+  }
+
+  if (live && live.shoot_id) {
+    const liveShootId = live.shoot_id
+    const { data: sibs } = await adminClient
+      .from('equipment_reservations')
+      .select('item_id')
+      .eq('shoot_id', liveShootId)
+      .in('status', ['active'] as unknown as 'active'[])
+    const otherIds = (sibs ?? []).map((r) => r.item_id).filter((id) => id !== item.id)
+    return {
+      kind: 'pickup',
+      scanned: { ...base, in_shoot: true },
+      shoot: {
+        id: liveShootId,
+        name: live.shoot_name,
+        starts_at: live.shoot_starts_at,
+        ends_at: live.shoot_ends_at,
+      },
+      alsoReserved: await toCheckoutRow(otherIds, true),
+    }
+  }
+
+  // ---- Plain checkout. Offer the rest of its kit, same tick-list idea. ----
+  const { data: kitLinks } = await adminClient
+    .from('equipment_kit_items')
+    .select('kit_id')
+    .eq('item_id', item.id)
+    .limit(1)
+  let kit: { id: string; name: string; items: ScanCheckoutRow[] } | null = null
+  if (kitLinks && kitLinks.length > 0) {
+    const kitId = kitLinks[0].kit_id
+    const [{ data: kitRow }, { data: members }] = await Promise.all([
+      adminClient.from('equipment_kits').select('id, name').eq('id', kitId).maybeSingle(),
+      adminClient.from('equipment_kit_items').select('item_id').eq('kit_id', kitId),
+    ])
+    if (kitRow) {
+      const otherIds = (members ?? []).map((m) => m.item_id).filter((id) => id !== item.id)
+      kit = { id: kitRow.id, name: kitRow.name, items: await toCheckoutRow(otherIds, false) }
+    }
+  }
+
+  return { kind: 'checkout', scanned: { ...base, in_shoot: false }, kit }
+}

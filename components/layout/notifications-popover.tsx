@@ -3,12 +3,13 @@
 import * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Bell, CheckCheck } from "lucide-react";
+import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, parseISO } from "date-fns";
 
 export function NotificationsPopover() {
-  const { notifications, markNotificationsRead } = useStore();
+  const { notifications, markNotificationsRead, markOneRead } = useStore();
   const unread = notifications.filter((n) => !n.read_at).length;
 
   return (
@@ -46,14 +47,8 @@ export function NotificationsPopover() {
               </div>
             ) : (
               <ul>
-                {notifications.map((n) => (
-                  <li
-                    key={n.id}
-                    className={cn(
-                      "px-4 py-3 border-b last:border-0 hover:bg-muted/40 transition-colors",
-                      !n.read_at && "bg-primary/[0.03]"
-                    )}
-                  >
+                {notifications.map((n) => {
+                  const content = (
                     <div className="flex items-start gap-3">
                       <div
                         className={cn(
@@ -71,8 +66,36 @@ export function NotificationsPopover() {
                         </div>
                       </div>
                     </div>
-                  </li>
-                ))}
+                  )
+
+                  return (
+                    <li
+                      key={n.id}
+                      className={cn(
+                        "px-4 py-3 border-b last:border-0 hover:bg-muted/40 transition-colors",
+                        !n.read_at && "bg-primary/[0.03]"
+                      )}
+                    >
+                      {n.link_url ? (
+                        <Link
+                          href={n.link_url}
+                          className="block"
+                          onClick={() => markOneRead(n.id)}
+                        >
+                          {content}
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="block w-full text-left"
+                          onClick={() => markOneRead(n.id)}
+                        >
+                          {content}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>

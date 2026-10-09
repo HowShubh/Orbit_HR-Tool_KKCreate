@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
 import { Toaster } from "@/components/layout/toaster";
+import { QueryProvider } from "@/components/providers/query-provider";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -15,10 +16,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={inter.variable}>
       <body className="font-sans">
-        <StoreProvider>
-          {children}
-          <Toaster />
-        </StoreProvider>
+        <QueryProvider>
+          <StoreProvider>
+            {children}
+            <Toaster />
+          </StoreProvider>
+        </QueryProvider>
       </body>
     </html>
   );

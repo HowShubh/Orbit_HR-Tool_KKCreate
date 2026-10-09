@@ -1,20 +1,9 @@
-"use client";
+import { getCurrentUser } from '@/lib/auth/get-current-user'
+import { redirect } from 'next/navigation'
+import { SettingsClient } from '@/components/settings/settings-client'
 
-import { Topbar } from "@/components/layout/topbar";
-import { Card, CardContent } from "@/components/ui/card";
-
-export default function SettingsPage() {
-  return (
-    <>
-      <Topbar title="Settings" subtitle="Workspace preferences" />
-      <div className="px-5 lg:px-8 py-5">
-        <Card>
-          <CardContent className="p-12 text-center text-muted-foreground">
-            More workspace settings coming soon. For now, edit your profile from
-            the sidebar.
-          </CardContent>
-        </Card>
-      </div>
-    </>
-  );
+export default async function SettingsPage() {
+  const user = await getCurrentUser()
+  if (!user) redirect('/login')
+  return <SettingsClient user={user} />
 }
