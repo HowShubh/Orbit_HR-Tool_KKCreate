@@ -162,7 +162,7 @@ export function TeamRosterGrid({
               >
                 <td className="sticky left-0 z-10 bg-card px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <Avatar name={name} size="sm" />
+                    <Avatar name={name} userId={id} size="sm" />
                     <span className="text-[12.5px] font-medium">
                       {name}
                       {id === applicantId && <span className="ml-1 text-orange-600">✱</span>}

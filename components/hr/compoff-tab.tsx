@@ -148,7 +148,7 @@ export function CompoffTab({ grants, users }: Props) {
                     key={g.id}
                     className="rounded-xl border border-border p-4 flex flex-wrap items-center gap-4"
                   >
-                    <Avatar name={u?.full_name ?? '?'} size="md" />
+                    <Avatar name={u?.full_name ?? '?'} userId={g.user_id} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <PersonName userId={g.user_id} name={u?.full_name ?? 'Unknown'} className="text-[13.5px] font-semibold" />
@@ -228,7 +228,7 @@ export function CompoffTab({ grants, users }: Props) {
                     key={g.id}
                     className="rounded-xl border border-border p-4 flex flex-wrap items-center gap-4 opacity-75"
                   >
-                    <Avatar name={u?.full_name ?? '?'} size="md" />
+                    <Avatar name={u?.full_name ?? '?'} userId={g.user_id} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <PersonName userId={g.user_id} name={u?.full_name ?? 'Unknown'} className="text-[13.5px] font-semibold" />

@@ -785,7 +785,7 @@ export function LeaveFormDialog({ trigger, onBehalf }: Props) {
                     ) : (
                       selectedDateLeaves.map((leave) => (
                         <div key={leave.id} className="flex items-center gap-2">
-                          <Avatar name={leave.user_full_name} size="sm" />
+                          <Avatar name={leave.user_full_name} userId={leave.user_id} size="sm" />
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs font-medium">{leave.user_full_name}</div>
                             <div className="text-[11px] text-muted-foreground">

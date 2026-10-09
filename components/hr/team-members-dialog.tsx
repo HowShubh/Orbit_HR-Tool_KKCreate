@@ -102,7 +102,7 @@ export function TeamMembersDialog({ open, onOpenChange, team, users }: Props) {
                   const membership = u.memberships.find((m) => m.team_id === team.id)
                   return (
                     <li key={u.id} className="flex items-center gap-3 rounded-lg border px-3 py-2">
-                      <Avatar name={u.full_name} size="sm" />
+                      <Avatar name={u.full_name} userId={u.id} size="sm" />
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-medium truncate">{u.full_name}</div>
                         <div className="text-[11px] text-muted-foreground truncate">{u.designation ?? u.role}</div>

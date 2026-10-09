@@ -101,3 +101,12 @@ export async function getMyProfileContext(
     directReports: reportsRes.data ?? [],
   }
 }
+
+/** Profile photo URL per user id, for every user who has set one. */
+export async function listUserPhotos(): Promise<Record<string, string>> {
+  const adminClient = createAdminClient()
+  const { data } = await adminClient.from('users').select('id, photo_url').not('photo_url', 'is', null)
+  const photos: Record<string, string> = {}
+  for (const u of data ?? []) if (u.photo_url) photos[u.id] = u.photo_url
+  return photos
+}

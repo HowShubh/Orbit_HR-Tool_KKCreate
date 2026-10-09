@@ -234,7 +234,7 @@ export function AuditClient({ entries }: Props) {
                         className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30"
                         onClick={() => toggle(row.id)}
                       >
-                        <Avatar name={row.actor_full_name} size="sm" />
+                        <Avatar name={row.actor_full_name} userId={row.actor_id} size="sm" />
                         <div className="min-w-0 flex-1">
                           <div className="text-[13.5px] leading-snug">{describe(row)}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-2">

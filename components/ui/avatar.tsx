@@ -2,11 +2,14 @@
 
 import * as React from "react";
 import { cn, initials, avatarGradient } from "@/lib/utils";
+import { useUserPhoto } from "@/lib/contexts/user-photos-context";
 
 export interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   name: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   src?: string | null;
+  /** Looks the person's profile photo up when no `src` is passed. */
+  userId?: string | null;
   ring?: boolean;
   /** Override the generated initials (e.g. team initials like "SF"). */
   fallbackText?: string;
@@ -20,7 +23,9 @@ const sizeMap = {
   xl: "h-14 w-14 text-base",
 };
 
-export function Avatar({ name, size = "md", src, ring, fallbackText, className, ...props }: AvatarProps) {
+export function Avatar({ name, size = "md", src, userId, ring, fallbackText, className, ...props }: AvatarProps) {
+  const lookedUp = useUserPhoto(userId);
+  const photo = src ?? lookedUp;
   return (
     <div
       className={cn(
@@ -32,9 +37,9 @@ export function Avatar({ name, size = "md", src, ring, fallbackText, className, 
       )}
       {...props}
     >
-      {src ? (
+      {photo ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={name} className="h-full w-full rounded-full object-cover" />
+        <img src={photo} alt={name} className="h-full w-full rounded-full object-cover" />
       ) : (
         <span>{fallbackText ?? initials(name)}</span>
       )}

@@ -80,7 +80,7 @@ export function RequestHistoryTable({
                       <tr key={r.id} className={cn('border-t', r.status === 'deleted' && 'opacity-50')}>
                         <td className="whitespace-nowrap px-4 py-2">
                           <div className="flex items-center gap-2">
-                            <Avatar name={r.user_full_name} size="sm" />
+                            <Avatar name={r.user_full_name} userId={r.user_id} size="sm" />
                             <PersonName userId={r.user_id} name={r.user_full_name} className="font-medium" />
                           </div>
                         </td>

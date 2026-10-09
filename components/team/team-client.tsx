@@ -239,7 +239,7 @@ export function TeamClient({
                 <ul className="divide-y">
                   {upcoming.map((l) => (
                     <li key={l.id} className="flex items-center gap-3 px-4 py-3">
-                      <Avatar name={l.user_full_name} size="sm" />
+                      <Avatar name={l.user_full_name} userId={l.user_id} size="sm" />
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-medium truncate">
                           {l.user_full_name}

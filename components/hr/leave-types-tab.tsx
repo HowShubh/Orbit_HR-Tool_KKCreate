@@ -396,7 +396,7 @@ export function LeaveTypesTab({
                     checked={form.eligible_user_ids.includes(user.id)}
                     onChange={() => toggleUser(user.id)}
                   />
-                  <Avatar name={user.full_name} size="sm" />
+                  <Avatar name={user.full_name} userId={user.id} size="sm" />
                   <span className="text-xs font-medium">{user.full_name}</span>
                 </label>
               ))}

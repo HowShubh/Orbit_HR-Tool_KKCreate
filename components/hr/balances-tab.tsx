@@ -264,7 +264,7 @@ export function BalancesTab({ users, balances, compoffBalances, leaveTypes, leav
               <tr key={u.id} className="border-t hover:bg-muted/30">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2.5">
-                    <Avatar name={u.full_name} size="sm" />
+                    <Avatar name={u.full_name} userId={u.id} size="sm" />
                     <div>
                       <PersonName userId={u.id} name={u.full_name} className="text-[13px] font-medium" />
                       <div className="text-[11px] text-muted-foreground capitalize">

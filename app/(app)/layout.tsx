@@ -9,6 +9,7 @@ import {
 import { listMyNotifications } from '@/lib/queries/notifications'
 import { countCompoffPendingForApprover } from '@/lib/queries/compoff'
 import { listMyCapabilityKeys } from '@/lib/queries/capabilities'
+import { listUserPhotos } from '@/lib/queries/users'
 import { AppShell } from '@/components/layout/app-shell'
 
 export default async function AppLayout({
@@ -39,12 +40,13 @@ export default async function AppLayout({
     redirect('/login?error=account_exited')
   }
 
-  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount, grantedCapabilityKeys] =
+  const [{ ledTeamIds, membersByTeam }, notifications, pendingCompoffCount, grantedCapabilityKeys, userPhotos] =
     await Promise.all([
       getCurrentUserTeamContext(user.id),
       listMyNotifications(user.id, 20),
       countCompoffPendingForApprover(user.id),
       listMyCapabilityKeys(user.id),
+      listUserPhotos(),
     ])
 
   return (
@@ -55,6 +57,7 @@ export default async function AppLayout({
       grantedCapabilityKeys={grantedCapabilityKeys}
       notifications={notifications}
       pendingCompoffCount={pendingCompoffCount}
+      userPhotos={userPhotos}
       site={siteFromHost(headers().get('host'))}
     >
       {children}

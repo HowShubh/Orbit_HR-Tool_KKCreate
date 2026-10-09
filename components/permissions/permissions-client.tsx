@@ -193,7 +193,7 @@ export function PermissionsClient({
                     return (
                       <li key={user.id} className="px-4 py-4">
                         <div className="flex items-start gap-3">
-                          <Avatar name={user.full_name} size="sm" />
+                          <Avatar name={user.full_name} userId={user.id} size="sm" />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-1.5">
                               <span className="text-[13.5px] font-semibold">{user.full_name}</span>

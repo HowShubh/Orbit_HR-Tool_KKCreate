@@ -645,7 +645,7 @@ function DailyTeamOverviewCard({ data, orgWide = false }: { data: DashboardData;
               <div className="space-y-3">
                 {birthdays.map((item) => (
                   <div key={item.id} className="flex items-center gap-3">
-                    <Avatar name={item.full_name} size="sm" />
+                    <Avatar name={item.full_name} userId={item.id} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-medium truncate">{item.full_name}</div>
                       <div className="text-[11.5px] text-muted-foreground truncate">
@@ -673,7 +673,7 @@ function DailyTeamOverviewCard({ data, orgWide = false }: { data: DashboardData;
               <div className="space-y-3">
                 {anniversaries.map((item) => (
                   <div key={item.id} className="flex items-center gap-3">
-                    <Avatar name={item.full_name} size="sm" />
+                    <Avatar name={item.full_name} userId={item.id} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-medium truncate">{item.full_name}</div>
                       <div className="text-[11.5px] text-muted-foreground truncate">
@@ -722,7 +722,7 @@ function TeamLeavesTodayList({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {shown.map((leave) => (
           <div key={leave.id} className="flex items-center gap-3 rounded-lg border p-3">
-            <Avatar name={leave.user_full_name} size="sm" />
+            <Avatar name={leave.user_full_name} userId={leave.user_id} size="sm" />
             <div className="min-w-0 flex-1">
               <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
               <div className="text-[11.5px] text-muted-foreground">
@@ -812,7 +812,7 @@ function MyTeamReferenceCard({
               <div className="mt-2 space-y-3">
                 {team.members.slice(0, 10).map((member) => (
                   <div key={member.id} className="flex items-center gap-3">
-                    <Avatar name={member.full_name} size="sm" />
+                    <Avatar name={member.full_name} userId={member.id} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-medium truncate">
                         {member.full_name}
@@ -955,7 +955,7 @@ function UpcomingTeamCard({ leaves }: { leaves: DashboardData['upcomingTeam'] })
           <div className="space-y-3">
             {leaves.slice(0, 6).map((leave) => (
               <div key={leave.id} className="flex items-center gap-3">
-                <Avatar name={leave.user_full_name} size="sm" />
+                <Avatar name={leave.user_full_name} userId={leave.user_id} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="text-[13.5px] font-medium truncate">{leave.user_full_name}</div>
                   <div className="text-[11.5px] text-muted-foreground">
@@ -1021,7 +1021,7 @@ function PendingApprovalsCard({
             key={approval.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-white/80 p-3"
           >
-            <Avatar name={approval.user_full_name} size="sm" />
+            <Avatar name={approval.user_full_name} userId={approval.user_id} size="sm" />
             <div className="min-w-[180px] flex-1">
               <div className="text-[13.5px] font-semibold text-foreground">
                 {approval.user_full_name}

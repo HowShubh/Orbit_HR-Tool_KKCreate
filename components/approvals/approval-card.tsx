@@ -110,7 +110,7 @@ export function ApprovalCard({
         className="flex cursor-pointer flex-wrap items-start gap-3 p-4 hover:bg-amber-50/40"
         onClick={() => setExpanded((v) => !v)}
       >
-        <Avatar name={request.user_full_name} size="md" />
+        <Avatar name={request.user_full_name} userId={request.user_id} size="md" />
         <div className="min-w-[200px] flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <PersonName
