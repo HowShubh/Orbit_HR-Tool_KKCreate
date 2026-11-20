@@ -31,6 +31,10 @@ function slackCompoffLines(days: Array<{ date: string; type: string; half: boole
     .join('\n')
 }
 
+// A rejected comp-off request never credited anything, so it must not block a
+// fresh request for the same worked day. Only these statuses hold a date.
+const LIVE_COMPOFF_STATUSES = ['pending', 'approved'] as unknown as ('pending' | 'approved')[]
+
 export async function decideCompoff(
   grantId: string,
   decision: 'approved' | 'rejected',
@@ -287,6 +291,7 @@ async function buildCompoffPlannerData(
       .from('compoff_grants')
       .select('work_date, type, status')
       .eq('user_id', userId)
+      .in('status', LIVE_COMPOFF_STATUSES)
       .gte('work_date', startDate),
   ])
 
@@ -349,6 +354,7 @@ export async function requestCompoffPlan(input: z.infer<typeof RequestCompoffPla
     .from('compoff_grants')
     .select('work_date')
     .eq('user_id', user.id)
+    .in('status', LIVE_COMPOFF_STATUSES)
     .in('work_date', days.map((d) => d.date))
   const existingDates = new Set((existing ?? []).map((g) => g.work_date))
   const dup = days.find((d) => existingDates.has(d.date))
@@ -459,6 +465,7 @@ export async function requestCompoffPlanForUser(
     .from('compoff_grants')
     .select('work_date')
     .eq('user_id', parsed.user_id)
+    .in('status', LIVE_COMPOFF_STATUSES)
     .in('work_date', days.map((d) => d.date))
   const existingDates = new Set((existing ?? []).map((g) => g.work_date))
   const dup = days.find((d) => existingDates.has(d.date))
@@ -616,6 +623,7 @@ export async function importCompoffGrantsCsv(rows: Record<string, string>[]) {
       .from('compoff_grants')
       .select('user_id, work_date')
       .in('user_id', involved)
+      .in('status', LIVE_COMPOFF_STATUSES)
     for (const g of existing ?? []) {
       const set = existingByUser.get(g.user_id) ?? new Set<string>()
       set.add(g.work_date)
