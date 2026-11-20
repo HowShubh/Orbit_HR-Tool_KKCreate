@@ -377,15 +377,36 @@ Write access to device records — assign, reassign, mark returned.
 
 **Default holders (planned):** `hr`, `founder`, `tech_lead` bundle.
 
-### `view_equipment` (Phase 2)
+### `view_equipment` (retired before implementation)
 
-Read-only access to shared equipment ownership state. Note: every employee can see who has what shared equipment by design (search feature) — so this capability gates *administrative* equipment views (history, audit), not the basic "who has X" lookup.
+Was planned as a Phase 2 capability. Not implemented: the Lockup module (migration 023) makes inventory, holders, shoots, reservations, repairs and issues visible to every active employee by design (visibility is the whole point of the tracker), and the only admin-restricted data (purchase price/date) is gated by `manage_equipment`. A separate read capability had nothing left to gate.
 
-### `manage_equipment` (Phase 2)
+### `manage_equipment`
 
-Write access to equipment records — register new equipment, generate QR codes, override ownership in edge cases.
+**Description:** Full administrative control over the Lockup equipment tracker: create/edit/retire items, CSV import, QR label downloads, manage storage locations, record repairs (send/receive), resolve issue reports, force check-in, and view purchase data (price, purchase date).
 
-**Default holders (planned):** `hr`, `founder`, `tech_lead` bundle.
+**Type:** Global, write (implies read of `equipment_private`).
+
+**Default holders:**
+- `hr` (via `hr_admin` bundle)
+- `founder` (via `founder_full` bundle)
+- Granted individually to the Tech Lead (Gaurav Mandal), who is the primary operator
+
+**Used in:**
+- All `equipment_*` write RLS policies plus the `equipment_private` SELECT policy (migration `023_equipment.sql`)
+- `requireCapability('manage_equipment')` in `lib/actions/lockup.ts` manage actions
+- Tech Console route gate (`/tech`) and its nav entry
+- Overdue digest recipient list in `/api/cron/equipment-sweep`
+
+**Justification:** Kept as a single capability (no read/write split) because every employee can already read all operational Lockup data by design. Splitting would leave the read capability gating only purchase prices, which always travels with the manage role anyway.
+
+**Hardcoded self-permissions of the module (not capabilities):** any active employee can view inventory and availability, check gear out/in, take over an item, create shoots, reserve items, and report issues. These are invariants of using shared gear, mirrored in RLS as self-clauses (`holder_id = auth.uid()` etc.).
+
+**Common scenarios:**
+- The Tech Lead runs day-to-day gear operations without needing an HR role
+- A second gear-responsible person is added later without any code change
+
+**Phase added:** v1 (Lockup module, 2026-07)
 
 ### `manage_sops` (Phase 4)
 

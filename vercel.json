@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/reconcile-compoff",
+      "schedule": "30 19 * * *"
+    },
+    {
+      "path": "/api/cron/post-whereabouts",
+      "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/equipment-sweep",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}

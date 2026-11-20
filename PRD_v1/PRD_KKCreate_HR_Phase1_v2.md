@@ -3,7 +3,8 @@
 **Owner:** Shubham
 **Status:** Ready for implementation
 **Target launch:** June 1
-**Scope:** Web app, mobile-responsive. No native app, no Slack, no email in this phase.
+**Scope:** Web app, mobile-responsive. No native app, no Slack, no external email notifications in this phase.
+**Auth decision for MVP testing:** Use Supabase email/password login for v1 testing. Move to Google OAuth-only after the core HR flows are proven end-to-end.
 
 **Changelog from v1:** Replaced rigid RBAC with a hybrid role + capability system. Roles act as default capability bundles. Scoped capabilities support self / specific users / specific teams / all. Capabilities split into read and write where relevant. Capability bundles defined at code level for MVP.
 
@@ -11,9 +12,9 @@
 
 ## 1. Goal
 
-Replace KK Create's manual Google Sheet-based leave tracking with a web application. Build the **foundational infrastructure** (auth, users, teams, roles, capabilities, org tree, notifications, audit log) that all future HR modules will plug into.
+Replace KK Create's manual Google Sheet-based leave tracking with a web application. Build the **foundational infrastructure** (auth, users, teams, roles, capabilities, org tree, notifications, audit log) that future HR modules will plug into.
 
-This phase ships **leave management end-to-end**, a **read-only org tree**, and a **complete capability-based permission system**. Nothing else.
+This v1 MVP focuses on **Core HR + Leave + Attendance/WFO visibility + Comp-off + Org + Permissions**. It ships leave management end-to-end, WFO schedule/status visibility, a read-only org tree, and a complete capability-based permission system. Nothing else.
 
 ## 2. Non-goals for this phase
 
@@ -30,13 +31,15 @@ This phase ships **leave management end-to-end**, a **read-only org tree**, and 
 - Reports / analytics dashboards
 - Multi-language
 - UI for creating new capability bundles (code-level only in MVP)
+- Payroll, recruitment, performance reviews, expenses, and full time-clock attendance
+- Google OAuth-only auth until after MVP testing validates the core flows
 
 ## 3. Tech stack (locked)
 
 - **Frontend:** Next.js 14+ (App Router), TypeScript, Tailwind CSS, shadcn/ui
 - **Hosting:** Vercel
 - **Backend / DB:** Supabase (Postgres, Auth, Realtime, Storage, Edge Functions, Row-Level Security)
-- **Auth:** Supabase Auth → Google OAuth only
+- **Auth:** Supabase Auth → email/password for MVP testing; Google OAuth-only after validation
 - **State / Data:** TanStack Query for server state; React Context for auth + capabilities session
 - **Forms:** React Hook Form + Zod
 - **Date handling:** `date-fns`
@@ -671,8 +674,9 @@ Read by all authenticated users. Writes via service-role API only.
 Mobile-first responsive. 375px floor.
 
 ### 8.1 Auth
-- `/login` — Google OAuth button. After auth, lookup user in `users` table. If absent: "Your account hasn't been set up yet. Contact HR." No self-signup.
-- Restrict OAuth domain to company email domain via Supabase Auth config.
+- `/login` — email/password sign-in for MVP testing. After auth, lookup user in `users` table. If absent: "Your account hasn't been set up yet. Contact HR." No public self-signup.
+- HR/founders create users and temporary credentials during MVP testing. Google OAuth-only replaces this after all core flows are validated.
+- Email remains the auth identity. Users cannot edit their own email from Profile.
 
 ### 8.2 Layout
 - Top nav: logo, page title, notifications bell, profile dropdown
@@ -753,6 +757,8 @@ Tab-gated by capability:
 - **Holidays** (req: `manage_holidays`) — list view (read-only in MVP; seeded via migration)
 - **Annual Reset** (req: `run_annual_reset`) — button + reset history
 - **Users** (req: `manage_users`) — create/edit users, set role, manager, teams, mark exited
+- **Teams** (req: `manage_users`) — create/edit teams, WFO pattern, team lead, and active members
+- **Bulk Import** (req: `manage_users`) — import users, teams, managers, and initial allocations from CSV for go-live
 
 ### 8.9 Permissions (`/permissions`) — req: `manage_capabilities`
 
@@ -802,7 +808,7 @@ Next.js Route Handlers for privileged mutations. Reads via Supabase client + RLS
 - `DELETE /api/leaves/:id` — soft delete
 - `POST /api/compoff` — request
 - `PATCH /api/compoff/:id` — approve/reject
-- `POST /api/hr/users` — create user (uses service role to provision auth.users)
+- `POST /api/hr/users` — create user (uses service role to provision `auth.users` with temporary email/password credentials for MVP testing)
 - `PATCH /api/hr/users/:id` — edit user (also recomputes role bundle if role changed)
 - `PATCH /api/hr/balances/:id` — adjust balance
 - `POST /api/hr/annual-reset` — run reset
@@ -873,7 +879,7 @@ All privileged routes go through a centralized `requireCapability(req, cap, targ
 ## 11. Acceptance criteria
 
 ### Core auth & users
-1. ✅ User can sign in with company Google account; non-onboarded shows "contact HR".
+1. ✅ User can sign in with HR-created email/password credentials; non-onboarded shows "contact HR".
 2. ✅ A user with `manage_users` can create a user, set role + manager + teams + per-type allocations.
 3. ✅ Setting a user's role auto-applies the corresponding role bundle.
 4. ✅ Changing a user's role removes old role-derived capabilities and applies new ones.
@@ -881,7 +887,7 @@ All privileged routes go through a centralized `requireCapability(req, cap, targ
 
 ### Capabilities
 6. ✅ A founder can grant the `hr_admin` bundle to a new HR user; that user immediately gains all HR capabilities.
-7. ✅ A founder can grant `manage_devices(all)` (or any individual capability) to a non-HR employee.
+7. ✅ A founder can grant any current individual capability (for example `view_audit_log` or scoped `view_leaves`) to a non-HR employee.
 8. ✅ A founder can grant a scoped capability with `users` scope (multi-target user array).
 9. ✅ A founder can grant a scoped capability with `teams` scope (multi-target team array).
 10. ✅ A user added to a team that has team-scoped capabilities granted to them is automatically visible to the holder.
@@ -968,7 +974,7 @@ Strict order. Don't skip ahead.
 4. SQL functions: `user_can()`, `apply_bundle()`, `recompute_role_bundles()`
 5. RLS policies on all tables (and `leaves_today` view)
 6. Triggers: balance recompute, team_members primary uniqueness, role-change recomputes bundles
-7. Google OAuth login + protected layout
+7. Email/password login + protected layout
 8. `useCurrentUser` hook with capabilities loaded into session cache
 9. Centralized `requireCapability()` middleware + `logAudit()` helper
 10. Users management (HR Console → Users tab) — needed before anything else can be tested
@@ -1003,7 +1009,7 @@ COMPANY_EMAIL_DOMAIN=
 
 ## 14. Out-of-scope reminders
 
-If during build you find yourself adding: devices, equipment, QR, SOPs, push, native app, Slack, email, bundle UI editor, multi-language — **stop**. Phase 2+.
+If during build you find yourself adding: payroll, recruitment, performance reviews, expenses, devices, equipment, QR, SOPs, push, native app, Slack, external email notifications, bundle UI editor, multi-language, or Google-only auth migration — **stop**. Phase 2+.
 
 ## 15. Key design principles
 
@@ -1015,6 +1021,7 @@ If during build you find yourself adding: devices, equipment, QR, SOPs, push, na
 6. **Never check `user.role === 'x'` in feature code.** Always use `can.*` helpers (frontend) or `user_can()` (DB). Roles bundle capabilities; capabilities are the atoms.
 7. **Capabilities are documented in `CAPABILITIES.md`.** Adding a new capability requires a written justification in that file. Forces deliberateness.
 8. **No premature abstraction.** Built for 100-200 users, not 10,000.
+9. **MVP focus is operational trust.** Core HR records, leave, WFO/attendance visibility, comp-off, org structure, and permissions must work end-to-end before adding broad HRMS modules.
 
 ## 16. CAPABILITIES.md (committed alongside this PRD)
 
